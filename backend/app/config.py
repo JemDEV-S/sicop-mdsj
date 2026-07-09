@@ -40,26 +40,47 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # ─── SQL Server (SIGA) ──────────────────────────────────────
-    MSSQL_HOST: str = "localhost"
+    # La conexión soporta dos modos:
+    #   - MSSQL_AUTH=windows → Trusted_Connection=yes (dev local en Windows)
+    #   - MSSQL_AUTH=sql     → usuario/contraseña (recomendado para prod)
+    MSSQL_AUTH: str = "windows"  # "windows" | "sql"
+    MSSQL_SERVER: str = "."  # instancia: ".", "localhost", "SERVER\\INSTANCE"
     MSSQL_PORT: int = 1433
     MSSQL_DB: str = "SIGA_300687"
-    MSSQL_USER: str = "sa"
-    MSSQL_SA_PASSWORD: str = "Sicop_Dev_2026!"
-    MSSQL_ODBC_DRIVER: str = "ODBC Driver 18 for SQL Server"
+    MSSQL_ODBC_DRIVER: str = "ODBC Driver 17 for SQL Server"
     MSSQL_TRUST_CERT: str = "yes"
+    MSSQL_ENCRYPT: str = "no"
 
-    MSSQL_LECTOR_USER: str = "lector_presupuesto"
-    MSSQL_LECTOR_PASSWORD: str = "change-me-lector-pw"
+    # Solo se usan cuando MSSQL_AUTH=sql
+    MSSQL_USER: str = ""
+    MSSQL_PASSWORD: str = ""
+
+    @property
+    def mssql_odbc_connection_string(self) -> str:
+        """Connection string ODBC directo para pyodbc.connect().
+
+        Preferido sobre SQLAlchemy DSN para queries crudas (T-05 en adelante).
+        """
+        parts = [
+            f"DRIVER={{{self.MSSQL_ODBC_DRIVER}}}",
+            f"SERVER={self.MSSQL_SERVER}",
+            f"DATABASE={self.MSSQL_DB}",
+            f"TrustServerCertificate={self.MSSQL_TRUST_CERT}",
+            f"Encrypt={self.MSSQL_ENCRYPT}",
+        ]
+        if self.MSSQL_AUTH == "windows":
+            parts.append("Trusted_Connection=yes")
+        else:
+            parts.append(f"UID={self.MSSQL_USER}")
+            parts.append(f"PWD={self.MSSQL_PASSWORD}")
+        return ";".join(parts) + ";"
 
     @property
     def mssql_dsn(self) -> str:
-        # Conexión de app: usa el usuario lector (solo lectura).
-        driver = self.MSSQL_ODBC_DRIVER.replace(" ", "+")
-        return (
-            f"mssql+pyodbc://{self.MSSQL_LECTOR_USER}:{self.MSSQL_LECTOR_PASSWORD}"
-            f"@{self.MSSQL_HOST}:{self.MSSQL_PORT}/{self.MSSQL_DB}"
-            f"?driver={driver}&TrustServerCertificate={self.MSSQL_TRUST_CERT}"
-        )
+        """DSN SQLAlchemy (para engine + pool). Usa la connection string ODBC."""
+        from urllib.parse import quote_plus
+
+        return f"mssql+pyodbc:///?odbc_connect={quote_plus(self.mssql_odbc_connection_string)}"
 
     # ─── API MEF ────────────────────────────────────────────────
     MEF_BASE_URL: str = "https://api.datosabiertos.mef.gob.pe/DatosAbiertos/v1"

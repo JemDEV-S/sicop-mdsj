@@ -15,9 +15,12 @@ Sistema web dual para la **Municipalidad Distrital de San Jerónimo (Cusco)**:
 | Entidad ejecutora | `SEC_EJEC = 300687` |
 | UBIGEO San Jerónimo | `080104` |
 | Año vigente MVP | `2026` |
+| Cobertura SIGA local | 2023 – 2026 |
 | Resource SIAF ejecución | `615644aa-ef73-4358-b4e0-0c20931632f3` |
 | Resource Invierte.pe | `f9cc4ba0-931a-4b70-86c9-eacbd8c68596` |
 | Base API MEF | `https://api.datosabiertos.mef.gob.pe/DatosAbiertos/v1/` |
+| SIGA dev (SQL Server) | Instancia default `.` (localhost), BD `SIGA_300687`, Windows Auth |
+| ODBC Driver | `ODBC Driver 17 for SQL Server` |
 
 ## Stack
 
@@ -52,7 +55,7 @@ Sistema web dual para la **Municipalidad Distrital de San Jerónimo (Cusco)**:
 | [Docs/idea-principal.md](Docs/idea-principal.md) | Contexto general y módulos | §5 usuarios · §6 módulos · §10 priorización MVP |
 | [Docs/diccionario-datos-unificado.md](Docs/diccionario-datos-unificado.md) | Cualquier query o modelo | §4 META · §7 montos · §8 Invierte.pe · §10 cadena logística · §17 llaves cruce · §18 reglas |
 | [Docs/actividad-1-exploracion-mef.md](Docs/actividad-1-exploracion-mef.md) | Limitaciones API MEF y queries validadas | §3 diccionario campos · §4 limitaciones · §10 queries validadas · §12 Invierte.pe |
-| [Docs/datos-iniciales-siga.md](Docs/datos-iniciales-siga.md) | Estructura SIGA y validación cruce | §5 metas · §11 queries · §12 cadena logística · §13 módulos funcionarios |
+| [Docs/datos-iniciales-siga.md](Docs/datos-iniciales-siga.md) | Estructura SIGA y validación cruce | §2 conexión dev · §5 metas · §11 queries · §12 cadena logística · §13 módulos funcionarios |
 | [Docs/actividad-2-requerimientos-funcionales.md](Docs/actividad-2-requerimientos-funcionales.md) | Antes de implementar una HU | §2 RN globales · §3-9 HU por módulo · §10 priorización MoSCoW |
 | [Docs/actividad-3-arquitectura-tecnica.md](Docs/actividad-3-arquitectura-tecnica.md) | Setup, modelo BD, API, despliegue | §3 modelo PostgreSQL · §4 endpoints · §5 adaptador SIGA · §6 sync SIAF · §9 despliegue · §11 estructura repo |
 | [Docs/actividad-5-plan-desarrollo.md](Docs/actividad-5-plan-desarrollo.md) | Qué hacer y en qué orden | Índice de tareas + citas por tarea |

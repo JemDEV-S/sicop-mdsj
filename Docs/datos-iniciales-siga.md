@@ -14,15 +14,80 @@ Integra los procedimientos técnico-administrativos de **Presupuesto, Logística
 
 ## 2. Características técnicas de la instancia
 
+### 2.1 Motor y esquema
+
 | Parámetro | Valor |
 |---|---|
-| Motor de base de datos | **SQL Server** |
+| Motor de base de datos | **SQL Server 2022** (16.0.1180.1) |
 | Esquema principal | `dbo` |
 | Total de tablas | **~937** |
 | Tablas operativas (con data) | **~840** |
 | Tablas temporales/staging | **~95** |
 | Entidad | Municipalidad Distrital de San Jerónimo |
 | Integración SIAF activa | ❌ No (tablas `SIG_INT_*` vacías) |
+| Cobertura temporal | Años 2023 – 2026 |
+
+### 2.2 Datos de conexión (entorno de desarrollo local)
+
+Instancia SQL Server nativa en Windows, backup SIGA_300687 restaurado localmente.
+
+| Parámetro | Valor |
+|---|---|
+| **Nombre lógico servidor** | `PC_OTI_03` (por defecto de la máquina) |
+| **Host / Data Source** | `.` o `localhost` (instancia default `MSSQLSERVER`) |
+| **Puerto** | `1433` (default TCP) |
+| **Base de datos** | `SIGA_300687` |
+| **Autenticación** | **Windows Authentication (integrada)** en dev · SQL Auth para prod |
+| **Encrypt** | `no` |
+| **TrustServerCertificate** | `yes` |
+| **ODBC Driver** | `ODBC Driver 17 for SQL Server` |
+
+> **Nota — otras instancias detectadas en la máquina:** `MSSQLSERVER01` es otra instancia con nombre que también corre pero **no contiene** SIGA_300687 (solo `master`). Usar siempre la instancia default (`.`).
+
+> **Nota — otras BDs presentes en la instancia:** `DBPLANILLASPLUSMDSJ2026`, `RENTAS`, `Rentas_2024_12`. No forman parte del alcance del proyecto SICOP.
+
+### 2.3 Connection string ODBC (referencia)
+
+```
+DRIVER={ODBC Driver 17 for SQL Server};SERVER=.;DATABASE=SIGA_300687;Trusted_Connection=yes;TrustServerCertificate=yes;Encrypt=no;
+```
+
+En el backend Python se resuelve mediante `app/config.py` (soporta ambos modos):
+
+```env
+MSSQL_AUTH=windows        # o "sql"
+MSSQL_SERVER=.
+MSSQL_PORT=1433
+MSSQL_DB=SIGA_300687
+MSSQL_ODBC_DRIVER=ODBC Driver 17 for SQL Server
+MSSQL_TRUST_CERT=yes
+MSSQL_ENCRYPT=no
+# Solo con MSSQL_AUTH=sql:
+MSSQL_USER=
+MSSQL_PASSWORD=
+```
+
+Ver módulo `backend/app/siga/conexion.py` y smoke test `backend/scripts/ping_siga.py`.
+
+### 2.4 Volúmenes reales por año (validación empírica — julio 2026)
+
+Verificación ejecutada por `scripts/ping_siga.py` sobre la instancia local:
+
+| Tabla | 2023 | 2024 | 2025 | 2026 |
+|---|---:|---:|---:|---:|
+| `META` | 171 | 207 | 188 | 175 |
+| `SIG_ORDEN_ADQUISICION` | 396 | 3,269 | 3,160 | 1,473 |
+| `SIG_TECHO_PRESUPUESTO` | 1,919 | 4,038 | 1,874 | 2,218 |
+| `SIG_PEDIDOS` | 705 | 5,292 | 4,728 | 2,358 |
+| `SIG_CONTRATISTAS` | — | — | — | 2,645 (total, sin `ano_eje`) |
+
+> Los 3,160 órdenes 2025 coinciden exactamente con el valor documentado en §12.4 abajo.
+
+### 2.5 Consideraciones para producción
+
+- En producción el backend usará **SQL Auth** con un usuario dedicado `db_datareader` sobre `SIGA_300687`.
+- La conexión se hará por red interna de la muni (no expuesta a internet).
+- El backend correrá como servicio contenedor. Se debe configurar `MSSQL_SERVER=host.docker.internal` (Windows/Docker Desktop) o la IP de la red interna cuando aplique.
 
 ---
 
