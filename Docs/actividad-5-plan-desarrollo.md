@@ -155,7 +155,7 @@ Archivos:
 - `backend/app/models/enums.py` — Python enums que corresponden a los ENUM de PG
 - `backend/app/models/auth.py` (Rol, Usuario, UsuarioCentroCosto, RefreshToken)
 - `backend/app/models/ref.py` (CentroCosto con `ltree`, Meta, MetaCentroCosto, FuenteFinanciamiento, Rubro, Funcion, ProgramaPresupuestal)
-- `backend/app/models/siaf.py` (EjecucionPresupuestal, Inversion) — la vista se crea en Alembic con `op.execute`
+- `backend/app/models/siaf.py` (EjecucionPresupuestal, Inversion) — las dos vistas (`v_ejecucion_normalizada` con COALESCE + `v_ejecucion_huerfana`) se crean en Alembic con `op.execute`
 - `backend/app/models/sistema.py` (UmbralSemaforo, UmbralAlerta, AlertaRevisada, AnotacionInterna, ObservacionCiudadana, DocumentoObra)
 - `backend/app/models/logs.py` (Auditoria, Sincronizacion)
 - `backend/alembic/versions/0001_initial.py` — CREATE EXTENSION + CREATE TYPE + CREATE SCHEMA + tablas + vista

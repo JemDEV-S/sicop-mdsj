@@ -380,21 +380,23 @@ Se mantiene denormalizada (incluye nombres inline del MEF) para permitir reconci
 
 Vista que combina `siaf.ejecucion_presupuestal` con los catálogos de `ref` para servir nombres autoritativos. **Todo el frontend consume esta vista, no la tabla base.**
 
+**Tratamiento de huérfanos** (filas SIAF sin match en `ref.metas`): `LEFT JOIN` + `COALESCE` a placeholder + flag `es_huerfano` para que el frontend pueda distinguirlas. Las discrepancias también quedan registrables desde una vista auxiliar (§ abajo).
+
 ```sql
 CREATE VIEW siaf.v_ejecucion_normalizada AS
 SELECT
     e.id, e.ano_eje, e.mes_eje, e.sec_ejec, e.sec_func,
-    -- Meta (autoritativa desde ref)
-    m.meta        AS meta_codigo,
-    m.nombre      AS meta_nombre,
+    -- Meta: autoritativa desde ref; si no hay match, placeholder + nombre bruto del MEF como fallback
+    COALESCE(m.meta,   e.meta,          '(sin código)')       AS meta_codigo,
+    COALESCE(m.nombre, e.meta_nombre,   'Meta desconocida')   AS meta_nombre,
     m.tipo_meta,
-    m.act_proy    AS producto_proyecto,
-    -- Función (autoritativa desde ref)
-    f.codigo      AS funcion_codigo,
-    f.nombre      AS funcion_nombre,
+    COALESCE(m.act_proy, e.producto_proyecto)                 AS producto_proyecto,
+    -- Función: autoritativa desde ref
+    COALESCE(f.codigo, e.funcion)                             AS funcion_codigo,
+    COALESCE(f.nombre, e.funcion_nombre, 'Función desconocida') AS funcion_nombre,
     -- Fuente
-    ff.codigo     AS fuente_codigo,
-    ff.nombre     AS fuente_nombre,
+    COALESCE(ff.codigo, e.fuente_financiamiento)              AS fuente_codigo,
+    COALESCE(ff.nombre, e.fuente_financiamiento_nombre)       AS fuente_nombre,
     -- Clasificador (bruto del MEF — no hay catálogo por ahora)
     e.generica, e.generica_nombre, e.especifica, e.especifica_det,
     e.categoria_gasto,
@@ -402,14 +404,34 @@ SELECT
     e.monto_pia, e.monto_pim, e.monto_certificado,
     e.monto_comprometido_anual, e.monto_comprometido,
     e.monto_devengado, e.monto_girado,
-    e.sincronizado_en
+    e.sincronizado_en,
+    -- Flag para el frontend: fila sin match en ref.metas (usable para badge/alerta)
+    (m.sec_func IS NULL)                                      AS es_huerfano
 FROM siaf.ejecucion_presupuestal e
 LEFT JOIN ref.metas m                    ON m.sec_func = e.sec_func
 LEFT JOIN ref.funciones f                ON f.codigo = e.funcion
 LEFT JOIN ref.fuentes_financiamiento ff  ON ff.codigo = e.fuente_financiamiento;
 ```
 
-Ventaja: si el MEF renombra "TRANSPORTES" → "TRANSPORTE", solo se actualiza `ref.funciones` una vez y todo el sistema refleja el cambio.
+**Vista auxiliar de auditoría** para detectar discrepancias de sincronización:
+
+```sql
+CREATE VIEW siaf.v_ejecucion_huerfana AS
+SELECT
+    e.ano_eje, e.mes_eje, e.sec_func, e.meta, e.meta_nombre,
+    e.producto_proyecto, e.producto_proyecto_nombre,
+    e.monto_pim, e.monto_devengado, e.sincronizado_en
+FROM siaf.ejecucion_presupuestal e
+LEFT JOIN ref.metas m ON m.sec_func = e.sec_func
+WHERE m.sec_func IS NULL;
+```
+
+Consumida por `/admin/reconciliacion` (v2) o revisada manualmente tras cada sync.
+
+**Ventajas del enfoque:**
+- Si el MEF renombra "TRANSPORTES" → "TRANSPORTE", solo se actualiza `ref.funciones` una vez.
+- Si SIGA aún no sincroniza una meta nueva del MEF, la fila no se pierde — se muestra con placeholder y aparece en `v_ejecucion_huerfana` para atención manual.
+- El frontend puede mostrar un badge "Meta pendiente de catalogar" cuando `es_huerfano = true`.
 
 #### `siaf.inversiones`
 
@@ -610,7 +632,7 @@ Estado de los jobs de sincronización.
 
 ---
 
-### 3.7 Resumen del modelo — 20 tablas + 1 vista
+### 3.7 Resumen del modelo — 20 tablas + 2 vistas
 
 | Schema | Tabla | PK | Notas |
 |---|---|---|---|
@@ -627,7 +649,8 @@ Estado de los jobs de sincronización.
 | `ref` | `programas_presupuestales` | varchar(4) | seed + refresh anual |
 | `siaf` | `ejecucion_presupuestal` | bigserial | staging+swap diario |
 | `siaf` | `inversiones` | bigserial | staging+swap diario |
-| `siaf` | `v_ejecucion_normalizada` | (vista) | consumida por el frontend |
+| `siaf` | `v_ejecucion_normalizada` | (vista) | consumida por el frontend — COALESCE con placeholder para huérfanos |
+| `siaf` | `v_ejecucion_huerfana` | (vista) | auditoría de filas SIAF sin match en `ref.metas` |
 | `sistema` | `umbrales_semaforos` | smallserial | seed defaults |
 | `sistema` | `umbrales_alertas` | smallserial | seed defaults |
 | `sistema` | `alertas_revisadas` | bigserial | |
@@ -650,6 +673,8 @@ Estado de los jobs de sincronización.
 | **NO** `catalogos.periodos` (rechazado) | 3 filas no ganan a `smallint` directo | — |
 | **NO** multi-tenant (rechazado) | Fuera del alcance MVP; el filtro `SEC_EJEC=300687` es regla no negociable | — |
 | **NO** star schema puro (parcial) | Sobre-ingeniería para volumen actual (~5K filas/año) | Compromiso: `ref.*` como dimensiones ligeras |
+| **NO** eliminar `_nombre` de `siaf.ejecucion` | Rechazado tras evaluación: los ~500KB de duplicación por año son despreciables vs el valor de reconciliación con el snapshot MEF exacto en el momento de la ingesta. Además `ref.metas` y `siaf.ejecucion` tienen ciclos de sync independientes — mantener los nombres brutos permite mostrar filas huérfanas con contexto en vez de vacío. | Los `_nombre` se mantienen en `siaf.ejecucion_presupuestal`. La vista `v_ejecucion_normalizada` prefiere `ref.*` (autoritativo) y hace fallback al bruto con COALESCE. |
+| Manejo de huérfanos SIAF↔`ref.metas` | LEFT JOIN + COALESCE + placeholder "Meta desconocida" + flag `es_huerfano`. Vista auxiliar `siaf.v_ejecucion_huerfana` para auditoría. No perder filas de ejecución legítima. | En la vista `siaf.v_ejecucion_normalizada` (§3.4) |
 
 ---
 
