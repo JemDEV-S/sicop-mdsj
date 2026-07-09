@@ -1,0 +1,71 @@
+"""Alembic environment — SICOP-MDSJ.
+
+Toma la URL de PostgreSQL desde `app.config.settings` (no del alembic.ini).
+Usa la Base declarativa de `app.database.Base` como target_metadata.
+"""
+
+from logging.config import fileConfig
+
+from sqlalchemy import engine_from_config, pool
+
+from alembic import context
+
+# Cargar settings y modelos ─────────────────────────────────────────
+from app.config import settings
+from app.database import Base
+
+# TODO T-06: import de los modelos concretos aquí una vez existan
+# from app.models import auth, siaf, sistema, logs  # noqa: F401
+
+# ─── Alembic config ────────────────────────────────────────────────
+config = context.config
+
+# Override de la URL con la de settings (no hardcodear en alembic.ini).
+config.set_main_option("sqlalchemy.url", settings.postgres_dsn)
+
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
+
+target_metadata = Base.metadata
+
+
+def include_schemas(names: list[str]) -> None:
+    """Placeholder para configurar schemas — se ejecutará en T-06."""
+
+
+def run_migrations_offline() -> None:
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+        include_schemas=True,
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online() -> None:
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            include_schemas=True,
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
