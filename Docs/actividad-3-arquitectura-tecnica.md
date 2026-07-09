@@ -102,90 +102,255 @@ Flujo saliente (job nocturno):
 
 ## 3. Modelo de datos PostgreSQL
 
+> **Nota — Revisión julio 2026:** el modelo original se refactorizó tras evaluar
+> propuesta interna sobre catálogos y separación de dimensiones. Cambios clave:
+> nuevo schema `ref` con dimensiones espejadas de SIGA, uso de `ltree` para
+> jerarquía de centros de costo, UUID solo donde es semánticamente necesario,
+> ENUMs para estados cerrados, y vista normalizada sobre la tabla de hechos.
+
+### 3.0 Principios de diseño
+
+1. **Fuentes autoritativas ≠ persistencia local.** SIGA es la fuente de verdad para metas y centros de costo; PostgreSQL guarda un espejo (`ref.*`) para evitar ir a SIGA en cada request.
+2. **Staging + swap atómico** para snapshots externos (SIAF, Invierte.pe, catálogos SIGA). Nunca se sirve una tabla a medio poblar.
+3. **Vista normalizada** entre datos externos (nombres que pueden cambiar en la fuente) y el frontend. Si el MEF renombra `FUNCION_NOMBRE`, cambia solo la vista.
+4. **UUID solo donde el ID sale al mundo** (URLs públicas, tokens, referencias entre servicios). `bigserial` para todo lo interno.
+5. **ENUMs para valores cerrados y estables.** `varchar` cuando el conjunto crece con el tiempo (ej. `logs.auditoria.accion`).
+6. **`ltree` para jerarquías** de centros de costo — con índice GIST, las consultas "todos los descendientes de X" son sub-milisegundo.
+
 ### 3.1 Organización de schemas
 
-| Schema | Propósito |
-|---|---|
-| `auth` | Usuarios, roles, sesiones, tokens |
-| `siaf` | Snapshots diarios de la API SIAF e Invierte.pe |
-| `sistema` | Configuración de umbrales, alertas revisadas, observaciones ciudadanas, anotaciones internas, documentos y fotos de obras |
-| `logs` | Auditoría de acciones + logs de sincronización |
+| Schema | Propósito | Fuente |
+|---|---|---|
+| `auth` | Usuarios, roles, tokens, permisos por CC | Propio del sistema |
+| `ref` | **Dimensiones espejadas de SIGA** (centros de costo, metas, sus relaciones) + catálogos fijos MEF (fuentes, rubros, funciones) | Snapshot diario de SIGA + seed MEF |
+| `siaf` | Snapshots de la API MEF (ejecución presupuestal + Invierte.pe) | Snapshot diario de API MEF |
+| `sistema` | Configuración (umbrales, alertas), datos de negocio propios (observaciones, anotaciones, documentos) | Propio del sistema |
+| `logs` | Auditoría de acciones + logs de sincronización | Propio del sistema |
+
+### 3.1.1 Extensiones PostgreSQL requeridas
+
+```sql
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";  -- generación de UUIDs
+CREATE EXTENSION IF NOT EXISTS "ltree";       -- jerarquía de centros de costo
+CREATE EXTENSION IF NOT EXISTS "btree_gin";   -- índices compuestos con jsonb
+```
+
+### 3.1.2 ENUMs globales
+
+```sql
+CREATE TYPE estado_usuario           AS ENUM ('activo', 'inactivo', 'bloqueado');
+CREATE TYPE estado_observacion       AS ENUM ('pendiente', 'leida', 'respondida', 'spam');
+CREATE TYPE estado_sync              AS ENUM ('en_curso', 'exito', 'error');
+CREATE TYPE tipo_documento_obra      AS ENUM ('foto', 'expediente_tecnico', 'contrato', 'f8', 'f9', 'otro');
+CREATE TYPE tipo_entidad_anotacion   AS ENUM ('pedido', 'orden', 'meta', 'obra', 'contrato');
+CREATE TYPE tipo_entidad_alerta      AS ENUM ('pedido', 'contrato', 'meta');
+CREATE TYPE direccion_semaforo       AS ENUM ('mayor', 'menor');  -- mayor = más = mejor
+CREATE TYPE codigo_rol               AS ENUM ('ciudadano', 'operativo', 'decisor', 'admin');
+```
 
 ### 3.2 Schema `auth`
+
+#### `auth.roles`
+
+Catálogo pequeño y cerrado — se pobla por seed.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `id` | `smallserial` PK | |
+| `codigo` | `codigo_rol` UNIQUE | ENUM: `ciudadano`, `operativo`, `decisor`, `admin` |
+| `nombre` | `varchar(80)` | Nombre humano |
 
 #### `auth.usuarios`
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `uuid` PK | Identificador |
-| `usuario` | `varchar(60)` UNIQUE | Login |
-| `password_hash` | `text` | bcrypt |
-| `nombre_completo` | `varchar(150)` | |
+| `id` | `uuid` PK DEFAULT `uuid_generate_v4()` | Usado en JWT (`sub`), URLs de admin |
+| `usuario` | `varchar(60)` UNIQUE NOT NULL | Login |
+| `password_hash` | `text` NOT NULL | bcrypt |
+| `nombre_completo` | `varchar(150)` NOT NULL | |
 | `email` | `varchar(150)` | |
-| `rol_id` | `int` FK → `auth.roles` | |
-| `estado` | `varchar(10)` | `activo`, `inactivo`, `bloqueado` |
-| `intentos_fallidos` | `int` DEFAULT 0 | Para bloqueo |
+| `rol_id` | `smallint` FK → `auth.roles` NOT NULL | |
+| `estado` | `estado_usuario` NOT NULL DEFAULT `'activo'` | ENUM |
+| `intentos_fallidos` | `smallint` NOT NULL DEFAULT 0 | Para bloqueo |
 | `bloqueado_hasta` | `timestamptz` NULL | |
-| `debe_cambiar_password` | `boolean` DEFAULT true | Primer login |
-| `creado_en` | `timestamptz` DEFAULT now() | |
-| `actualizado_en` | `timestamptz` | |
+| `debe_cambiar_password` | `boolean` NOT NULL DEFAULT true | Primer login |
+| `creado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
+| `actualizado_en` | `timestamptz` NOT NULL DEFAULT `now()` | Trigger `moddatetime` |
 
-#### `auth.roles`
-
-| Columna | Tipo | Descripción |
-|---|---|---|
-| `id` | `serial` PK | |
-| `codigo` | `varchar(30)` UNIQUE | `ciudadano`, `operativo`, `decisor`, `admin` |
-| `nombre` | `varchar(80)` | |
+**Índices:** `(email) WHERE email IS NOT NULL`, `(rol_id)`.
 
 #### `auth.usuarios_centros_costo`
 
-Relación muchos-a-muchos: qué centros de costo puede ver cada usuario.
+Relación muchos-a-muchos: qué centros de costo puede ver cada usuario. Las jerarquías se resuelven contra `ref.centros_costo` (con `ltree`), por lo que no hay que replicar la jerarquía aquí — basta un flag.
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `usuario_id` | `uuid` FK | |
-| `centro_costo` | `varchar(15)` | Referencia lógica al `CENTRO_COSTO` de SIGA (no FK física porque SIGA es externo) |
-| `es_raiz_jerarquia` | `boolean` | Si es `true`, el usuario ve todos los descendientes de este CC (jerarquía por `CENTRO_PADRE`) |
+| `usuario_id` | `uuid` FK → `auth.usuarios` | |
+| `centro_costo` | `varchar(15)` FK → `ref.centros_costo(codigo)` | |
+| `es_raiz_jerarquia` | `boolean` NOT NULL DEFAULT false | Si `true`, el usuario ve descendientes vía `ltree` |
+| `creado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
-**Índice:** `PRIMARY KEY (usuario_id, centro_costo)`.
+**PK compuesta:** `(usuario_id, centro_costo)`.
 
 #### `auth.refresh_tokens`
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `uuid` PK | |
-| `usuario_id` | `uuid` FK | |
-| `token_hash` | `text` | SHA-256 del token (no plaintext) |
-| `expira_en` | `timestamptz` | |
-| `revocado` | `boolean` DEFAULT false | |
-| `creado_en` | `timestamptz` DEFAULT now() | |
+| `id` | `uuid` PK DEFAULT `uuid_generate_v4()` | Se compara con hash del token |
+| `usuario_id` | `uuid` FK → `auth.usuarios` NOT NULL | |
+| `token_hash` | `text` NOT NULL | SHA-256 del token (no plaintext) |
+| `expira_en` | `timestamptz` NOT NULL | |
+| `revocado` | `boolean` NOT NULL DEFAULT false | |
+| `creado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
 | `user_agent` | `text` | Info del navegador |
+| `ip_origen` | `inet` | |
 
-### 3.3 Schema `siaf`
+**Índices:** `(usuario_id, revocado)`, `(expira_en)` para limpieza de tokens vencidos.
 
-Contiene el snapshot diario de la API MEF. Se sobrescribe cada noche; para la v2 se añadirá `siaf.snapshot_historico` particionado por año.
+### 3.3 Schema `ref` — Dimensiones espejadas de SIGA
+
+Snapshots diarios de tablas maestras de SIGA. Se sobrescriben con staging + swap.
+El job `sync_catalogos_siga` corre junto al sync SIAF (03:00 diario).
+
+#### `ref.centros_costo`
+
+Espejo de `SIG_CENTRO_COSTO` filtrado por `SEC_EJEC=300687` y `ANO_EJE` vigente.
+La columna `ruta` es un `ltree` que representa la jerarquía completa desde la raíz.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `codigo` | `varchar(15)` PK | `SIG_CENTRO_COSTO.CENTRO_COSTO` |
+| `nombre` | `varchar(200)` NOT NULL | `NOMBRE_DEPEND` |
+| `abreviado` | `varchar(60)` | `ABREVIADO_DEPEND` |
+| `centro_padre` | `varchar(15)` FK auto-ref | `CENTRO_PADRE` (nullable en raíces) |
+| `ruta` | `ltree` NOT NULL | Reconstruido al final del sync. Ej: `root.0700.0714` |
+| `nivel` | `smallint` NOT NULL | Profundidad en el árbol (root = 0) |
+| `sede` | `smallint` | FK lógica a `SIG_SEDES` |
+| `tipo_dependencia` | `char(1)` | `TIPO_DEPEND` |
+| `nro_personal` | `smallint` | |
+| `flag_cn` | `boolean` | Participa en cuadro de necesidades |
+| `flag_presupuesto` | `boolean` | Tiene presupuesto asignado |
+| `flag_ppr` | `boolean` | Participa en PPR |
+| `activo` | `boolean` NOT NULL DEFAULT true | `ESTADO='A'` |
+| `sincronizado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
+
+**Índices:**
+- `USING GIST (ruta)` — consultas jerárquicas rápidas
+- `(centro_padre)`
+- `(activo)` parcial
+
+**Query típica** (todos los descendientes de OTI para un decisor):
+```sql
+SELECT * FROM ref.centros_costo WHERE ruta <@ 'root.0700.0714';
+```
+
+#### `ref.metas`
+
+Espejo de `META` filtrado por `SEC_EJEC=300687` y `ANO_EJE` vigente.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `sec_func` | `bigint` PK | `META.sec_func` (llave principal cruce SIAF↔SIGA) |
+| `ano_eje` | `smallint` NOT NULL | |
+| `meta` | `varchar(5)` NOT NULL | Código de meta |
+| `nombre` | `varchar(200)` NOT NULL | |
+| `funcion` | `varchar(2)` | |
+| `programa` | `varchar(3)` | |
+| `sub_programa` | `varchar(4)` | |
+| `act_proy` | `varchar(7)` | Prefijo determina tipo (ver `tipo_meta`) |
+| `componente` | `varchar(7)` | |
+| `finalidad` | `varchar(10)` | |
+| `tipo_meta` | `varchar(20)` NOT NULL | Calculado: `actividad_generica` (`3999999`), `proyecto_inversion` (`2xxxxxx`), `actividad_pp` (`3xxxxxx≠3999999`) |
+| `unidad_med` | `varchar(3)` | |
+| `activo` | `boolean` NOT NULL DEFAULT true | |
+| `sincronizado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
+
+**Índices:**
+- `(ano_eje, tipo_meta)` para filtros del dashboard
+- `(act_proy)` para cruce con Invierte.pe
+- `(funcion)`, `(programa)` para filtros
+
+#### `ref.metas_centro_costo`
+
+Espejo de `SIG_METAS_X_CENTRO` — puente meta ↔ centro de costo con fuente/tipo recurso.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `id` | `bigserial` PK | Interno |
+| `sec_func` | `bigint` FK → `ref.metas` NOT NULL | |
+| `centro_costo` | `varchar(15)` FK → `ref.centros_costo` NOT NULL | |
+| `secuencia` | `smallint` NOT NULL | Del SIGA original |
+| `fuente_financ` | `varchar(2)` | |
+| `tipo_recurso` | `varchar(2)` | |
+| `porc_techo` | `numeric(8,4)` | |
+| `sincronizado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
+
+**Unique:** `(sec_func, centro_costo, secuencia)`.
+**Índices:** `(centro_costo, sec_func)` para "metas de mi unidad".
+
+#### `ref.fuentes_financiamiento`
+
+Catálogo pequeño y estable — se pobla por seed. No cambia año a año.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `codigo` | `varchar(2)` PK | `1`, `2`, `4`, `5` |
+| `nombre` | `varchar(80)` NOT NULL | RO, RDR, Donaciones, R. Determinados |
+
+#### `ref.rubros`
+
+Catálogo pequeño y estable — seed.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `codigo` | `varchar(2)` PK | `00`, `07`, `08`, `09`, `13`, `18` |
+| `nombre` | `varchar(120)` NOT NULL | |
+| `fuente_financ_codigo` | `varchar(2)` FK → `ref.fuentes_financiamiento` | |
+
+#### `ref.funciones`
+
+Catálogo de funciones presupuestales (67 según diccionario). Estable — seed inicial + refresh anual desde SIAF si aparecen nuevas.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `codigo` | `varchar(4)` PK | `03`, `05`, `08`, `15`, ... |
+| `nombre` | `varchar(120)` NOT NULL | TRANSPORTE, SANEAMIENTO, EDUCACION, ... |
+
+#### `ref.programas_presupuestales`
+
+Los 21 programas activos (ver Actividad 1 §7). Seed + refresh anual.
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `codigo` | `varchar(4)` PK | `0002`, `0082`, `0148`, `9001`, ... |
+| `nombre` | `varchar(200)` NOT NULL | |
+
+### 3.4 Schema `siaf`
+
+Contiene el snapshot diario de la API MEF. Patrón staging + swap atómico (ver §6).
+Para la v2 se añadirá `siaf.snapshot_historico` particionado por año.
 
 #### `siaf.ejecucion_presupuestal`
 
 Snapshot del resource `615644aa-ef73-4358-b4e0-0c20931632f3` filtrado por `SEC_EJEC=300687`.
+Se mantiene denormalizada (incluye nombres inline del MEF) para permitir reconciliación con SIGA sin JOIN forzoso. El frontend consume la vista `siaf.v_ejecucion_normalizada` (ver abajo).
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `bigserial` PK | |
-| `ano_eje` | `smallint` | |
-| `mes_eje` | `smallint` | 0 = PIM base, 1-12 = mes de ejecución |
-| `sec_ejec` | `varchar(10)` | Fijo `300687` |
-| `sec_func` | `varchar(20)` | **Llave de cruce con SIGA** |
+| `id` | `bigserial` PK | Interno |
+| `ano_eje` | `smallint` NOT NULL | |
+| `mes_eje` | `smallint` NOT NULL | 0 = PIM base, 1-12 = mes de ejecución |
+| `sec_ejec` | `varchar(10)` NOT NULL | Fijo `300687` |
+| `sec_func` | `bigint` NOT NULL | **Llave de cruce con `ref.metas`** |
 | `producto_proyecto` | `varchar(20)` | |
-| `producto_proyecto_nombre` | `text` | |
+| `producto_proyecto_nombre` | `text` | Nombre bruto del MEF (autoritativo: `ref.metas`) |
 | `tipo_act_proy` | `char(1)` | `2` proyecto, `3` actividad |
 | `meta` | `varchar(10)` | |
 | `meta_nombre` | `text` | |
 | `funcion` | `varchar(4)` | |
-| `funcion_nombre` | `varchar(120)` | |
+| `funcion_nombre` | `varchar(120)` | Bruto del MEF (autoritativo: `ref.funciones`) |
 | `programa_ppto` | `varchar(10)` | |
-| `programa_ppto_nombre` | `text` | |
+| `programa_ppto_nombre` | `text` | Bruto del MEF (autoritativo: `ref.programas_presupuestales`) |
 | `categoria_gasto` | `char(1)` | `5`/`6` |
 | `generica` | `varchar(4)` | |
 | `generica_nombre` | `varchar(120)` | |
@@ -193,22 +358,58 @@ Snapshot del resource `615644aa-ef73-4358-b4e0-0c20931632f3` filtrado por `SEC_E
 | `especifica` | `varchar(4)` | |
 | `especifica_det` | `varchar(4)` | |
 | `fuente_financiamiento` | `varchar(4)` | |
-| `fuente_financiamiento_nombre` | `varchar(120)` | |
+| `fuente_financiamiento_nombre` | `varchar(120)` | Bruto (autoritativo: `ref.fuentes_financiamiento`) |
 | `rubro` | `varchar(4)` | |
-| `monto_pia` | `numeric(18,2)` | Viene en 0 en la API — usar SIGA como fuente real |
-| `monto_pim` | `numeric(18,2)` | |
-| `monto_certificado` | `numeric(18,2)` | |
-| `monto_comprometido_anual` | `numeric(18,2)` | |
-| `monto_comprometido` | `numeric(18,2)` | |
-| `monto_devengado` | `numeric(18,2)` | |
-| `monto_girado` | `numeric(18,2)` | |
-| `sincronizado_en` | `timestamptz` DEFAULT now() | |
+| `monto_pia` | `numeric(18,2)` NOT NULL DEFAULT 0 | Viene en 0 en la API — usar SIGA como fuente real |
+| `monto_pim` | `numeric(18,2)` NOT NULL DEFAULT 0 | |
+| `monto_certificado` | `numeric(18,2)` NOT NULL DEFAULT 0 | |
+| `monto_comprometido_anual` | `numeric(18,2)` NOT NULL DEFAULT 0 | |
+| `monto_comprometido` | `numeric(18,2)` NOT NULL DEFAULT 0 | |
+| `monto_devengado` | `numeric(18,2)` NOT NULL DEFAULT 0 | |
+| `monto_girado` | `numeric(18,2)` NOT NULL DEFAULT 0 | |
+| `sincronizado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
 **Índices:**
 - `(ano_eje, mes_eje, sec_func)` — consultas del dashboard
 - `(ano_eje, producto_proyecto)` — cruce con Invierte.pe
 - `(ano_eje, mes_eje, funcion)` — agregaciones por función
 - `(ano_eje, mes_eje, fuente_financiamiento)` — agregaciones por fuente
+- `(sec_func)` — JOIN con `ref.metas`
+
+#### `siaf.v_ejecucion_normalizada` (vista)
+
+Vista que combina `siaf.ejecucion_presupuestal` con los catálogos de `ref` para servir nombres autoritativos. **Todo el frontend consume esta vista, no la tabla base.**
+
+```sql
+CREATE VIEW siaf.v_ejecucion_normalizada AS
+SELECT
+    e.id, e.ano_eje, e.mes_eje, e.sec_ejec, e.sec_func,
+    -- Meta (autoritativa desde ref)
+    m.meta        AS meta_codigo,
+    m.nombre      AS meta_nombre,
+    m.tipo_meta,
+    m.act_proy    AS producto_proyecto,
+    -- Función (autoritativa desde ref)
+    f.codigo      AS funcion_codigo,
+    f.nombre      AS funcion_nombre,
+    -- Fuente
+    ff.codigo     AS fuente_codigo,
+    ff.nombre     AS fuente_nombre,
+    -- Clasificador (bruto del MEF — no hay catálogo por ahora)
+    e.generica, e.generica_nombre, e.especifica, e.especifica_det,
+    e.categoria_gasto,
+    -- Montos
+    e.monto_pia, e.monto_pim, e.monto_certificado,
+    e.monto_comprometido_anual, e.monto_comprometido,
+    e.monto_devengado, e.monto_girado,
+    e.sincronizado_en
+FROM siaf.ejecucion_presupuestal e
+LEFT JOIN ref.metas m                    ON m.sec_func = e.sec_func
+LEFT JOIN ref.funciones f                ON f.codigo = e.funcion
+LEFT JOIN ref.fuentes_financiamiento ff  ON ff.codigo = e.fuente_financiamiento;
+```
+
+Ventaja: si el MEF renombra "TRANSPORTES" → "TRANSPORTE", solo se actualiza `ref.funciones` una vez y todo el sistema refleja el cambio.
 
 #### `siaf.inversiones`
 
@@ -262,29 +463,30 @@ Snapshot del resource `f9cc4ba0-931a-4b70-86c9-eacbd8c68596` (Invierte.pe).
 | `nombre_uei` | `text` | |
 | `nombre_uf` | `text` | |
 | `nombre_opmi` | `text` | |
-| `sincronizado_en` | `timestamptz` DEFAULT now() | |
+| `sincronizado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
 **Índices:**
 - `codigo_unico` UNIQUE
-- `(latitud, longitud)` para el mapa
-- `des_tipologia`, `funcion` para filtros
+- `(latitud, longitud)` WHERE latitud IS NOT NULL — para el mapa
+- `(des_tipologia)`, `(funcion)` para filtros
+- `(sec_ejec, estado)` parcial
 
-### 3.4 Schema `sistema`
+### 3.5 Schema `sistema`
 
 #### `sistema.umbrales_semaforos`
 
-Configuración de umbrales de semáforos por módulo. Los defaults se cargan por migración.
+Configuración de umbrales de semáforos por módulo. Los defaults se cargan por seed.
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `serial` PK | |
-| `modulo` | `varchar(50)` | `portal_obras`, `saldos`, `metas`, `pipeline`, etc. |
-| `metrica` | `varchar(50)` | `avance_fisico`, `avance_financiero`, `saldo_disponible`, ... |
-| `umbral_verde` | `numeric(6,2)` | |
-| `umbral_amarillo` | `numeric(6,2)` | |
-| `direccion` | `char(4)` | `mayor` (más = mejor) o `menor` |
-| `actualizado_por` | `uuid` FK → `auth.usuarios` | |
-| `actualizado_en` | `timestamptz` | |
+| `id` | `smallserial` PK | Interno |
+| `modulo` | `varchar(50)` NOT NULL | `portal_obras`, `saldos`, `metas`, `pipeline`, etc. |
+| `metrica` | `varchar(50)` NOT NULL | `avance_fisico`, `avance_financiero`, `saldo_disponible`, ... |
+| `umbral_verde` | `numeric(6,2)` NOT NULL | |
+| `umbral_amarillo` | `numeric(6,2)` NOT NULL | |
+| `direccion` | `direccion_semaforo` NOT NULL | ENUM: `mayor` (más = mejor) o `menor` |
+| `actualizado_por` | `uuid` FK → `auth.usuarios` NULL | |
+| `actualizado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
 **Unique:** `(modulo, metrica)`.
 
@@ -292,11 +494,11 @@ Configuración de umbrales de semáforos por módulo. Los defaults se cargan por
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `serial` PK | |
-| `codigo_alerta` | `varchar(50)` UNIQUE | `pedido_estancado`, `contrato_por_vencer`, `meta_baja_ejecucion` |
-| `parametros` | `jsonb` | Ej: `{"dias": 15}` o `{"dias": 30}` o `{"pct_q3": 50, "pct_q4": 90}` |
-| `actualizado_por` | `uuid` FK | |
-| `actualizado_en` | `timestamptz` | |
+| `id` | `smallserial` PK | |
+| `codigo_alerta` | `varchar(50)` UNIQUE NOT NULL | `pedido_estancado`, `contrato_por_vencer`, `meta_baja_ejecucion` |
+| `parametros` | `jsonb` NOT NULL | Ej: `{"dias": 15}` o `{"dias": 30}` o `{"pct_q3": 50, "pct_q4": 90}` |
+| `actualizado_por` | `uuid` FK → `auth.usuarios` NULL | |
+| `actualizado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
 #### `sistema.alertas_revisadas`
 
@@ -304,13 +506,15 @@ Persistencia de alertas marcadas por el usuario como revisadas.
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `bigserial` PK | |
-| `usuario_id` | `uuid` FK | |
-| `codigo_alerta` | `varchar(50)` | |
-| `entidad_tipo` | `varchar(30)` | `pedido`, `contrato`, `meta` |
-| `entidad_id` | `varchar(50)` | Identificador en SIGA (`NRO_PEDIDO`, `NRO_CONTRATO`, `SEC_FUNC`) |
-| `revisado_en` | `timestamptz` DEFAULT now() | |
+| `id` | `bigserial` PK | Interno — no sale al mundo |
+| `usuario_id` | `uuid` FK → `auth.usuarios` NOT NULL | |
+| `codigo_alerta` | `varchar(50)` NOT NULL | Coincide con `sistema.umbrales_alertas.codigo_alerta` |
+| `entidad_tipo` | `tipo_entidad_alerta` NOT NULL | ENUM |
+| `entidad_id` | `varchar(50)` NOT NULL | Identificador SIGA (`NRO_PEDIDO`, `NRO_CONTRATO`, `SEC_FUNC`) |
+| `revisado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
 | `comentario` | `text` NULL | |
+
+**Índices:** `(usuario_id, codigo_alerta, entidad_id)` UNIQUE (evita duplicados).
 
 #### `sistema.anotaciones_internas`
 
@@ -318,70 +522,75 @@ Notas que los funcionarios agregan a un pedido, orden, meta u obra. No tocan SIG
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `bigserial` PK | |
-| `entidad_tipo` | `varchar(30)` | `pedido`, `orden`, `meta`, `obra`, `contrato` |
-| `entidad_id` | `varchar(50)` | |
-| `usuario_id` | `uuid` FK | |
-| `texto` | `text` | |
-| `creado_en` | `timestamptz` DEFAULT now() | |
+| `id` | `bigserial` PK | Interno |
+| `entidad_tipo` | `tipo_entidad_anotacion` NOT NULL | ENUM |
+| `entidad_id` | `varchar(50)` NOT NULL | |
+| `usuario_id` | `uuid` FK → `auth.usuarios` NOT NULL | |
+| `texto` | `text` NOT NULL | |
+| `creado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
+
+**Índices:** `(entidad_tipo, entidad_id, creado_en DESC)` para traer notas de una entidad ordenadas.
 
 #### `sistema.observaciones_ciudadanas`
 
-Buzón público de la ficha de obra.
+Buzón público de la ficha de obra. `id` es UUID porque sale al mundo (URL de confirmación al ciudadano).
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `bigserial` PK | |
-| `codigo_unico_obra` | `varchar(20)` | Referencia a Invierte.pe |
+| `id` | `uuid` PK DEFAULT `uuid_generate_v4()` | Expuesto en URL/email de confirmación |
+| `codigo_unico_obra` | `varchar(20)` NOT NULL | Referencia a Invierte.pe |
 | `nombre_ciudadano` | `varchar(150)` NULL | |
 | `email_ciudadano` | `varchar(150)` NULL | |
-| `texto` | `text` | |
-| `estado` | `varchar(20)` DEFAULT `pendiente` | `pendiente`, `leida`, `respondida`, `spam` |
-| `revisado_por` | `uuid` FK NULL | |
+| `texto` | `text` NOT NULL | |
+| `estado` | `estado_observacion` NOT NULL DEFAULT `'pendiente'` | ENUM |
+| `revisado_por` | `uuid` FK → `auth.usuarios` NULL | |
 | `revisado_en` | `timestamptz` NULL | |
 | `respuesta_interna` | `text` NULL | |
 | `ip_origen` | `inet` | Para detectar abuso |
 | `captcha_score` | `numeric(3,2)` NULL | Score de reCAPTCHA v3 |
-| `creado_en` | `timestamptz` DEFAULT now() | |
+| `creado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
+
+**Índices:** `(codigo_unico_obra, creado_en DESC)`, `(estado)` parcial.
 
 #### `sistema.documentos_obra`
 
-Archivos subidos por funcionarios asociados a una obra.
+Archivos subidos por funcionarios asociados a una obra. `id` es UUID porque forma parte de la URL pública de descarga.
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `bigserial` PK | |
-| `codigo_unico_obra` | `varchar(20)` | |
-| `tipo` | `varchar(30)` | `foto`, `expediente_tecnico`, `contrato`, `f8`, `f9`, `otro` |
-| `nombre_original` | `varchar(255)` | |
-| `ruta_relativa` | `varchar(500)` | Bajo `/var/data/uploads/obras/{codigo}/...` |
-| `mime_type` | `varchar(80)` | |
-| `tamano_bytes` | `int` | |
-| `subido_por` | `uuid` FK | |
-| `subido_en` | `timestamptz` DEFAULT now() | |
-| `publicado` | `boolean` DEFAULT true | Permite despublicar sin borrar |
+| `id` | `uuid` PK DEFAULT `uuid_generate_v4()` | Expuesto en URL de descarga |
+| `codigo_unico_obra` | `varchar(20)` NOT NULL | |
+| `tipo` | `tipo_documento_obra` NOT NULL | ENUM |
+| `nombre_original` | `varchar(255)` NOT NULL | |
+| `ruta_relativa` | `varchar(500)` NOT NULL | Bajo `/var/data/uploads/obras/{codigo}/...` |
+| `mime_type` | `varchar(80)` NOT NULL | |
+| `tamano_bytes` | `int` NOT NULL | |
+| `subido_por` | `uuid` FK → `auth.usuarios` NOT NULL | |
+| `subido_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
+| `publicado` | `boolean` NOT NULL DEFAULT true | Permite despublicar sin borrar |
 
-**Índice:** `(codigo_unico_obra, tipo)`.
+**Índices:** `(codigo_unico_obra, tipo) WHERE publicado`, `(subido_por)`.
 
-### 3.5 Schema `logs`
+### 3.6 Schema `logs`
 
 #### `logs.auditoria`
 
-Auditoría de acciones de negocio.
+Auditoría de acciones de negocio. `accion` es **varchar (no enum)** porque el conjunto crece: cada nueva feature agrega códigos.
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `bigserial` PK | |
-| `usuario_id` | `uuid` FK NULL | NULL para acciones públicas |
-| `accion` | `varchar(50)` | `login_exitoso`, `login_fallido`, `exportacion`, `cambio_umbral`, `subida_documento`, `publicacion_observacion`, ... |
+| `id` | `bigserial` PK | Interno |
+| `usuario_id` | `uuid` FK → `auth.usuarios` NULL | NULL para acciones públicas |
+| `accion` | `varchar(50)` NOT NULL | `login_exitoso`, `login_fallido`, `exportacion`, `cambio_umbral`, `subida_documento`, `publicacion_observacion`, ... |
 | `detalle` | `jsonb` | Payload variable |
 | `ip` | `inet` | |
 | `user_agent` | `text` | |
-| `creado_en` | `timestamptz` DEFAULT now() | |
+| `creado_en` | `timestamptz` NOT NULL DEFAULT `now()` | |
 
 **Índices:**
-- `(usuario_id, creado_en DESC)`
-- `(accion, creado_en DESC)`
+- `(usuario_id, creado_en DESC)` — historial de un usuario
+- `(accion, creado_en DESC)` — filtro por tipo de acción
+- `USING gin (detalle jsonb_path_ops)` para queries sobre el payload
 
 #### `logs.sincronizacion`
 
@@ -389,13 +598,58 @@ Estado de los jobs de sincronización.
 
 | Columna | Tipo | Descripción |
 |---|---|---|
-| `id` | `bigserial` PK | |
-| `job` | `varchar(50)` | `siaf_ejecucion`, `siaf_inversiones` |
-| `inicio` | `timestamptz` | |
+| `id` | `bigserial` PK | Interno |
+| `job` | `varchar(50)` NOT NULL | `siaf_ejecucion`, `siaf_inversiones`, `catalogos_siga` |
+| `inicio` | `timestamptz` NOT NULL DEFAULT `now()` | |
 | `fin` | `timestamptz` NULL | |
-| `estado` | `varchar(20)` | `en_curso`, `exito`, `error` |
+| `estado` | `estado_sync` NOT NULL DEFAULT `'en_curso'` | ENUM |
 | `registros_procesados` | `int` | |
 | `error_mensaje` | `text` NULL | |
+
+**Índices:** `(job, inicio DESC)` para ver historial de un job.
+
+---
+
+### 3.7 Resumen del modelo — 20 tablas + 1 vista
+
+| Schema | Tabla | PK | Notas |
+|---|---|---|---|
+| `auth` | `roles` | smallserial | seed |
+| `auth` | `usuarios` | uuid | JWT sub |
+| `auth` | `usuarios_centros_costo` | (usuario_id, centro_costo) | FK a `ref` |
+| `auth` | `refresh_tokens` | uuid | |
+| `ref` | `centros_costo` | varchar(15) | ltree para jerarquía |
+| `ref` | `metas` | bigint | espejo `META` |
+| `ref` | `metas_centro_costo` | bigserial | puente |
+| `ref` | `fuentes_financiamiento` | varchar(2) | seed |
+| `ref` | `rubros` | varchar(2) | seed |
+| `ref` | `funciones` | varchar(4) | seed + refresh anual |
+| `ref` | `programas_presupuestales` | varchar(4) | seed + refresh anual |
+| `siaf` | `ejecucion_presupuestal` | bigserial | staging+swap diario |
+| `siaf` | `inversiones` | bigserial | staging+swap diario |
+| `siaf` | `v_ejecucion_normalizada` | (vista) | consumida por el frontend |
+| `sistema` | `umbrales_semaforos` | smallserial | seed defaults |
+| `sistema` | `umbrales_alertas` | smallserial | seed defaults |
+| `sistema` | `alertas_revisadas` | bigserial | |
+| `sistema` | `anotaciones_internas` | bigserial | |
+| `sistema` | `observaciones_ciudadanas` | uuid | URL pública |
+| `sistema` | `documentos_obra` | uuid | URL pública |
+| `logs` | `auditoria` | bigserial | |
+| `logs` | `sincronizacion` | bigserial | |
+
+### 3.8 Trazabilidad de decisiones (revisión julio 2026)
+
+| Decisión | Justificación | Aplicación |
+|---|---|---|
+| Schema `ref` con espejos de SIGA | Evita ir a SIGA en cada request; permite JOIN local rápido; centraliza el "árbol" de CC | `ref.centros_costo`, `ref.metas`, `ref.metas_centro_costo` |
+| `ltree` para jerarquía CC | Consultas "descendientes de X" O(log n) con índice GIST vs recursividad | `ref.centros_costo.ruta` |
+| UUID solo donde sale al mundo | Menor overhead en tablas internas; mejor localidad en índices | `usuarios`, `refresh_tokens`, `observaciones_ciudadanas`, `documentos_obra` |
+| ENUM para estados cerrados | Validación en BD, ahorro de storage, autocompletado en herramientas | 8 ENUMs en §3.1.2 |
+| Vista normalizada | Aísla el frontend de cambios en nombres del MEF; fuente autoritativa consistente | `siaf.v_ejecucion_normalizada` |
+| Staging + swap atómico | Nunca servir tablas a medio poblar; rollback trivial | Todos los jobs de sync (§6) |
+| **NO** `catalogos.periodos` (rechazado) | 3 filas no ganan a `smallint` directo | — |
+| **NO** multi-tenant (rechazado) | Fuera del alcance MVP; el filtro `SEC_EJEC=300687` es regla no negociable | — |
+| **NO** star schema puro (parcial) | Sobre-ingeniería para volumen actual (~5K filas/año) | Compromiso: `ref.*` como dimensiones ligeras |
 
 ---
 

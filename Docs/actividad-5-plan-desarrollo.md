@@ -145,21 +145,69 @@ Depende de: T-03, T-04.
 ### T-06 · Migración inicial de schemas PostgreSQL
 **M · backend**
 
-Descripción: Crear los 4 schemas (`auth`, `siaf`, `sistema`, `logs`) y todas las tablas del modelo con Alembic.
+Descripción: Crear los **5 schemas** (`auth`, `ref`, `siaf`, `sistema`, `logs`), las extensiones (`uuid-ossp`, `ltree`, `btree_gin`), los 8 ENUMs, todas las tablas y la vista `siaf.v_ejecucion_normalizada`.
 
-Consultar: `Docs/actividad-3-arquitectura-tecnica.md` §3 completa (modelo de datos).
+Consultar:
+- `Docs/actividad-3-arquitectura-tecnica.md` §3.0 (principios) — §3.1 (schemas) — §3.1.1 (extensiones) — §3.1.2 (ENUMs) — §3.2 (auth) — §3.3 (ref) — §3.4 (siaf) — §3.5 (sistema) — §3.6 (logs) — §3.7 (resumen)
 
 Archivos:
-- `backend/app/models/auth.py` (Usuario, Rol, UsuarioCentroCosto, RefreshToken)
-- `backend/app/models/siaf.py` (EjecucionPresupuestal, Inversion)
+- `backend/app/models/__init__.py` — reexporta Base y todos los modelos
+- `backend/app/models/enums.py` — Python enums que corresponden a los ENUM de PG
+- `backend/app/models/auth.py` (Rol, Usuario, UsuarioCentroCosto, RefreshToken)
+- `backend/app/models/ref.py` (CentroCosto con `ltree`, Meta, MetaCentroCosto, FuenteFinanciamiento, Rubro, Funcion, ProgramaPresupuestal)
+- `backend/app/models/siaf.py` (EjecucionPresupuestal, Inversion) — la vista se crea en Alembic con `op.execute`
 - `backend/app/models/sistema.py` (UmbralSemaforo, UmbralAlerta, AlertaRevisada, AnotacionInterna, ObservacionCiudadana, DocumentoObra)
 - `backend/app/models/logs.py` (Auditoria, Sincronizacion)
-- `backend/alembic/versions/0001_initial.py` — autogenerado + revisado
-- Semilla: `backend/alembic/versions/0002_seed_roles_umbrales.py` — inserta roles (ciudadano, operativo, decisor, admin) y umbrales default
+- `backend/alembic/versions/0001_initial.py` — CREATE EXTENSION + CREATE TYPE + CREATE SCHEMA + tablas + vista
+- `backend/alembic/versions/0002_seed_ref_catalogos.py` — seed de `ref.fuentes_financiamiento`, `ref.rubros`, `ref.funciones`, `ref.programas_presupuestales` (valores del diccionario §3.4, §3.7, §3.8 de actividad-1 y §7 de actividad-1)
+- `backend/alembic/versions/0003_seed_auth_umbrales.py` — seed de `auth.roles` (ciudadano, operativo, decisor, admin), usuario admin inicial, umbrales default y alertas default (RN-01 y RN-02 de actividad-2)
 
-Done cuando: `alembic upgrade head` crea todo. `\dn` en psql muestra los 4 schemas.
+Notas de implementación:
+- Para `ltree` en SQLAlchemy usar `sqlalchemy_utils.LtreeType` o `Column(sa.Text)` + índice GIST vía `op.execute` (más simple)
+- ENUMs con `sa.Enum(name='...', create_type=False)` porque los creamos manualmente antes con `op.execute("CREATE TYPE ...")` para poder referenciarlos en varias tablas
+- La vista `siaf.v_ejecucion_normalizada` se crea con `op.execute` (Alembic no la genera desde modelos)
+
+Done cuando:
+- `alembic upgrade head` crea todo sin error
+- `\dn` en psql muestra los 5 schemas (auth, ref, siaf, sistema, logs)
+- `\dT` muestra los 8 ENUMs
+- Seed pobla `ref.fuentes_financiamiento` (4 filas), `ref.rubros` (6 filas), `auth.roles` (4 filas), `sistema.umbrales_semaforos` (defaults por módulo)
 
 Depende de: T-03.
+
+---
+
+### T-06.5 · Job sincronización catálogos SIGA → PostgreSQL
+**M · backend**
+
+Descripción: Job que copia `SIG_CENTRO_COSTO`, `META` y `SIG_METAS_X_CENTRO` de SIGA a `ref.centros_costo`, `ref.metas`, `ref.metas_centro_costo` con **staging + swap atómico**. Reconstruye la columna `ruta` (ltree) tras el swap.
+
+Este job es prerrequisito para que auth (T-08 en adelante) pueda resolver la jerarquía de centros de costo por decisor sin ir a SIGA en cada login.
+
+Consultar:
+- `Docs/actividad-3-arquitectura-tecnica.md` §3.3 (schema ref) y §6 (patrón de sync)
+- `Docs/diccionario-datos-unificado.md` §4 (tabla META) y §9 (centros de costo)
+- `Docs/datos-iniciales-siga.md` §5 (relaciones META ↔ CENTRO_COSTO)
+
+Archivos:
+- `backend/app/jobs/sync_catalogos_siga.py` — lógica del job
+- `backend/app/jobs/ltree_builder.py` — reconstruye la columna `ruta` haciendo BFS desde raíces (donde `centro_padre IS NULL`)
+- `backend/tests/test_sync_catalogos.py` — mock de SIGA con fixture
+
+Estrategia:
+1. Registrar inicio en `logs.sincronizacion` con job=`catalogos_siga`
+2. Leer los 3 dataset de SIGA con las queries del diccionario §11 (SIG_METAS_X_CENTRO deduplicado)
+3. Insertar en tablas staging (`ref.centros_costo_staging`, etc.)
+4. Transacción única: `TRUNCATE` tablas finales + `INSERT SELECT` desde staging
+5. Reconstruir `ruta` con BFS (Python + UPDATE por lotes o CTE recursiva)
+6. Registrar fin exitoso
+
+Done cuando:
+- Ejecutar `python -m app.jobs.sync_catalogos_siga` puebla los 3 espejos
+- `SELECT * FROM ref.centros_costo WHERE ruta <@ 'root.<raiz>'` devuelve descendientes correctos
+- `logs.sincronizacion` refleja el resultado
+
+Depende de: T-05, T-06.
 
 ---
 
@@ -312,23 +360,27 @@ Depende de: T-12, T-13.
 
 ---
 
-### T-15 · Repositorio SIGA: metas y centros de costo
+### T-15 · Repositorio: metas y centros de costo (contra `ref.*`)
 **M · backend**
 
-Descripción: Queries SQL crudas para `META`, `SIG_CENTRO_COSTO`, `SIG_METAS_X_CENTRO`. Métodos: `listar_metas`, `obtener_meta`, `listar_centros_costo`, `obtener_jerarquia_cc`.
+Descripción: Queries sobre las tablas espejadas `ref.metas`, `ref.centros_costo` (con `ltree`), `ref.metas_centro_costo`. Métodos: `listar_metas`, `obtener_meta`, `listar_centros_costo`, `descendientes_cc(codigo_raiz)`.
+
+**Nota:** con la revisión julio 2026, los datos maestros no se consultan más contra SIGA directo (SIG_CENTRO_COSTO, META). Ahora se leen de `ref.*` (poblado por T-06.5). Esto reduce carga en SIGA y acelera queries. La única razón para ir a SIGA en este tema sería un refresh manual, cubierto por T-06.5.
 
 Consultar:
-- `Docs/datos-iniciales-siga.md` §5 (relacional metas)
+- `Docs/actividad-3-arquitectura-tecnica.md` §3.3 (schema ref)
 - `Docs/diccionario-datos-unificado.md` §4 (META) y §9 (centros de costo)
 
 Archivos:
-- `backend/app/repositories/metas_repo.py`
-- `backend/app/repositories/centros_costo_repo.py`
-- Tests: `backend/tests/test_metas_repo.py` (contra SIGA local)
+- `backend/app/repositories/metas_repo.py` (consulta `ref.metas`)
+- `backend/app/repositories/centros_costo_repo.py` (usa `ruta <@ 'root.<raiz>'` para descendientes)
+- Tests: `backend/tests/test_metas_repo.py`
 
-Done cuando: Métodos devuelven datos reales. Test valida que la meta 00121 existe para 2025.
+Done cuando:
+- `listar_metas(ano=2025)` devuelve las 741 metas locales
+- `descendientes_cc('0700')` devuelve todos los CC bajo la gerencia con una sola query GIST
 
-Depende de: T-05.
+Depende de: T-06.5.
 
 ---
 
@@ -1180,13 +1232,15 @@ Depende de: T-60.
 | Fase | Tareas | Descripción | Depende de |
 |---|---|---|---|
 | 1 · Infra | T-01 → T-05 | Monorepo, Docker, PostgreSQL, SIGA local | — |
-| 2 · Backend base | T-06 → T-11 | Migraciones, FastAPI, auth, logging | Fase 1 |
+| 2 · Backend base | T-06 → T-11 (+ T-06.5) | Migraciones (5 schemas + ltree + ENUMs), sync catálogos SIGA, FastAPI, auth, logging | Fase 1 |
 | 3 · Backend dominios | T-12 → T-30 | Sync SIAF, todos los repos y endpoints | Fase 2 |
 | 4 · Frontend base | T-31 → T-36 | React, router, auth, componentes base | Fase 1 |
 | 5 · Frontend dominios | T-37 → T-55 | Todas las páginas del MVP | Fase 3 + Fase 4 |
 | 6 · Cierre | T-56 → T-62 | Nginx, TLS, backup, smoke test, runbook | Fase 5 |
 
-**Total: 62 tareas.**
+**Total: 63 tareas** (62 originales + T-06.5 añadida en revisión julio 2026).
+
+**Nota — revisión del modelo (julio 2026):** el modelo de datos se refactorizó tras evaluar propuesta interna. Los cambios principales impactan a T-06 (más tablas y ENUMs), T-15 (ahora contra `ref.*` local en lugar de SIGA directo) y agregan T-06.5 (sync de catálogos SIGA → `ref.*`). Ver `Docs/actividad-3-arquitectura-tecnica.md` §3.0 y §3.8.
 
 ---
 
@@ -1195,7 +1249,7 @@ Depende de: T-60.
 Orden mínimo para ver algo funcional lo antes posible:
 
 1. T-01 → T-02 → T-03 → T-04 → T-05 (**infra base**)
-2. T-06 → T-07 → T-08 → T-09 (**backend base con auth**)
+2. T-06 → T-06.5 → T-07 → T-08 → T-09 (**backend base con auth y catálogos**)
 3. T-31 → T-32 → T-33 → T-34 → T-35 → T-36 (**frontend base con login**)
 4. Elegir un dominio para primer end-to-end demo (sugerido: **saldos** por ser el más autocontenido):
    T-15 → T-16 → T-17 → **[login funciona con backend]** → T-48

@@ -25,7 +25,7 @@ Sistema web dual para la **Municipalidad Distrital de San Jerónimo (Cusco)**:
 ## Stack
 
 - **Backend:** Python 3.12 + FastAPI + Pydantic v2 + SQLAlchemy (engine) + pyodbc
-- **Base intermedia:** PostgreSQL 16 (schemas `auth`, `siaf`, `sistema`, `logs`)
+- **Base intermedia:** PostgreSQL 16 (schemas `auth`, `ref`, `siaf`, `sistema`, `logs`) + `ltree` + `uuid-ossp`
 - **Fuente SIGA:** SQL Server (solo lectura, queries SQL crudas)
 - **Frontend:** React 18 + Vite 5 + TypeScript + Tailwind + shadcn/ui + TanStack Query + Zustand
 - **Gráficos:** Recharts · **Mapas:** Leaflet · **Cache:** Redis · **Jobs:** APScheduler
@@ -47,6 +47,9 @@ Sistema web dual para la **Municipalidad Distrital de San Jerónimo (Cusco)**:
 6. **Filtro por CC:** Operativo = sus CC; Decisor = jerarquía por `CENTRO_PADRE`; Admin = todo.
 7. **Umbrales configurables** en `sistema.umbrales_*` — no hardcodear.
 8. **Auditoría** en `logs.auditoria` para: login, exportación, cambio de umbrales, subida docs, publicación observación.
+9. **Datos maestros de SIGA** (metas, centros de costo, sus relaciones) NO se consultan contra SIGA en cada request. Se leen de `ref.*` (poblado por job `sync_catalogos_siga`).
+10. **Frontend consume `siaf.v_ejecucion_normalizada`** (vista con JOIN a `ref.*`), no la tabla base `siaf.ejecucion_presupuestal`. Nombres autoritativos vienen de `ref`.
+11. **Jerarquía CC:** usar `ruta <@ 'root.<código>'` (ltree) — no queries recursivas manuales.
 
 ## Índice de documentos (leer por sección, no completos)
 
@@ -57,7 +60,7 @@ Sistema web dual para la **Municipalidad Distrital de San Jerónimo (Cusco)**:
 | [Docs/actividad-1-exploracion-mef.md](Docs/actividad-1-exploracion-mef.md) | Limitaciones API MEF y queries validadas | §3 diccionario campos · §4 limitaciones · §10 queries validadas · §12 Invierte.pe |
 | [Docs/datos-iniciales-siga.md](Docs/datos-iniciales-siga.md) | Estructura SIGA y validación cruce | §2 conexión dev · §5 metas · §11 queries · §12 cadena logística · §13 módulos funcionarios |
 | [Docs/actividad-2-requerimientos-funcionales.md](Docs/actividad-2-requerimientos-funcionales.md) | Antes de implementar una HU | §2 RN globales · §3-9 HU por módulo · §10 priorización MoSCoW |
-| [Docs/actividad-3-arquitectura-tecnica.md](Docs/actividad-3-arquitectura-tecnica.md) | Setup, modelo BD, API, despliegue | §3 modelo PostgreSQL · §4 endpoints · §5 adaptador SIGA · §6 sync SIAF · §9 despliegue · §11 estructura repo |
+| [Docs/actividad-3-arquitectura-tecnica.md](Docs/actividad-3-arquitectura-tecnica.md) | Setup, modelo BD, API, despliegue | §3.0 principios · §3.1 schemas · §3.1.2 ENUMs · §3.2 auth · §3.3 ref (ltree) · §3.4 siaf + vista · §3.5 sistema · §3.6 logs · §3.7 resumen · §4 endpoints · §5 adaptador SIGA · §6 sync SIAF · §9 despliegue · §11 estructura repo |
 | [Docs/actividad-5-plan-desarrollo.md](Docs/actividad-5-plan-desarrollo.md) | Qué hacer y en qué orden | Índice de tareas + citas por tarea |
 
 ## Cómo trabajar (para el agente y el humano)
