@@ -1,0 +1,71 @@
+# docker-compose.dev.yml — Entorno de desarrollo
+# Uso: docker compose -f docker-compose.dev.yml up -d postgres redis
+#
+# Backend y frontend se corren fuera de Docker en dev (uvicorn --reload / vite dev)
+# para tener hot-reload directo. Los servicios de infra van en containers.
+
+services:
+  # ─── PostgreSQL 16 (base intermedia del sistema) ──────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sicop_postgres_dev
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sicop}
+      POSTGRES_USER: ${POSTGRES_USER:-sicop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sicop_dev_pw}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sicop} -d ${POSTGRES_DB:-sicop}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── Redis 7 (cache de queries pesadas SIGA) ──────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: sicop_redis_dev
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── SQL Server 2022 (SIGA restaurado localmente) ─────────────
+  # Nota: el backup SIGA_300687.bak se restaura mediante scripts/restore-siga.ps1
+  # tras el primer arranque.
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sicop_sqlserver_siga_dev
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Sicop_Dev_2026!}
+      MSSQL_PID: "Developer"
+    ports:
+      - "${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+      - ./scripts/siga-backup:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: sicop_postgres_data
+  redis_data:
+    name: sicop_redis_data
+  sqlserver_data:
+    name: sicop_sqlserver_data
