@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import health
+from app.routers import auth, health
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,9 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     # También bajo el prefijo API para consistencia con Swagger.
     app.include_router(health.router, prefix=API_PREFIX)
+
+    # Auth
+    app.include_router(auth.router, prefix=API_PREFIX)
 
     return app
 
