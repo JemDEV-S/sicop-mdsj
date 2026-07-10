@@ -30,6 +30,8 @@ from app.security.jwt import (
     sha256_hex,
 )
 from app.security.passwords import hash_password, verify_password
+from app.services import auditoria_service
+from app.services.auditoria_service import Accion
 
 logger = logging.getLogger(__name__)
 
@@ -124,26 +126,15 @@ def _registrar_auditoria(
     ip: str | None,
     user_agent: str | None,
 ) -> None:
-    db.execute(
-        text(
-            """
-            INSERT INTO logs.auditoria (usuario_id, accion, detalle, ip, user_agent)
-            VALUES (:usuario_id, :accion, CAST(:detalle AS jsonb), :ip, :user_agent)
-            """
-        ),
-        {
-            "usuario_id": str(usuario_id) if usuario_id else None,
-            "accion": accion,
-            "detalle": _to_jsonb(detalle),
-            "ip": ip,
-            "user_agent": user_agent,
-        },
+    """Wrapper delgado sobre `auditoria_service.registrar` (T-10)."""
+    auditoria_service.registrar(
+        db,
+        accion=accion,
+        usuario_id=usuario_id,
+        detalle=detalle,
+        ip=ip,
+        user_agent=user_agent,
     )
-
-
-def _to_jsonb(detalle: dict[str, Any] | None) -> str | None:
-    import json
-    return None if detalle is None else json.dumps(detalle, default=str)
 
 
 def _guardar_refresh(
@@ -194,7 +185,7 @@ def login(
     if usuario is None:
         # Registrar intento contra usuario inexistente sin exponerlo.
         _registrar_auditoria(
-            db, "login_fallido", None,
+            db, Accion.LOGIN_FALLIDO, None,
             {"usuario_intento": usuario_input, "motivo": "usuario_no_existe"},
             ip, user_agent,
         )
@@ -204,7 +195,7 @@ def login(
     # Bloqueo activo
     if usuario.bloqueado_hasta and usuario.bloqueado_hasta > _ahora():
         _registrar_auditoria(
-            db, "login_fallido", usuario.id,
+            db, Accion.LOGIN_FALLIDO, usuario.id,
             {"motivo": "bloqueado", "hasta": usuario.bloqueado_hasta.isoformat()},
             ip, user_agent,
         )
@@ -214,7 +205,7 @@ def login(
     # Estado inactivo/bloqueado permanente
     if usuario.estado != EstadoUsuario.activo:
         _registrar_auditoria(
-            db, "login_fallido", usuario.id,
+            db, Accion.LOGIN_FALLIDO, usuario.id,
             {"motivo": "estado", "estado": usuario.estado.value},
             ip, user_agent,
         )
@@ -228,7 +219,7 @@ def login(
             usuario.bloqueado_hasta = _ahora() + timedelta(minutes=BLOQUEO_MINUTOS)
             usuario.intentos_fallidos = 0
             motivo["bloqueado_hasta"] = usuario.bloqueado_hasta.isoformat()
-        _registrar_auditoria(db, "login_fallido", usuario.id, motivo, ip, user_agent)
+        _registrar_auditoria(db, Accion.LOGIN_FALLIDO, usuario.id, motivo, ip, user_agent)
         db.commit()
         if "bloqueado_hasta" in motivo:
             raise UsuarioBloqueado(usuario.bloqueado_hasta)  # type: ignore[arg-type]
@@ -246,7 +237,7 @@ def login(
     _guardar_refresh(db, usuario.id, refresh_hash, refresh_exp, ip, user_agent)
 
     _registrar_auditoria(
-        db, "login_exitoso", usuario.id,
+        db, Accion.LOGIN_EXITOSO, usuario.id,
         {"rol": rol_codigo, "centros_costo_directos": len(centros)},
         ip, user_agent,
     )
@@ -314,7 +305,7 @@ def logout(db: Session, refresh_token: str, ip: str | None, user_agent: str | No
     ).first()
     if row is not None:
         _registrar_auditoria(
-            db, "logout", row.usuario_id, None, ip, user_agent
+            db, Accion.LOGOUT, row.usuario_id, None, ip, user_agent
         )
     db.commit()
 
@@ -332,13 +323,13 @@ def cambiar_password(
         raise UsuarioInactivo()
     if not verify_password(password_actual, usuario.password_hash):
         _registrar_auditoria(
-            db, "cambio_password_fallido", usuario_id, None, ip, user_agent
+            db, Accion.CAMBIO_PASSWORD_FALLIDO, usuario_id, None, ip, user_agent
         )
         db.commit()
         raise PasswordActualIncorrecta()
     usuario.password_hash = hash_password(password_nueva)
     usuario.debe_cambiar_password = False
-    _registrar_auditoria(db, "cambio_password", usuario_id, None, ip, user_agent)
+    _registrar_auditoria(db, Accion.CAMBIO_PASSWORD, usuario_id, None, ip, user_agent)
     # Revocar todos los refresh existentes: fuerza re-login en otras sesiones.
     db.execute(
         text(

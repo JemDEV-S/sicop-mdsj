@@ -37,6 +37,29 @@ CC_RAMA = "01.02.02"
 CC_HOJA_1 = "01.02.02.01"
 CC_HOJA_2 = "01.02.02.02"
 
+_CC_REQUERIDOS = [CC_RAIZ, CC_RAMA, CC_HOJA_1, CC_HOJA_2]
+
+
+@pytest.fixture(autouse=True)
+def _skip_si_faltan_ccs():
+    """Si los CC de fixture no están (BD post-mock de test_sync_catalogos),
+    saltar los tests que los necesitan — no son responsabilidad de este módulo.
+    """
+    with SessionLocal() as db:
+        faltantes = [
+            cc
+            for cc in _CC_REQUERIDOS
+            if not db.execute(
+                text("SELECT 1 FROM ref.centros_costo WHERE codigo = :c"),
+                {"c": cc},
+            ).first()
+        ]
+    if faltantes:
+        pytest.skip(
+            f"Faltan CCs {faltantes} en ref.centros_costo — "
+            "correr `python -m app.jobs.sync_catalogos_siga` o `pytest tests/test_permisos.py`"
+        )
+
 
 # ─── Fixtures ───────────────────────────────────────────────────────────
 
