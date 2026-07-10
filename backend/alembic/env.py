@@ -13,9 +13,7 @@ from alembic import context
 # Cargar settings y modelos ─────────────────────────────────────────
 from app.config import settings
 from app.database import Base
-
-# TODO T-06: import de los modelos concretos aquí una vez existan
-# from app.models import auth, siaf, sistema, logs  # noqa: F401
+from app.models import auth, logs, ref, siaf, sistema  # noqa: F401
 
 # ─── Alembic config ────────────────────────────────────────────────
 config = context.config
