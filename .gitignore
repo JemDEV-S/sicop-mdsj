@@ -45,6 +45,7 @@ uploads/
 backups/
 logs/
 var/
+_data/
 
 # ─── IDE / OS ─────────────────────────────────────────────────────
 .vscode/
