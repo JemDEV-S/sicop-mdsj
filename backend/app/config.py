@@ -93,7 +93,9 @@ class Settings(BaseSettings):
     ANO_VIGENTE: int = 2026
 
     # ─── Uploads ────────────────────────────────────────────────
-    UPLOAD_PATH: str = "/var/data/uploads"
+    # En dev Windows override via `.env` con algo como `./_data/uploads`.
+    # En prod Linux Docker usar `/var/data/uploads` (bind-mount al host).
+    UPLOAD_PATH: str = "./_data/uploads"
     UPLOAD_MAX_MB_FOTO: int = 5
     UPLOAD_MAX_MB_DOCUMENTO: int = 20
 
