@@ -169,3 +169,28 @@
 - T-36: crear componentes reutilizables base con accesibilidad (`fd2d2c1`)
 - T-36: logica de formateo y calculo de semaforos con cobertura de tests (`7420c35`)
 
+## T-37 · Home público
+**Fecha:** 2026-07-11
+**Estado:** completado
+
+### Decisiones tomadas
+- **Jerarquía de Skills:** Se estableció como regla inquebrantable de proceso que, ante cualquier choque o tensión entre directrices inyectadas de UI/UX (ej. "usar micro-interacciones") y la identidad del proyecto (`SKILL.md`), **prevalece siempre la institucional**. Por tanto, la página se diseñó sobria, sin animaciones decorativas ni glassmorphism, honrando la prioridad institucional.
+- **Rutas Stub:** Para mantener integridad navegacional, se registraron las futuras rutas públicas (`/obras`, `/ejecucion`, `/proveedores`, `/mapa`) devolviendo stubs estáticos. El `PublicLayout` se conservó intacto como padre genérico.
+- **Copy en revisión:** Para el texto (Hero section), se usó un placeholder literal marcado con `TODO`, evitando asumir el tono de voz gubernamental pero manteniendo el lenguaje llano de caja.
+- **Mapeo rígido de íconos:** Se acoplaron íconos explícitos y funcionales de Lucide: `Building2` para Obras, `BarChart3` para Ejecución Presupuestal, `Users` para Proveedores, y `MapPin` para Mapa del Distrito.
+
+### Pendientes / deuda técnica
+- Los textos con `// TODO: confirmar copy institucional` deberán ser reemplazados cuando M.D. San Jerónimo apruebe la retórica oficial.
+- Una vez finalizadas las tareas T-38 a T-43, reemplazar los `<div>` stub por la importación de sus componentes reales en `router.tsx`.
+
+### Verificación realizada
+- Se estructuró y ejecutó exitosamente el test automatizado `router.test.tsx`, inyectando el environment `@vitest-environment jsdom` para asegurar que las rutas stub existen y están definidas como hijos directos del Index.
+- Build verificado (`tsc -b && vite build`) culminando exitosamente y sin filtraciones de tipo de React Router.
+
+### Correcciones del supervisor
+- **Corrección de Proceso (Jerarquía de Skills):** Se ordenó documentar formalmente que la directiva institucional de San Jerónimo subordina a los gustos o configuraciones default inyectadas, cancelando el uso de micro-animaciones.
+- **Test de routing:** Se exigió automatizar la validación de stubs y jerarquía de layout público en vez de depender del testeo manual iterativo.
+
+### Commits
+- T-37: Home publico con stubs y smoke tests de enrutamiento (`f00e5e1`)
+
