@@ -8,6 +8,8 @@ import Login from '../pages/auth/Login';
 import QueryTest from '../pages/interno/QueryTest';
 import Sandbox from '../pages/interno/Sandbox';
 
+import ObrasListado from '../pages/publico/ObrasListado';
+
 export const router = createBrowserRouter([
   {
     path: '/',
@@ -19,7 +21,7 @@ export const router = createBrowserRouter([
       },
       {
         path: 'obras',
-        element: <div data-testid="stub-obras">Módulo Obras (En construcción)</div>
+        element: <ObrasListado />
       },
       {
         path: 'ejecucion',
