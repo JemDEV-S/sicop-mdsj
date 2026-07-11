@@ -22,6 +22,13 @@ export const router = createBrowserRouter([
         }
       },
       {
+        path: 'obras/:codigo',
+        lazy: async () => {
+          const { default: Obra } = await import('../pages/publico/Obra');
+          return { Component: Obra };
+        }
+      },
+      {
         path: 'ejecucion',
         element: <div data-testid="stub-ejecucion">Módulo Ejecución (En construcción)</div>
       },
