@@ -133,3 +133,39 @@
 - T-35: proveer QueryClient a la aplicacion y devtools condicionales (`65f370f`)
 - T-35: configurar QueryClient global y tests de funcion retry (`57bcf0d`)
 - T-35: instalar tanstack/react-query y devtools (`cfdf192`)
+
+## T-36 · Componentes reutilizables base
+**Fecha:** 2026-07-11
+**Estado:** completado
+
+### Decisiones tomadas
+- **DataTable Base:** Se consolidó `@tanstack/react-table` desde el principio (en lugar de mapeos simples) para garantizar escalabilidad hacia paginación y ordenamiento complejo, integrándolo con las clases Tailwind nativas de shadcn.
+- **Formateadores Peruanos:** Se crearon funciones usando `Intl.NumberFormat` y `Intl.DateTimeFormat` configuradas para `es-PE`.
+- **Lógica Matemática Pura:** Se aisló la lógica del cálculo de semáforos (`calcularSemaforo`) fuera de la UI, con tipado estricto para direcciones (`mayor` | `menor`) y cobertura de test exhaustiva.
+- **Semaforo Visual (Accesibilidad Enforced):** El componente `Semaforo` ahora es completamente tipeado (TypeScript). Su prop `texto` no es opcional, previniendo fallas de accesibilidad en compilación si se intenta usar solo el color.
+- **Contraste de Accesibilidad:** Se estableció textualmente el uso de la clase `text-gray-900` para el estado "Alerta" (`bg-[var(--semaforo-alerta)]`, amarillo) luego de confirmar que blanco sobre amarillo fallaría flagrantemente la normativa WCAG AA.
+- **Mapeo de Leaflet:** Se creó el `WrapperMapa` y, como **hallazgo de entorno**, se descubrió que Leaflet compite violentamente con el z-index de Tailwind al inyectar sus overlays (haciendo que el mapa superponga ventanas modales o headers). Solución aplicada: se configuró un contenedor con `zIndex: 0` y `relative` explícito.
+- **Sandbox Seguro:** Los componentes de prueba se montaron en `/interno/sandbox`, protegiendo la ruta tras la barrera `RequireAuth` en lugar de dejarla pública, con marcadores en los props de prueba para no contaminar código futuro.
+
+### Pendientes / deuda técnica
+- Eliminar la ruta de sandbox (`/interno/sandbox`) una vez validados todos los componentes institucionales.
+- Para los componentes gráficos reales que deriven de `WrapperGrafico`, asegurar que las paletas no pasen defaults de librería y utilicen las variables CSS.
+
+### Verificación realizada
+- Test unitarios de `formatters.test.ts` ajustados y exitosos.
+- Test de la lógica semafórica pura `semaforo.test.ts`, asegurando el caso límite estricto de coincidencia de valor y umbral.
+- Contraste validado manualmente en ratio lumínico (>4.5:1 exigido) validando la elección de `gray-900` sobre amarillo.
+- Build estricto de Vite (`npm run build`) validado.
+
+### Correcciones del supervisor
+- **Firma completa para semáforos:** Se exigió definir y tipar el `direccion` desde el plan y clarificar la lógica de caso límite (umbral exacto pertenece a la categoría superior).
+- **Placeholder de umbrales:** Se exigió comentar explícitamente en el Sandbox que los valores hardcodeados son estubs temporales para T-17/T-55.
+- **Decisión React Table:** Se cerró la disyuntiva forzando el uso inmediato de TanStack Table para no rehacer la tabla en el futuro.
+- **Sandbox Protegido:** Se exigió aislar la página de pruebas bajo `/interno` de la misma manera que el Query Test de T-35, salvaguardando accesos anónimos.
+- **Verificación de contraste:** Se exigió la confirmación explícita sobre el color del texto frente a los estados críticos, documentando por qué el estado alerta debe tener texto oscuro.
+
+### Commits
+- T-36: montar Sandbox protegido y actualizar dependencias (`1ff4946`)
+- T-36: crear componentes reutilizables base con accesibilidad (`fd2d2c1`)
+- T-36: logica de formateo y calculo de semaforos con cobertura de tests (`7420c35`)
+
