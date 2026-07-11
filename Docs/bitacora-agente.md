@@ -192,6 +192,31 @@
 - **Corrección de Proceso (Jerarquía de Skills):** Se ordenó documentar formalmente que la directiva institucional de San Jerónimo subordina a los gustos o configuraciones default inyectadas, cancelando el uso de micro-animaciones.
 - **Test de routing:** Se exigió automatizar la validación de stubs y jerarquía de layout público en vez de depender del testeo manual iterativo.
 
+## T-38 · Portal de obras — Listado
+**Fecha:** 2026-07-11
+**Estado:** completado
+
+### Decisiones tomadas
+- **UI Paginación Controlada:** Se adaptó el `DataTable` base (T-36) para admitir de forma opcional los props de paginación (`pageCount`, `pagination`, `onPaginationChange`). Si se proporcionan, se activa `manualPagination: true` de TanStack Table, delegando la responsabilidad de fetch al servidor sin romper la compatibilidad cliente (sandbox).
+- **Mapeo Defensivo del Semáforo:** Se encapsuló la función pura `mapSemaforoApiToEstado` para traducir el string crudo del backend al estricto `EstadoSemaforo` ('ok' | 'alerta' | 'critico' | null). Valores no manejados o 'desconocido' se evalúan como `null` y renderizan texto plano ("Sin datos de avance") sin fallas tipo `is undefined`.
+- **Granularidad de Commits:** Se retomó la práctica de separar commits estrictamente (Tipos/Puros, API/Hooks, UI/Rutas) previniendo retrocesos en la trazabilidad (git bisect).
+
+### Pendientes / deuda técnica
+- **Riesgo de deriva en `types.ts`:** El archivo `types.ts` de obras se mantiene sincronizado a mano contra `backend/app/schemas/obras.py` — revisar si diverge en tareas futuras, ya que el backend puede agregar o mutar campos sin aviso (como ocurrió con `semaforo: "desconocido"`).
+- (Pendiente persistente) Reemplazar stubs `/ejecucion`, `/proveedores` y `/mapa`.
+
+### Verificación realizada
+- Se validaron unitariamente (`api.test.ts`) los casos 'ok', 'alerta', 'critico', 'desconocido' y basura ('OK', '123') sobre el mapeo defensivo de semáforos.
+- Se testeó el hook `hooks.test.tsx` garantizando resiliencia sin roturas ante responses con un estado 'desconocido'.
+- Build confirmado sin filtraciones TypeScript.
+
+### Correcciones del supervisor
+- **Error de Nomenclatura:** Se corrigió en la génesis de la tarea el malentendido semántico (Listado vs Ficha), obligando a validar rigurosamente el documento de arquitectura madre antes de nombrar o construir.
+- **Asunciones de Dominio (Filtros y SOT de Semáforos):** Se forzó a demostrar con evidencia real en el código backend la existencia de los endpoints antes de definir el comportamiento de los combos asíncronos en el frontend. Así mismo, la responsabilidad de los umbrales permaneció exclusiva en el backend para evitar estados divergentes.
+
 ### Commits
-- T-37: Home publico con stubs y smoke tests de enrutamiento (`f00e5e1`)
+- Docs: registrar deuda tecnica sobre types.ts (`e29d278`)
+- T-38: Mapeo defensivo de semaforos y tipos de dominio (`1d24322`)
+- T-38: Hooks de React Query para Obras (`b68d5b3`)
+- T-38: UI de listado de obras con Data Table y filtros (`5505b13`)
 
