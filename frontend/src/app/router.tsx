@@ -3,6 +3,7 @@ import PublicLayout from './layouts/PublicLayout';
 import InternoLayout from './layouts/InternoLayout';
 import RequireAuth from '../features/auth/RequireAuth';
 import RequireRole from '../features/auth/RequireRole';
+import Home from '../pages/publico/Home';
 import Login from '../pages/auth/Login';
 import QueryTest from '../pages/interno/QueryTest';
 import Sandbox from '../pages/interno/Sandbox';
@@ -14,7 +15,23 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
-        element: <div>Portal público — en construcción</div>
+        element: <Home />
+      },
+      {
+        path: 'obras',
+        element: <div data-testid="stub-obras">Módulo Obras (En construcción)</div>
+      },
+      {
+        path: 'ejecucion',
+        element: <div data-testid="stub-ejecucion">Módulo Ejecución (En construcción)</div>
+      },
+      {
+        path: 'proveedores',
+        element: <div data-testid="stub-proveedores">Módulo Proveedores (En construcción)</div>
+      },
+      {
+        path: 'mapa',
+        element: <div data-testid="stub-mapa">Módulo Mapa (En construcción)</div>
       },
       {
         path: 'login',
