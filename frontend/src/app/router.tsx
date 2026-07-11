@@ -3,6 +3,7 @@ import PublicLayout from './layouts/PublicLayout';
 import InternoLayout from './layouts/InternoLayout';
 import RequireAuth from '../features/auth/RequireAuth';
 import RequireRole from '../features/auth/RequireRole';
+import Login from '../pages/auth/Login';
 
 export const router = createBrowserRouter([
   {
@@ -15,7 +16,7 @@ export const router = createBrowserRouter([
       },
       {
         path: 'login',
-        element: <div>Login (Página Pública temporal)</div> // TODO T-35: Reemplazar por Login page real
+        element: <Login />
       }
     ]
   },
