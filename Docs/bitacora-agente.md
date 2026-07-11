@@ -220,3 +220,26 @@
 - T-38: Hooks de React Query para Obras (`b68d5b3`)
 - T-38: UI de listado de obras con Data Table y filtros (`5505b13`)
 
+## T-39 · Portal de obras — Ficha detallada
+**Fecha:** 2026-07-11
+**Estado:** completado
+
+### Decisiones tomadas
+- **Lazy Loading Preventivo:** Se aplicó `lazy: () => import(...)` nativo de React Router a la ruta `/obras/:codigo` desde el inicio del diseño. Esto previno exitosamente la inflación del bundle principal, manteniendo aislado el peso de `react-leaflet` (153KB) introducido por el mini-mapa en la vista de detalle.
+- **Ocultamiento de Seguridad (No Placeholders):** Las secciones Contratista y Documentos se aislaron en un componente que realiza un retorno nulo estricto si no hay datos. Esta decisión obedece a un riesgo de transparencia gubernamental, prefiriendo ocultar el bloque completo antes que mostrar un "Pendiente" que genere suspicacias ciudadanas.
+- **Fail-Fast en Tipos:** La deuda técnica del tipado de Obras se ajustó forzando los campos inexistentes (RUC, etc.) a `?: never` en la interfaz `ObraDetalleResponse`. Así, si alguien asume que los campos existen y trata de usarlos antes de que el backend los integre, la compilación fallará intencionalmente, advirtiendo del desacople.
+- **Zoom por Defecto:** Se externalizó el zoom del mapa de ubicación a la constante documentada `ZOOM_DEFAULT_FICHA = 15`.
+
+### Pendientes / deuda técnica / bloqueos de Backend
+- **BLOQUEO BACKEND (T-26):** El endpoint `GET /publico/obras/{codigo}` devuelve un esquema (`ObraDetalleResponse`) que **carece** de los datos del contratista (RUC, Razón Social, Monto Contratado - AC-02.3) y no expone las URLs directas o listados de descarga de documentos (AC-02.4), solo enviando flags de existencia (`tiene_f8`). Este es un bloqueo real que requiere que el backend (T-26 o su equivalente) asigne, obtenga e incluya estos campos antes de que puedan ser renderizados en el frontend (donde ya esperan bajo un condicional oculto con `// TODO T-XX`).
+- Continúa el riesgo de deriva manual de `types.ts`.
+
+### Verificación realizada
+- Test unitario (`ContratistaDocumentos.test.tsx`) creado para validar estructuralmente mediante Vitest+JsDom que los componentes de sección ocultos devuelven el contenedor en blanco (vaciado real del DOM, cero huecos o títulos huérfanos) cuando falta la data.
+- Test de rutas expandido para probar la inyección `lazy` de `/obras/:codigo`.
+- Comprobación manual del tamaño final del bundle, constatando que el archivo `index.js` permaneció ligero (~367 KB).
+
+### Commits
+- T-39: tipos y capa de datos para ficha detallada (`a643d03`)
+- T-39: componentes de secciones de la ficha detallada, test de ocultamiento y Leaflet aislado (`e2dabfe`)
+- T-39: implementar página Obra y agregar al router (`99b3bd9`)
