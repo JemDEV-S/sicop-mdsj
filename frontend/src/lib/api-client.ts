@@ -22,10 +22,18 @@ export function setAccessToken(token: string | null) {
   accessToken = token;
 }
 
-// TODO T-34: Reemplazar esta redirección directa por llamada al store de Zustand (store.logout())
-export function forceLogout() {
+let resetSessionCallback: (() => void) | null = null;
+
+export function setResetSessionCallback(cb: () => void) {
+  resetSessionCallback = cb;
+}
+
+// Reseteo silencioso de la sesión (sin navegación). Llamado al fallar el interceptor.
+export function triggerResetSession() {
   setAccessToken(null);
-  window.location.href = '/login';
+  if (resetSessionCallback) {
+    resetSessionCallback();
+  }
 }
 
 /**
@@ -41,7 +49,7 @@ export function refreshAuthToken(): Promise<string> {
         return newToken;
       })
       .catch((error) => {
-        forceLogout();
+        triggerResetSession();
         throw error;
       })
       .finally(() => {
@@ -88,7 +96,7 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest);
       } catch (refreshError) {
         // El refresh falló, la sesión está completamente muerta. 
-        // forceLogout() ya fue llamado por refreshAuthToken().
+        // triggerResetSession() ya fue llamado por refreshAuthToken().
         return Promise.reject(refreshError);
       }
     }
