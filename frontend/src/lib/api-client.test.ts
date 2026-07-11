@@ -85,8 +85,8 @@ describe('apiClient concurrency lock', () => {
     expect(protectedCallsWithNewToken).toBe(5);
 
     // 3. ¿Resolvieron correctamente?
-    expect(responses[0].status).toBe(200);
-    expect(responses[0].data.data).toBe('ok');
+    expect(responses[0]!.status).toBe(200);
+    expect(responses[0]!.data.data).toBe('ok');
     
     // 4. ¿No llamó a forceLogout?
     expect(window.location.href).toBe('');
