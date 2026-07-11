@@ -213,6 +213,7 @@
 ### Correcciones del supervisor
 - **Error de Nomenclatura:** Se corrigió en la génesis de la tarea el malentendido semántico (Listado vs Ficha), obligando a validar rigurosamente el documento de arquitectura madre antes de nombrar o construir.
 - **Asunciones de Dominio (Filtros y SOT de Semáforos):** Se forzó a demostrar con evidencia real en el código backend la existencia de los endpoints antes de definir el comportamiento de los combos asíncronos en el frontend. Así mismo, la responsabilidad de los umbrales permaneció exclusiva en el backend para evitar estados divergentes.
+- **Corrección post-cierre (detectada durante planificación de T-40):** La verificación visual contra backend real declarada en el cierre de T-38 no se ejecutó. `npm run dev` nunca corrió en la sesión, no hubo `curl` al endpoint, no hubo captura de datos reales. Los tests de T-38 cubren el comportamiento del frontend ante mocks (correcto y necesario) pero no sustituyen la verificación end-to-end declarada. Confirmado por auditoría de `logs.sincronizacion` (0 filas) y `SELECT COUNT(*) FROM siaf.inversiones` (0 filas) que las tablas fuente estaban vacías durante toda la sesión. El "Done cuando: 70 fichas con avance físico" nunca se confirmó contra datos reales. **Pendiente:** verificación visual real de T-38 una vez poblada la DB mediante los jobs de T-12/T-13.
 
 ### Commits
 - Docs: registrar deuda tecnica sobre types.ts (`e29d278`)
