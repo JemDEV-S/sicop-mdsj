@@ -93,3 +93,43 @@
 - **Separación reset/logout:** Se exigió no usar una redirección ruidosa a `/login` para fallos de refresco o hidratación, protegiendo así la UX de visitantes anónimos en rutas públicas.
 - **Inyección de Token en Orden:** Se solicitó hacer explícita la inyección del token local en el proceso del `login` justo antes de consultar `/auth/me`.
 - **Automatización obligatoria:** Exigencia del test automatizado aislado para el store validando el manejo silencioso, el éxito y el cierre explícito.
+
+### Commits
+- T-34: actualizar test de concurrencia para nueva semantica de triggerResetSession (`c6bc36b`)
+- T-34: pagina de Login y bootstrapping de la aplicacion (`3656b3e`)
+- T-34: conectar guards de autenticacion con el store (`7cf5db5`)
+- T-34: store de autenticacion con Zustand y tests automatizados (`659a176`)
+- T-34: inyectar callback de reseteo silencioso en cliente API (`1c907d5`)
+- T-34: instalar zustand (`6cee074`)
+
+## T-35 · TanStack Query provider + hooks base
+**Fecha:** 2026-07-11
+**Estado:** completado
+
+### Decisiones tomadas
+- **QueryClient Provider:** Se instaló `@tanstack/react-query` y se configuró un `QueryClient` global.
+- **Configuración de StaleTime:** Se definió `staleTime: 60000` (1 minuto) como default global, cumpliendo con la exigencia de la arquitectura (§8.3) para los datos internos regulares. 
+- **Lógica de reintentos:** Se deshabilitaron los reintentos automáticos para errores `401` y `403`, debido a que el interceptor de Axios ya maneja internamente la lógica de actualización del JWT (ver `query-client.ts`).
+- **Página de Prueba Aislada:** Se creó un componente `QueryTest.tsx` montado en `/interno/query-test` de forma temporal, con el fin de evitar contaminar la ruta del futuro dashboard real (T-44).
+- **ReactQueryDevtools limitados a DEV:** Las herramientas de debug se inyectan en `App.tsx` envolviéndolas estrictamente bajo el condicional `import.meta.env.DEV`.
+
+### Pendientes / deuda técnica
+- Eliminar `/interno/query-test` y el hook `useTestQuery.ts` cuando ya no sean requeridos para demostrar que la base funciona.
+- En T-37+ y T-48, asegurarse de configurar explícitamente `staleTime: 5 * 60 * 1000` en los hooks públicos y de saldos (override del default de 1 min).
+
+### Verificación realizada
+- Test unitario puramente algorítmico: `query-client.test.ts` valida que `shouldRetryQuery` retorna `false` ante errores 401 y 403, y `true` ante un 500. **Éxito**.
+- `npm run build` compila limpiamente.
+- Test empírico sobre el bundle generado: `grep -rn "ReactQueryDevtools" dist/assets/` arrojó vacío, demostrando que el código de DevTools es elidido completamente de producción.
+
+### Correcciones del supervisor
+- **Rutas de prueba aisladas:** Se exigió no pisar el stub de T-44 en `/interno/` para montar componentes de prueba. Las pruebas temporales deben ir en su propia ruta separada con comentario de borrado futuro.
+- **Sustento documental explícito:** Se exigió dejar constancia formal de qué valores por defecto vienen explícitos de los documentos de arquitectura y cuáles son decisiones de diseño inferidas ("defaults sensatos"), para evitar heredar suposiciones oscuras.
+- **Verificación unitaria vs manual:** Se exigió testear la lógica de reintento con Vitest a nivel de función pura (`shouldRetryQuery`), evitando las pruebas "a ojo" mirando el panel Network.
+- **Verificación de build estricta:** Se requirió probar con `grep` sobre los estáticos transpilados para comprobar mecánicamente que `ReactQueryDevtools` no viaja a producción.
+
+### Commits
+- T-35: ruta y hook temporal para verificar React Query (`fa9b0db`)
+- T-35: proveer QueryClient a la aplicacion y devtools condicionales (`65f370f`)
+- T-35: configurar QueryClient global y tests de funcion retry (`57bcf0d`)
+- T-35: instalar tanstack/react-query y devtools (`cfdf192`)
