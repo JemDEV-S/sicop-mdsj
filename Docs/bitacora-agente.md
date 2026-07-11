@@ -139,7 +139,7 @@
 **Estado:** completado
 
 ### Decisiones tomadas
-- **DataTable Base:** Se consolidó `@tanstack/react-table` desde el principio (en lugar de mapeos simples) para garantizar escalabilidad hacia paginación y ordenamiento complejo, integrándolo con las clases Tailwind nativas de shadcn.
+- **DataTable Base:** Se consolidó `@tanstack/react-table` desde el principio (en lugar de mapeos simples) para garantizar escalabilidad hacia paginación y ordenamiento complejo, integrándolo con las clases Tailwind nativas de shadcn. Originalmente client-side, en T-38 ganó la capacidad retrocompatible de `manualPagination: true` delegando control al servidor sin romper usos locales.
 - **Formateadores Peruanos:** Se crearon funciones usando `Intl.NumberFormat` y `Intl.DateTimeFormat` configuradas para `es-PE`.
 - **Lógica Matemática Pura:** Se aisló la lógica del cálculo de semáforos (`calcularSemaforo`) fuera de la UI, con tipado estricto para direcciones (`mayor` | `menor`) y cobertura de test exhaustiva.
 - **Semaforo Visual (Accesibilidad Enforced):** El componente `Semaforo` ahora es completamente tipeado (TypeScript). Su prop `texto` no es opcional, previniendo fallas de accesibilidad en compilación si se intenta usar solo el color.
