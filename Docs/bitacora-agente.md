@@ -143,7 +143,7 @@
 - **Formateadores Peruanos:** Se crearon funciones usando `Intl.NumberFormat` y `Intl.DateTimeFormat` configuradas para `es-PE`.
 - **Lógica Matemática Pura:** Se aisló la lógica del cálculo de semáforos (`calcularSemaforo`) fuera de la UI, con tipado estricto para direcciones (`mayor` | `menor`) y cobertura de test exhaustiva.
 - **Semaforo Visual (Accesibilidad Enforced):** El componente `Semaforo` ahora es completamente tipeado (TypeScript). Su prop `texto` no es opcional, previniendo fallas de accesibilidad en compilación si se intenta usar solo el color.
-- **Contraste de Accesibilidad:** Se estableció textualmente el uso de la clase `text-gray-900` para el estado "Alerta" (`bg-[var(--semaforo-alerta)]`, amarillo) luego de confirmar que blanco sobre amarillo fallaría flagrantemente la normativa WCAG AA.
+- **Contraste de Accesibilidad:** Se estableció textualmente el uso de la clase `text-gray-900` (`#111827`) para el estado "Alerta" (`bg-[var(--semaforo-alerta)]`, amarillo `#F0C84F`) luego de calcular el contraste real WCAG: texto blanco (`#FFFFFF`) daba 1.59:1 (falla severa), mientras que `gray-900` da un excelente ratio de 11.24:1 (pasa WCAG AAA).
 - **Mapeo de Leaflet:** Se creó el `WrapperMapa` y, como **hallazgo de entorno**, se descubrió que Leaflet compite violentamente con el z-index de Tailwind al inyectar sus overlays (haciendo que el mapa superponga ventanas modales o headers). Solución aplicada: se configuró un contenedor con `zIndex: 0` y `relative` explícito.
 - **Sandbox Seguro:** Los componentes de prueba se montaron en `/interno/sandbox`, protegiendo la ruta tras la barrera `RequireAuth` en lugar de dejarla pública, con marcadores en los props de prueba para no contaminar código futuro.
 
