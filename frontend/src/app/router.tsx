@@ -5,6 +5,7 @@ import RequireAuth from '../features/auth/RequireAuth';
 import RequireRole from '../features/auth/RequireRole';
 import Login from '../pages/auth/Login';
 import QueryTest from '../pages/interno/QueryTest';
+import Sandbox from '../pages/interno/Sandbox';
 
 export const router = createBrowserRouter([
   {
@@ -40,6 +41,11 @@ export const router = createBrowserRouter([
             // TODO T-35: eliminar tras validar funcionalidad
             path: 'query-test',
             element: <QueryTest />
+          },
+          {
+            // TODO T-36: eliminar tras validar funcionalidad
+            path: 'sandbox',
+            element: <Sandbox />
           }
         ]
       }
