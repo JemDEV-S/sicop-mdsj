@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import MockAdapter from 'axios-mock-adapter';
 import axios from 'axios';
-import { apiClient, setAccessToken } from './api-client';
+import { apiClient, setAccessToken, getAccessToken } from './api-client';
 
 describe('apiClient concurrency lock', () => {
   let mockGlobal: MockAdapter;
@@ -11,7 +11,7 @@ describe('apiClient concurrency lock', () => {
     mockGlobal = new MockAdapter(axios);
     mockApi = new MockAdapter(apiClient);
     setAccessToken(null);
-    // Mock window.location for forceLogout
+    // Mock window.location
     globalThis.window = { location: { href: '' } } as any;
   });
 
@@ -46,8 +46,9 @@ describe('apiClient concurrency lock', () => {
     // 1. ¿Cuántas veces se llamó al refresh? Exactamente 1.
     expect(refreshCalls).toBe(1);
 
-    // 2. ¿Terminó en forceLogout? (window.location.href debe ser /login)
-    expect(window.location.href).toBe('/login');
+    // 2. ¿Terminó en triggerResetSession? (token en null, sin navegación)
+    expect(window.location.href).toBe('');
+    expect(getAccessToken()).toBeNull();
   });
 
   it('debe llamar a /auth/refresh EXACTAMENTE UNA VEZ cuando fallan 5 requests concurrentes y reintentarlas con éxito si el refresh funciona', async () => {
@@ -88,7 +89,7 @@ describe('apiClient concurrency lock', () => {
     expect(responses[0]!.status).toBe(200);
     expect(responses[0]!.data.data).toBe('ok');
     
-    // 4. ¿No llamó a forceLogout?
+    // 4. ¿Mantuvo la sesión?
     expect(window.location.href).toBe('');
   });
 });
