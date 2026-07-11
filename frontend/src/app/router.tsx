@@ -4,11 +4,6 @@ import InternoLayout from './layouts/InternoLayout';
 import RequireAuth from '../features/auth/RequireAuth';
 import RequireRole from '../features/auth/RequireRole';
 import Home from '../pages/publico/Home';
-import Login from '../pages/auth/Login';
-import QueryTest from '../pages/interno/QueryTest';
-import Sandbox from '../pages/interno/Sandbox';
-
-import ObrasListado from '../pages/publico/ObrasListado';
 
 export const router = createBrowserRouter([
   {
@@ -21,7 +16,10 @@ export const router = createBrowserRouter([
       },
       {
         path: 'obras',
-        element: <ObrasListado />
+        lazy: async () => {
+          const { default: ObrasListado } = await import('../pages/publico/ObrasListado');
+          return { Component: ObrasListado };
+        }
       },
       {
         path: 'ejecucion',
@@ -37,7 +35,10 @@ export const router = createBrowserRouter([
       },
       {
         path: 'login',
-        element: <Login />
+        lazy: async () => {
+          const { default: Login } = await import('../pages/auth/Login');
+          return { Component: Login };
+        }
       }
     ]
   },
@@ -59,12 +60,18 @@ export const router = createBrowserRouter([
           {
             // TODO T-35: eliminar tras validar funcionalidad
             path: 'query-test',
-            element: <QueryTest />
+            lazy: async () => {
+              const { default: QueryTest } = await import('../pages/interno/QueryTest');
+              return { Component: QueryTest };
+            }
           },
           {
             // TODO T-36: eliminar tras validar funcionalidad
             path: 'sandbox',
-            element: <Sandbox />
+            lazy: async () => {
+              const { default: Sandbox } = await import('../pages/interno/Sandbox');
+              return { Component: Sandbox };
+            }
           }
         ]
       }
