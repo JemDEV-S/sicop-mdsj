@@ -1,4 +1,5 @@
-// TODO T-34: Eliminar este hook temporal y usar Zustand
+import { useAuthStore } from '../../../store/auth';
+
 export function useRole(): string | undefined {
-  return undefined;
+  return useAuthStore(state => state.user?.rol?.codigo);
 }
