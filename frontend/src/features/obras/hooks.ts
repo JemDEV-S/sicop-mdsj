@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchObrasListado, fetchFunciones, fetchTipologias, FetchObrasParams } from './api';
+import { fetchObrasListado, fetchFunciones, fetchTipologias, fetchObraDetalle, type FetchObrasParams } from './api';
 
 export function useObras(params: FetchObrasParams) {
   return useQuery({
@@ -19,5 +19,13 @@ export function useTipologias() {
   return useQuery({
     queryKey: ['obras', 'tipologias'],
     queryFn: fetchTipologias,
+  });
+}
+
+export function useObra(codigoUnico: string) {
+  return useQuery({
+    queryKey: ['obras', 'detalle', codigoUnico],
+    queryFn: () => fetchObraDetalle(codigoUnico),
+    enabled: !!codigoUnico,
   });
 }
