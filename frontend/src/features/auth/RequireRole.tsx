@@ -1,17 +1,15 @@
 import { Navigate, Outlet } from 'react-router-dom';
-// import { useAuthStore } from './store'; // TODO T-34: Importar estado global con el rol
+import { useRole } from './hooks/useRole';
 
 interface RequireRoleProps {
   role: string;
 }
 
 export default function RequireRole({ role }: RequireRoleProps) {
-  // TODO T-34: Obtener rol real del usuario desde Zustand
-  // const userRole = useAuthStore(state => state.user?.role);
+  const currentRole = useRole();
   
-  // STUB: Actualmente fallamos cerrado (deny default) porque no tenemos el rol.
-  // Usamos `role` para evitar warning de TS, pero forzamos false.
-  const hasRequiredRole = Boolean(role) && false; 
+  // Falla cerrado: si no hay rol, o si el rol no coincide con el requerido, denegamos.
+  const hasRequiredRole = currentRole === role;
 
   if (!hasRequiredRole) {
     // Si no tiene el rol, lo mandamos al inicio interno por defecto
