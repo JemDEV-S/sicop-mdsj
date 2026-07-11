@@ -4,6 +4,7 @@ import InternoLayout from './layouts/InternoLayout';
 import RequireAuth from '../features/auth/RequireAuth';
 import RequireRole from '../features/auth/RequireRole';
 import Login from '../pages/auth/Login';
+import QueryTest from '../pages/interno/QueryTest';
 
 export const router = createBrowserRouter([
   {
@@ -34,6 +35,11 @@ export const router = createBrowserRouter([
           {
             path: 'saldos',
             element: <div>Módulo Saldos (Stub)</div>
+          },
+          {
+            // TODO T-35: eliminar tras validar funcionalidad
+            path: 'query-test',
+            element: <QueryTest />
           }
         ]
       }
