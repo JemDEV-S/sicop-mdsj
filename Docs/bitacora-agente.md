@@ -182,6 +182,7 @@
 ### Pendientes / deuda técnica
 - Los textos con `// TODO: confirmar copy institucional` deberán ser reemplazados cuando M.D. San Jerónimo apruebe la retórica oficial.
 - Una vez finalizadas las tareas T-38 a T-43, reemplazar los `<div>` stub por la importación de sus componentes reales en `router.tsx`.
+- **Riesgo de deriva en `types.ts`:** El archivo `types.ts` de obras se mantiene sincronizado a mano contra `backend/app/schemas/obras.py` — revisar si diverge en tareas futuras, ya que el backend puede agregar o mutar campos sin aviso (como ocurrió con `semaforo: "desconocido"`).
 
 ### Verificación realizada
 - Se estructuró y ejecutó exitosamente el test automatizado `router.test.tsx`, inyectando el environment `@vitest-environment jsdom` para asegurar que las rutas stub existen y están definidas como hijos directos del Index.
