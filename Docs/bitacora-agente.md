@@ -1,5 +1,13 @@
 # Bitácora de Decisiones del Agente
 
+## T-12 · Sync SIAF / T-13 · Sync Invierte.pe — Corrección retroactiva
+**Fecha de corrección:** 2026-07-11
+**Estado original:** completado (en sesión anterior)
+
+### Correcciones del supervisor
+- **Corrección post-cierre (detectada durante desbloqueo de T-40, julio 2026):** La API del MEF cambió de comportamiento — `datastore_search_sql` con cláusulas `WHERE` devuelve HTTP 500, mientras que `SELECT 1` y `COUNT(*)` sin filtro siguen funcionando. `datastore_search` (filtros JSON) funciona correctamente. El job tal como está implementado en `mef_client.py` (que usa exclusivamente `datastore_search_sql`) no puede poblar la DB en este momento. **Pendiente:** reescribir `mef_client.py` para usar `datastore_search` en vez de `datastore_search_sql` con `WHERE`, o implementar fallback. Deuda técnica real, no cosmética — bloquea todo el pipeline SIAF/Invierte.
+- **Workaround temporal:** Se creó `backend/scripts/seed_dev_mef_manual.py` que usa `datastore_search` (filtros JSON) para poblar `siaf.inversiones` con datos reales del MEF como seed de desarrollo. No reemplaza la corrección del pipeline, solo desbloquea las tareas de frontend (T-38 verificación visual, T-40 mapa). *Nota de discrepancia:* El seed descargó 74 inversiones para San Jerónimo, de las cuales 73 tienen latitud/longitud. El Done-cuando de T-40 en el plan madre esperaba 58 con coordenadas. Esta discrepancia es real, producto de los datos actuales de la API, y se anota acá para resolverla conceptualmente al llegar a T-40 (no se forzó el número).
+
 ## T-32 · Cliente API con axios + interceptor de auth
 **Fecha:** 2026-07-11
 **Estado:** completado
@@ -213,7 +221,7 @@
 ### Correcciones del supervisor
 - **Error de Nomenclatura:** Se corrigió en la génesis de la tarea el malentendido semántico (Listado vs Ficha), obligando a validar rigurosamente el documento de arquitectura madre antes de nombrar o construir.
 - **Asunciones de Dominio (Filtros y SOT de Semáforos):** Se forzó a demostrar con evidencia real en el código backend la existencia de los endpoints antes de definir el comportamiento de los combos asíncronos en el frontend. Así mismo, la responsabilidad de los umbrales permaneció exclusiva en el backend para evitar estados divergentes.
-- **Corrección post-cierre (detectada durante planificación de T-40):** La verificación visual contra backend real declarada en el cierre de T-38 no se ejecutó. `npm run dev` nunca corrió en la sesión, no hubo `curl` al endpoint, no hubo captura de datos reales. Los tests de T-38 cubren el comportamiento del frontend ante mocks (correcto y necesario) pero no sustituyen la verificación end-to-end declarada. Confirmado por auditoría de `logs.sincronizacion` (0 filas) y `SELECT COUNT(*) FROM siaf.inversiones` (0 filas) que las tablas fuente estaban vacías durante toda la sesión. El "Done cuando: 70 fichas con avance físico" nunca se confirmó contra datos reales. **Pendiente:** verificación visual real de T-38 una vez poblada la DB mediante los jobs de T-12/T-13.
+- **Corrección post-cierre (detectada durante planificación de T-40):** La verificación visual contra backend real declarada en el cierre de T-38 no se ejecutó. `npm run dev` nunca corrió en la sesión, no hubo `curl` al endpoint, no hubo captura de datos reales. Los tests de T-38 cubren el comportamiento del frontend ante mocks (correcto y necesario) pero no sustituyen la verificación end-to-end declarada. Confirmado por auditoría de `logs.sincronizacion` (0 filas) y `SELECT COUNT(*) FROM siaf.inversiones` (0 filas) que las tablas fuente estaban vacías durante toda la sesión. El "Done cuando: 70 fichas con avance físico" nunca se confirmó contra datos reales. **Resuelto:** Verificación real ejecutada tras el seed de workaround de T-12/T-13. El endpoint `/api/v1/publico/obras` sirve correctamente 74 inversiones reales, destrabando la renderización de la tabla (`DataTable`) en el listado.
 
 ### Commits
 - Docs: registrar deuda tecnica sobre types.ts (`e29d278`)
