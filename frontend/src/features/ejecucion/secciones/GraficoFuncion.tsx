@@ -80,7 +80,7 @@ export default function GraficoFuncion({ data, isLoading }: GraficoFuncionProps)
           />
           {/* El PIM va de fondo, el Devengado va encima si es BarChart superpuesto.
               Para horizontal, podemos graficar el devengado directamente. */}
-          <Bar dataKey="devengado" name="Devengado" fill="var(--primary)" radius={[0, 4, 4, 0]} />
+          <Bar dataKey="devengado" name="Devengado" fill="var(--primary)" radius={[0, 4, 4, 0]} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
     </div>

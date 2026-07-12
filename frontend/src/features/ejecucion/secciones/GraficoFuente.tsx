@@ -68,6 +68,7 @@ export default function GraficoFuente({ data, isLoading }: GraficoFuenteProps) {
             dataKey="pim"
             nameKey="nombre"
             stroke="var(--card)"
+            isAnimationActive={false}
           >
             {chartData.map((_, index) => (
               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />

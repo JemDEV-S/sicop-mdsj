@@ -74,7 +74,8 @@ export default function GraficoMensual({ data, isLoading }: GraficoMensualProps)
             strokeWidth={2}
             dot={false}
             strokeDasharray="5 5"
-            connectNulls={false} // IMPORTANTE: No conectar sobre los nulls
+            connectNulls={false}
+            isAnimationActive={false}
           />
           <Line 
             type="monotone" 
@@ -84,7 +85,8 @@ export default function GraficoMensual({ data, isLoading }: GraficoMensualProps)
             strokeWidth={3}
             dot={{ r: 4 }}
             activeDot={{ r: 6 }}
-            connectNulls={false} // IMPORTANTE: No conectar sobre los nulls
+            connectNulls={false}
+            isAnimationActive={false}
           />
         </LineChart>
       </ResponsiveContainer>
