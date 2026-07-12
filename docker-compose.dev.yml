@@ -1,8 +1,8 @@
 # docker-compose.dev.yml — Entorno de desarrollo
-# Uso: docker compose -f docker-compose.dev.yml up -d postgres redis
+# Uso: docker compose -f docker-compose.dev.yml up -d
 #
-# Backend y frontend se corren fuera de Docker en dev (uvicorn --reload / vite dev)
-# para tener hot-reload directo. Los servicios de infra van en containers.
+# El frontend se corre fuera de Docker en dev (npm run dev) para hot-reload.
+# El backend y la infra corren en contenedores (el backend monta el código local).
 
 services:
   # ─── PostgreSQL 16 (base intermedia del sistema) ──────────────
@@ -71,10 +71,41 @@ services:
       - "8080:8080"
     restart: unless-stopped
 
+  # ─── Backend (Hot-reload habilitado) ────────────────────────────
+  # Corre uvicorn --reload montando el código fuente local.
+  # Provee el entorno Linux con el driver ODBC de SQL Server listo.
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sicop_backend_dev
+    # Usamos bash -c para asegurarnos de activar el entorno y correr uvicorn desde /app
+    command: bash -c "source venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - uploads_dev:/var/data/uploads
+    environment:
+      - CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - REDIS_URL=redis://redis:6379/0
+      - MSSQL_SERVER=sqlserver
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:
-    name: sicop_postgres_data
+    name: sicop_postgres_data_dev
   redis_data:
-    name: sicop_redis_data
+    name: sicop_redis_data_dev
   sqlserver_data:
-    name: sicop_sqlserver_data
+    name: sicop_sqlserver_data_dev
+  uploads_dev:
+    name: sicop_uploads_dev
+
