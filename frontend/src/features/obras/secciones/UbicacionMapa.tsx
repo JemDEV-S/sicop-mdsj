@@ -16,7 +16,10 @@ const defaultIcon = new L.Icon({
 });
 
 export function UbicacionMapa({ obra }: { obra: ObraDetalleResponse }) {
-  if (obra.latitud === null || obra.longitud === null) {
+  if (
+    obra.latitud == null || obra.longitud == null ||
+    (obra.latitud === 0 && obra.longitud === 0)
+  ) {
     return (
       <div className="bg-white border border-gray-200 shadow-sm p-4 rounded-sm flex items-center justify-center h-full min-h-[300px]">
         <p className="text-gray-500">No hay coordenadas de ubicación registradas para esta obra.</p>
