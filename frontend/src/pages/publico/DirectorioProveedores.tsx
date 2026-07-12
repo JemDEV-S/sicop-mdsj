@@ -19,7 +19,7 @@ export default function DirectorioProveedores() {
     pageSize: 25,
   });
 
-  const { data, isLoading, isError, error } = useProveedoresPublico({
+  const { data, isError } = useProveedoresPublico({
     ano,
     q: debouncedQ || undefined,
     page: pageIndex + 1,
@@ -73,8 +73,6 @@ export default function DirectorioProveedores() {
             columns={columnasProveedoresPublico}
             data={data?.items || []}
             pageCount={data?.total ? Math.ceil(data.total / pageSize) : -1}
-            manualPagination={true}
-            isLoading={isLoading}
             pagination={{ pageIndex, pageSize }}
             onPaginationChange={setPagination}
           />
