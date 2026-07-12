@@ -248,6 +248,7 @@
 - **Paginación Server-Side y Deduplicación:** Se integró TanStack Table en modo `manualPagination: true` acoplado con `useDebounce` y TanStack Query para deduper fetches en vuelo.
 - **Parseo Resiliente de Errores (Blob):** Se implementó una verificación de instancia de `Blob` sobre el response de Axios (`responseType: 'blob'`) para deserializar asíncronamente JSONs de error generados por FastAPI y poder mostrar el Toast con el mensaje preciso.
 - **Unificación de Transformación de Moneda:** Se extrajo y unificó la tubería `formatearMoneda(parseMonto(val))` hacia `utils.ts` en lugar de usar `formatSoles(Number())`, previniendo que valores `undefined`, nulos o string vacíos rendericen un silencioso `"S/ NaN"`.
+- **Refactorización Retroactiva Centralizada:** **[NUEVO]** Durante la planificación de T-44, se detectó que la lógica de parseo y moneda residía en `features/ejecucion/utils.ts`. Para evitar deuda técnica y fugas de "NaN" en componentes globales, se refactorizó centralizando la verdad en `lib/formatters.ts` y actualizando `T-41`, `T-42` y `T-43` de forma atómica.
 
 ### Pendientes / deuda técnica
 - La tabla de `logs.auditoria` almacena exitosamente los accesos públicos (con `usuario_id=NULL`) pero aún no existe un consumidor o dashboard interno en el frontend que lea esta información para el administrador.
@@ -276,6 +277,7 @@
 ### Decisiones tomadas
 - **Desarrollo Guiado por Contrato (Mocking):** Ante la ausencia temporal de la fuente de datos real, el desarrollo se completó apoyándose en MSW y `vi.mock` simulando a la perfección el contrato Pydantic del backend (`items`, `total`, `page`, `size`) para desarrollar y probar la tabla de React completa, los filtros y la paginación.
 - **Adopción Temprana de Fix (NaN):** Se identificó el mismo antipatrón de formateo `parseFloat(...) || 0` de T-42 en esta nueva tabla, y se aprovechó la unificación arquitectónica para proteger tempranamente las columnas contra resultados matemáticos inválidos.
+- **Refactorización Retroactiva Centralizada:** **[NUEVO]** Se adaptó la importación de las funciones financieras hacia la librería centralizada `lib/formatters.ts` durante el commit atómico de refactorización posterior.
 
 ### Pendientes / deuda técnica
 - **BLOQUEADOR SIGA:** La verificación E2E final contra datos reales de producción sigue bloqueada. Esta tarea (y otras relacionadas como T-51) depende de restaurar el archivo `SIGA_300687.bak` que actualmente no se encuentra en `scripts/siga-backup/`. No se utilizará inyección de datos falsos de base de datos; la tarea queda pausada aquí hasta resolución externa.
@@ -352,6 +354,7 @@ Se autorizó oficialmente mantener el universo íntegro real (73), invalidando e
 - **El problema de renderizado SVG:** Los componentes `Bar` y `Pie` de Recharts fallaron al renderizarse visualmente porque utilizaban `fill="hsl(var(--primary))"`. La variable `--primary` ya estaba definida en el `:root` de `globals.css` como string completo (`hsl(198 52% 43%)`), lo que resultaba en un doble envoltorio inválido: `hsl(hsl(...))`. Se arregló usando `fill="var(--primary)"`.
 - **Paleta Categórica Accesible:** Para el gráfico de dona que requería 5 colores, se evitó hardcodear colores en el JSX y se extendió el sistema de diseño en `globals.css` añadiendo `--chart-1` a `--chart-5`. Se diseñó la luminosidad intencionalmente (25%, 43%, 55%, 63%, 75%) para robustecer el contraste ante daltonismos de tipo deuteranopia/protanopia.
 - **El problema de animaciones en Playwright:** Recharts inicializa barras y donas en tamaño 0 mediante animaciones (`requestAnimationFrame`). Playwright headless capturaba la pantalla antes de que los frames terminaran, resultando en gráficos vacíos. Se estableció `isAnimationActive={false}` en todos los gráficos, cumpliendo además con la regla de sobriedad institucional.
+- **Refactorización Retroactiva Centralizada:** **[NUEVO]** Se adaptaron las métricas y componentes del dashboard (KPIs, Donut, etc.) para importar `parseMonto` y `formatearMoneda` desde `lib/formatters.ts`, estandarizando los comportamientos de fallback "ND" en vez de depender de utils aislados de features.
 
 ### Pendientes / deuda técnica
 - **Limitación de Filtros en Backend (T-26/T-27):** Los endpoints del dashboard (`/resumen`, `/por-funcion`, etc.) actualmente solo aceptan el filtro `ano`. El mockup original (HU-05) requiere poder cruzar datos por función, fuente, categoría y mes simultáneamente. Se dejó documentado como decisión de alcance para esta iteración, pero HU-06 (Tabla Detallada) o T-42 necesitarán retomar esta capacidad cruzada.
