@@ -1,0 +1,1 @@
+export const ZOOM_DEFAULT_MAPA_GENERAL = 14;

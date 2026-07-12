@@ -38,7 +38,10 @@ export const router = createBrowserRouter([
       },
       {
         path: 'mapa',
-        element: <div data-testid="stub-mapa">Módulo Mapa (En construcción)</div>
+        lazy: async () => {
+          const { default: Mapa } = await import('../pages/publico/Mapa');
+          return { Component: Mapa };
+        }
       },
       {
         path: 'login',
