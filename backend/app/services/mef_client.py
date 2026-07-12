@@ -65,6 +65,88 @@ class MefClient:
         wait=wait_exponential(multiplier=10, min=10, max=90),
         reraise=True,
     )
+    def datastore_search(
+        self, resource_id: str, filters: dict[str, str], limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        """Ejecuta una consulta JSON contra la API MEF usando datastore_search."""
+        assert self._client is not None, "MefClient debe usarse como context manager"
+        url = f"{self.base_url}/datastore_search"
+        
+        # filters debe mandarse como un string JSON en el query parameter
+        import json
+        params = {
+            "resource_id": resource_id,
+            "filters": json.dumps(filters),
+            "limit": limit,
+            "offset": offset
+        }
+        
+        try:
+            resp = self._client.get(url, params=params)
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            raise MefApiTransientError(f"Timeout/red: {exc}") from exc
+
+        if resp.status_code >= 500:
+            raise MefApiTransientError(
+                f"HTTP {resp.status_code} desde MEF: {resp.text[:200]}"
+            )
+        if resp.status_code >= 400:
+            raise MefApiError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+
+        payload = resp.json()
+        if not payload.get("success"):
+            raise MefApiError(f"success=false: {payload.get('error')}")
+        
+        records = payload.get("result", {}).get("records", [])
+        return records  # type: ignore[no-any-return]
+
+    def paginar_json(
+        self,
+        resource_id: str,
+        filters: dict[str, str],
+        page_size: int = PAGE_LIMIT,
+        delay_seconds: float = 0.15,
+    ):
+        """Generador que hace paginado con datastore_search (JSON).
+        
+        Aplica un pequeño delay defensivo (150ms por defecto) entre peticiones 
+        para prevenir rate-limiting (HTTP 429) cuando iteramos masivamente.
+        """
+        import time
+        offset = 0
+        while True:
+            filas = self.datastore_search(
+                resource_id=resource_id, 
+                filters=filters, 
+                limit=page_size, 
+                offset=offset
+            )
+            
+            if not filas:
+                return
+                
+            yield filas
+            
+            # Condicion de corte rigurosa: 
+            # Si nos devolvió menos registros que el límite que pedimos, 
+            # entonces obligatoriamente ya no hay más registros en las siguientes páginas.
+            # No dependemos de `include_total` que a veces es solo una estimación.
+            if len(filas) < page_size:
+                return
+                
+            offset += page_size
+            
+            # Rate limiting defensivo entre peticiones exitosas para proteger la API
+            time.sleep(delay_seconds)
+
+    # ─── METODOS SQL DEPRECADOS ──────────────────────────────────────────────
+
+    @retry(
+        retry=retry_if_exception_type(MefApiTransientError),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=10, min=10, max=90),
+        reraise=True,
+    )
     def datastore_search_sql(self, sql: str) -> list[dict[str, Any]]:
         """Ejecuta un SQL contra la API MEF y devuelve los registros.
 
