@@ -71,7 +71,10 @@ export const router = createBrowserRouter([
         children: [
           {
             index: true,
-            element: <div>Dashboard Interno — en construcción</div>
+            lazy: async () => {
+              const { default: Dashboard } = await import('../pages/interno/Dashboard');
+              return { Component: Dashboard };
+            }
           },
           {
             path: 'saldos',
