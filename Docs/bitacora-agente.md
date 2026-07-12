@@ -280,7 +280,7 @@
 - **Refactorización Retroactiva Centralizada:** **[NUEVO]** Se adaptó la importación de las funciones financieras hacia la librería centralizada `lib/formatters.ts` durante el commit atómico de refactorización posterior.
 
 ### Pendientes / deuda técnica
-- **BLOQUEADOR SIGA:** La verificación E2E final contra datos reales de producción sigue bloqueada. Esta tarea (y otras relacionadas como T-51) depende de restaurar el archivo `SIGA_300687.bak` que actualmente no se encuentra en `scripts/siga-backup/`. No se utilizará inyección de datos falsos de base de datos; la tarea queda pausada aquí hasta resolución externa.
+- **BLOQUEADOR SIGA:** La verificación E2E final contra datos reales de producción sigue bloqueada. El `.bak` se espera para el 2026-07-13. Ver sección **"Bloqueador SIGA — Estado y seguimiento"** al final de este documento para el checklist de re-verificación obligatorio post-llegada. No se considera esta tarea cerrada hasta completar dicho checklist.
 
 ### Verificación realizada
 - Unit tests robustos (`DirectorioProveedores.test.tsx`) corriendo en verde. Los tests incluyen aserciones rigurosas de renderizado de la tabla con los datos mockeados y de filtrado mediante debounce, superando problemas de fuga de estado del DOM (requirió implementar `afterEach(cleanup)` en JSDOM).
@@ -371,3 +371,29 @@ Se autorizó oficialmente mantener el universo íntegro real (73), invalidando e
 ### Commits
 - T-41: fix(frontend): deshabilitar animaciones en Recharts para determinismo en tests E2E con Playwright (`4112d4e`)
 - T-41: fix(frontend): arreglar wrapper hsl() inválido en Recharts y definir paleta categórica accesible (`5d0fb99`)
+
+## Bloqueador SIGA — Estado y seguimiento
+**Fecha de registro:** 2026-07-12
+**Fecha estimada de llegada del .bak:** 2026-07-13 (domingo)
+
+### Diagnóstico confirmado
+- **Base `SIGA_300687`:** No existe en la instancia SQL Server del contenedor Docker. Error confirmado empíricamente: `Cannot open database "SIGA_300687" requested by the login. The login failed. (4060)`.
+- **Driver ODBC 17:** ✅ Funciona correctamente **dentro del contenedor Docker** (`sicop_backend`). Se verificó con `pyodbc.connect(...)` hacia `master` exitosamente. El error previo `Can't open lib 'ODBC Driver 17 for SQL Server'` se produjo al correr el backend directamente en el host Linux (fuera de Docker), donde el driver no está instalado. **No hay segundo bloqueador.**
+
+### Ítems de seguimiento obligatorio (post-llegada del .bak)
+
+> ⚠️ Los mocks validan contrato y lógica de UI, pero NO reemplazan la verificación E2E real. Estas sub-tareas quedan explícitamente pendientes y no se disuelven.
+
+1. **T-43 · Re-verificación E2E con datos reales:**
+   - Restaurar `SIGA_300687.bak` en el contenedor `sicop_sqlserver_siga_dev`.
+   - Ejecutar `curl` contra `GET /api/v1/publico/proveedores` desde dentro de `sicop_backend` y confirmar respuesta 200 con datos reales.
+   - Verificar visualmente que la tabla del Directorio de Proveedores renderiza datos reales (no mocks) sin NaN, sin "ND" espurio, con paginación funcional.
+   - Captura de pantalla E2E literal como evidencia.
+
+2. **T-44 · Re-verificación E2E con datos reales:**
+   - Ejecutar `curl` contra `GET /api/v1/interno/dashboard` (requiere autenticación) y confirmar respuesta 200.
+   - Verificar que los widgets del dashboard renderizan datos reales con semáforos correctos, montos formateados, y alertas/pedidos coherentes.
+   - Captura de pantalla E2E literal como evidencia.
+
+3. **Smoke test general:**
+   - Confirmar que los endpoints públicos existentes (`/publico/obras/mapa`, `/publico/ejecucion/detalle`, `/publico/ejecucion/resumen`) siguen funcionando con datos reales desde el contenedor Docker.
