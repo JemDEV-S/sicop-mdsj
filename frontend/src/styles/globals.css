@@ -39,6 +39,15 @@
   --semaforo-ok: hsl(170 58% 41%);
   --semaforo-alerta: hsl(45 84% 63%);
   --semaforo-critico: hsl(4 70% 48%);
+
+  /* Paleta Categórica para Gráficos (5 Fuentes de Financiamiento SIAF).
+     Separados intencionalmente por saltos de luminosidad (L) para robustez 
+     ante daltonismo (protanopia/deuteranopia). */
+  --chart-1: var(--primary);                /* Azul Institucional (L: 43%) */
+  --chart-2: hsl(170 58% 55%);              /* Turquesa Medio (L: 55%) - Aclarado del secondary para alejarlo del 43% */
+  --chart-3: var(--accent);                 /* Amarillo Institucional (L: 63%) */
+  --chart-4: hsl(198 70% 25%);              /* Azul Marino (L: 25%) - Oscurecido del primary */
+  --chart-5: hsl(170 45% 75%);              /* Verde Agua Suave (L: 75%) */
 }
 
 .dark {
@@ -86,6 +95,11 @@
   --color-semaforo-ok: var(--semaforo-ok);
   --color-semaforo-alerta: var(--semaforo-alerta);
   --color-semaforo-critico: var(--semaforo-critico);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
