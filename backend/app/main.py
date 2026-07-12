@@ -28,6 +28,7 @@ from app.routers import (
     cruce,
     ejecucion_publico,
     exportar,
+    exportar_publico,
     health,
     obras,
     obras_documentos,
@@ -130,6 +131,7 @@ def create_app() -> FastAPI:
 
     # Exportacion Excel + PDF (HU-21)
     app.include_router(exportar.router, prefix=API_PREFIX)
+    app.include_router(exportar_publico.router, prefix=API_PREFIX)
 
     logger.info("app_ready", env=settings.APP_ENV, prefix=API_PREFIX)
     return app
