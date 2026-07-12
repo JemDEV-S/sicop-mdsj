@@ -428,3 +428,25 @@ Se autorizó oficialmente mantener el universo íntegro real (73), invalidando e
 
 3. **Smoke test general:**
    - Confirmar que los endpoints públicos existentes (`/publico/obras/mapa`, `/publico/ejecucion/detalle`, `/publico/ejecucion/resumen`) siguen funcionando con datos reales desde el contenedor Docker.
+
+## T-44: Correcciones E2E, Regresión RequireRole y Proxies
+**Fecha:** 2026-07-12
+**Estado:** completado
+
+### Decisiones tomadas
+- **Dockerización del Backend (`a4f8fff`):** Se integró el backend al `docker-compose.dev.yml` para aislarlo de las dependencias de ODBC del host (resolviendo el crasheo "Can't open lib 'ODBC Driver 17'"). Ahora `make backend-dev` (o `make dev`) levanta la API directamente en Linux Alpine con el driver correcto sin impactar el hot-reload.
+- **Implementación de Proxy de Vite (`c19b51f`):** Se corrigió la pérdida de la cookie `refresh_token` (`SameSite=Lax`) en Chromium. Al usar Vite Proxy (`server.proxy`), el frontend y el backend comparten el mismo puerto origen (`localhost:5173`), evitando bloqueos cross-origin en solicitudes POST y simplificando `VITE_API_URL`.
+- **Fijación de Tipo en RequireRole (`ceb3a66`):** Se descubrió que el guard de autenticación fallaba de forma cerrada porque esperaba `user.rol.codigo`, cuando el backend real (`/auth/me`) retornaba un string primitivo. Se alineó la interfaz `UserProfile`, el hook `useRole` y los componentes de interfaz para que consuman este string, rehabilitando la seguridad de rutas.
+- **Validación Literal E2E:** Se introdujo `useRole.test.ts` con mock estricto del shape Pydantic para evitar futuras desalineaciones de contrato, además de confirmar la limpieza de scripts obsoletos (como `app.scripts.seed_db` que fue reemplazado exitosamente por migraciones de Alembic en las revisiones 0002 y 0003).
+
+### Verificación
+- Unit tests (`RequireRole.test.tsx`, `useRole.test.ts`) pasando y confirmando la correcta extracción del Rol.
+- Logs Playwright de E2E reales validando acceso permitido en `/admin` y denegado en `/interno`.
+- Fetch real hacia `/api/v1/publico/obras` respondiendo HTTP 200 tras resolución del ODBC y Proxy.
+
+### Commits
+- `c19b51f` fix(proxy): add Vite proxy and fix apiClient to resolve cross-origin cookie loss
+- `ceb3a66` fix(auth): align UserProfile rol with backend schema to fix RequireRole
+- `a4f8fff` chore(dev): dockerize backend to resolve ODBC drivers and fix networking
+- `65f8f99` docs: update dev setup instructions to use dockerized backend
+- `8fbc850` test(auth): add unit test for useRole against Pydantic schema
