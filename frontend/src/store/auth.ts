@@ -6,10 +6,7 @@ export interface UserProfile {
   usuario: string;
   nombre_completo: string;
   email: string | null;
-  rol: {
-    codigo: string;
-    nombre: string;
-  };
+  rol: string;
 }
 
 interface AuthState {

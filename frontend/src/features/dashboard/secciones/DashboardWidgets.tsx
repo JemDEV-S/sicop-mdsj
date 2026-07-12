@@ -356,7 +356,7 @@ export default function DashboardWidgets() {
         </h1>
         {user?.rol && (
           <p className="text-sm text-slate-500 mt-1">
-            {user.rol.nombre}
+            {user.rol}
             {/* TODO: agregar user.area cuando el backend lo devuelva */}
           </p>
         )}
