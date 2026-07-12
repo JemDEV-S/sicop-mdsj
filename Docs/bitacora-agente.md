@@ -450,3 +450,12 @@ Se autorizó oficialmente mantener el universo íntegro real (73), invalidando e
 - `a4f8fff` chore(dev): dockerize backend to resolve ODBC drivers and fix networking
 - `65f8f99` docs: update dev setup instructions to use dockerized backend
 - `8fbc850` test(auth): add unit test for useRole against Pydantic schema
+
+## Bloqueador Detectado: Histórico 2025 MEF (T-12 / T-13)
+**Fecha:** 2026-07-12
+**Estado:** bloqueado (temporalmente mitigado)
+
+### Decisiones tomadas
+- **Identificación del Bloqueador:** Se descubrió que el pipeline de sincronización (`sync_siaf` y `sync_invierte`) está bloqueado de forma nativa. La API pública del MEF (`datastore_search`) en los `resource_id` documentados (`615644aa...` y `f9cc4ba0...`) solo exponen datos del año fiscal **2026**. El endpoint genérico de descubrimiento CKAN del MEF retorna 404, por lo que no fue posible ubicar programáticamente el UUID histórico de **2025** (limitación ya advertida en `actividad-1-exploracion-mef.md` §13).
+- **Mitigación con Datos Sintéticos:** Dado que el SIGA local del proyecto está anclado a 2025 (llaves `sec_func`), correr la sincronización de 2026 rompería el cruce SIAF-SIGA. Se acordó inyectar un volumen mínimo (10-20 filas) de datos puramente sintéticos para 2025.
+- **Implementación:** Se creó el script temporal `backend/scripts/dev_seed_sintetico_2025.py`. Todos los nombres de inversiones y metas llevan explícitamente el prefijo `[DEV-SEED]` para alertar visualmente al usuario en la UI y evitar confusiones con la sincronización real. Se descartó usar `seed_dev_mef_manual.py` ya que extrae data real de 2026 del MEF.
