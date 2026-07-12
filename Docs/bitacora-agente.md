@@ -5,8 +5,9 @@
 **Estado original:** completado (en sesión anterior)
 
 ### Correcciones del supervisor
-- **Corrección post-cierre (detectada durante desbloqueo de T-40, julio 2026):** La API del MEF cambió de comportamiento — `datastore_search_sql` con cláusulas `WHERE` devuelve HTTP 500, mientras que `SELECT 1` y `COUNT(*)` sin filtro siguen funcionando. `datastore_search` (filtros JSON) funciona correctamente. El job tal como está implementado en `mef_client.py` (que usa exclusivamente `datastore_search_sql`) no puede poblar la DB en este momento. **Pendiente:** reescribir `mef_client.py` para usar `datastore_search` en vez de `datastore_search_sql` con `WHERE`, o implementar fallback. Deuda técnica real, no cosmética — bloquea todo el pipeline SIAF/Invierte.
-- **Workaround temporal:** Se creó `backend/scripts/seed_dev_mef_manual.py` que usa `datastore_search` (filtros JSON) para poblar `siaf.inversiones` con datos reales del MEF como seed de desarrollo. No reemplaza la corrección del pipeline, solo desbloquea las tareas de frontend (T-38 verificación visual, T-40 mapa). *Nota de discrepancia:* El seed descargó 74 inversiones para San Jerónimo, de las cuales 73 tienen latitud/longitud. El Done-cuando de T-40 en el plan madre esperaba 58 con coordenadas. Esta discrepancia es real, producto de los datos actuales de la API, y se anota acá para resolverla conceptualmente al llegar a T-40 (no se forzó el número).
+- **Corrección post-cierre (detectada durante desbloqueo de T-40, julio 2026):** [RESUELTO] La API del MEF cambió de comportamiento — `datastore_search_sql` con cláusulas `WHERE` devuelve HTTP 500, mientras que `SELECT 1` y `COUNT(*)` sin filtro siguen funcionando. `datastore_search` (filtros JSON) funciona correctamente. Se implementó un generador paginado resiliente en `mef_client.py` y se refactorizaron los jobs de sincronización (commits `21f3db9` y `3c2a21c`). Se validó exitosamente poblando la DB con 9213 filas de ejecución presupuestal y 74 de inversiones, superando los timeouts.
+- **Workaround temporal:** Se creó `backend/scripts/seed_dev_mef_manual.py` que usa `datastore_search` (filtros JSON) para poblar `siaf.inversiones` con datos reales del MEF como seed de desarrollo. No reemplaza la corrección del pipeline, solo desbloquea las tareas de frontend (T-38 verificación visual, T-40 mapa). *Nota de discrepancia:* El seed descargó 74 inversiones para San Jerónimo, de las cuales 73 tienen latitud/longitud. El Done-cuando de T-40 en el plan madre esperaba 58 con coordenadas. Esta discrepancia es real, producto de los datos actuales de la API, y se anota acá para resolverla conceptualmente al llegar a T-40 (no se forzó el número). *Deuda pendiente:* El script aún conserva la lógica obsoleta de truncamiento por substring en Python; se debe limpiar ahora que las columnas soportan `String(150)` de forma nativa.
+- **Corrección de Calidad de Datos (StringDataRightTruncation) [NUEVO]:** Al ejecutar `sync_invierte.py` contra el dataset completo de producción con el nuevo paginador, el job falló repetidamente (ver logs de sincronización IDs 10, 11, 12, 13) por el mismo error de truncamiento `StringDataRightTruncation` que habíamos "parchado" superficialmente en el seed manual con un substring de Python. Se solucionó el problema de raíz en la base de datos: se generaron migraciones Alembic (`1707131a8a8b`, `36ad7695cdfb`) para expandir definitivamente las columnas `etapa_f8`, `des_tipologia`, `funcion`, `programa` de `String(50/80)` a `String(150)` en `siaf.inversiones`. Con esto, la ejecución final (ID 14) fue exitosa. (Commit `3c5ba41`).
 
 ## T-26 · Obras públicas (backend) — Corrección retroactiva
 
@@ -254,6 +255,9 @@
 - Test de rutas expandido para probar la inyección `lazy` de `/obras/:codigo`.
 - Comprobación manual del tamaño final del bundle, constatando que el archivo `index.js` permaneció ligero (~367 KB).
 
+### Correcciones del supervisor
+- **Deuda de Calidad de Datos (Null Island) [RESUELTO]:** Se detectó que el MEF envía coordenadas `(0.0, 0.0)` para obras sin ubicación real. El mini-mapa renderizaba un marcador engañoso en el océano. Se requirió corregir retroactivamente `UbicacionMapa.tsx` para descartar explícitamente estas coordenadas y mostrar el mensaje de fallback. Se añadió un test unitario en `UbicacionMapa.test.tsx` garantizando que los casos `null` y `(0,0)` están cubiertos y no volverán a renderizarse por error (`df0aa54`).
+
 ### Commits
 - T-39: tipos y capa de datos para ficha detallada (`a643d03`)
 - T-39: componentes de secciones de la ficha detallada, test de ocultamiento y Leaflet aislado (`e2dabfe`)
@@ -270,7 +274,7 @@
 - **Lazy Loading de Leaflet:** La página se montó de forma perezosa aislando exitosamente los 153KB del mapa en su propio chunk (`WrapperMapa-xxx.js`).
 
 ### Pendientes / deuda técnica
-- (Ninguna generada directamente).
+- **Deuda de Calidad de Datos (Null Island):** **[RESUELTO]** Se identificaron 9 registros con coordenadas exactamente `(0.0, 0.0)` provenientes del MEF. Se implementó un filtro resiliente en el mapa general (T-40) y se corrigió retroactivamente el mini-mapa de la ficha individual (T-39, `UbicacionMapa.tsx`) en un commit propio para usar la misma lógica restrictiva, previniendo que cualquier obra se dibuje en Null Island.
 
 ### Verificación realizada
 - Test unitario puro `utils.test.ts` pasando 4 asserts para las clases tailwind de semáforo.
@@ -283,3 +287,28 @@
   3. Inicialmente la prueba E2E arrojó 64 debido a un bug JS (`!obra.latitud`) que filtraba la latitud literalmente igual a `0` (descartando 9 inversiones de la iteración en React).
 Se autorizó oficialmente mantener el universo íntegro real (73), invalidando el número 58 original del plan madre como anómalo/desfasado.
 - **Interacciones Obligatorias:** Se exigió demostrar programáticamente mediante E2E que el tooltip (Popup) de Leaflet funciona y direcciona a `/obras/:codigo` antes de cerrar la tarea, probando su integración con `react-router-dom`.
+
+## T-41 · Dashboard Público de Ejecución Presupuestal
+**Fecha:** 2026-07-12
+**Estado:** completado
+
+### Decisiones tomadas
+- **El problema de renderizado SVG:** Los componentes `Bar` y `Pie` de Recharts fallaron al renderizarse visualmente porque utilizaban `fill="hsl(var(--primary))"`. La variable `--primary` ya estaba definida en el `:root` de `globals.css` como string completo (`hsl(198 52% 43%)`), lo que resultaba en un doble envoltorio inválido: `hsl(hsl(...))`. Se arregló usando `fill="var(--primary)"`.
+- **Paleta Categórica Accesible:** Para el gráfico de dona que requería 5 colores, se evitó hardcodear colores en el JSX y se extendió el sistema de diseño en `globals.css` añadiendo `--chart-1` a `--chart-5`. Se diseñó la luminosidad intencionalmente (25%, 43%, 55%, 63%, 75%) para robustecer el contraste ante daltonismos de tipo deuteranopia/protanopia.
+- **El problema de animaciones en Playwright:** Recharts inicializa barras y donas en tamaño 0 mediante animaciones (`requestAnimationFrame`). Playwright headless capturaba la pantalla antes de que los frames terminaran, resultando en gráficos vacíos. Se estableció `isAnimationActive={false}` en todos los gráficos, cumpliendo además con la regla de sobriedad institucional.
+
+### Pendientes / deuda técnica
+- **Limitación de Filtros en Backend (T-26/T-27):** Los endpoints del dashboard (`/resumen`, `/por-funcion`, etc.) actualmente solo aceptan el filtro `ano`. El mockup original (HU-05) requiere poder cruzar datos por función, fuente, categoría y mes simultáneamente. Se dejó documentado como decisión de alcance para esta iteración, pero HU-06 (Tabla Detallada) o T-42 necesitarán retomar esta capacidad cruzada.
+- **Dataset Histórico MEF:** El dataset semilla actual del MEF parece estar limitado a un solo año de ejecución (2026) por UUID de recurso. Para comparar ejecución histórica real (años anteriores), será necesario mapear y extraer los UUIDs de recursos históricos correspondientes en el pipeline ETL.
+
+### Verificación realizada
+- Test E2E automatizado (`verify_dashboard_e2e.py`) generó capturas visuales probando layout responsive y estados condicionales (Año 2025 sin datos -> "ND", ocultando gráficos).
+- Verificación de contraste de la paleta.
+
+### Correcciones del supervisor
+- **Testing E2E Determinista:** Se exigió demostrar programáticamente mediante E2E por qué las barras y porciones de dona no renderizaban en headless a pesar de que los `rect` y `path` existían. Esto derivó en el hallazgo de desactivar animaciones.
+- **Formato Documental:** Se exigió ajustar esta entrada al formato de 6 campos.
+
+### Commits
+- T-41: fix(frontend): deshabilitar animaciones en Recharts para determinismo en tests E2E con Playwright (`4112d4e`)
+- T-41: fix(frontend): arreglar wrapper hsl() inválido en Recharts y definir paleta categórica accesible (`5d0fb99`)
