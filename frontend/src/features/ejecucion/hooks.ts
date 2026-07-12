@@ -63,15 +63,31 @@ export function useEjecucionDetalle(params: EjecucionDetalleParams) {
 export function useExportarEjecucionPublico() {
   return {
     exportar: async (filtros: EjecucionDetalleParams) => {
+      let toastId: string | number = '';
       try {
-        const toastId = toast.loading('Generando reporte Excel...');
+        toastId = toast.loading('Generando reporte Excel...');
         // Filtramos paginación
         const { page, size, sort, ...soloFiltros } = filtros;
         await exportarEjecucionPublico(soloFiltros);
         toast.success('Reporte exportado exitosamente', { id: toastId });
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error exportando reporte', error);
-        toast.error('Ocurrió un error al exportar el reporte');
+        let mensaje = 'Ocurrió un error al exportar el reporte';
+        
+        // Axios con responseType='blob' devuelve el error 400 también como Blob.
+        if (error.response?.data instanceof Blob) {
+          try {
+            const text = await error.response.data.text();
+            const json = JSON.parse(text);
+            if (json.detail) mensaje = json.detail;
+          } catch (e) {
+            // Ignorar y usar genérico
+          }
+        } else if (error.response?.data?.detail) {
+          mensaje = error.response.data.detail;
+        }
+        
+        toast.error(mensaje, { id: toastId });
         throw error;
       }
     }
