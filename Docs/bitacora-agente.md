@@ -372,6 +372,33 @@ Se autorizó oficialmente mantener el universo íntegro real (73), invalidando e
 - T-41: fix(frontend): deshabilitar animaciones en Recharts para determinismo en tests E2E con Playwright (`4112d4e`)
 - T-41: fix(frontend): arreglar wrapper hsl() inválido en Recharts y definir paleta categórica accesible (`5d0fb99`)
 
+## T-44 · Dashboard interno de bienvenida (HU-22)
+**Fecha:** 2026-07-12
+**Estado:** implementación completa (frontend y unitarios), E2E pausado por bloqueo SIGA
+
+### Decisiones tomadas
+- **Contrato Inferido desde Mockup + Schemas:** Ante la ausencia de un schema Pydantic explícito para `GET /interno/dashboard`, el contrato TypeScript se infirió a partir del mockup textual de HU-22 (AC-22.1, AC-22.2, AC-22.3) y de los schemas existentes `pipeline.py` y `saldos.py`. El tipo `DashboardResponse` agrupa: `AlertasResumen`, `PipelineResumen`, `SaldosResumen` y `PedidoReciente[]`.
+- **Reutilización de Componentes y Formateadores:** Los widgets consumen directamente `parseMonto`, `formatearMoneda`, `formatPorcentaje` y `formatFecha` desde `lib/formatters.ts` (centralizado en la refactorización atómica previa), y el componente `Semaforo` (T-36) con `mapSemaforoApiToEstado` (T-38).
+- **Lazy Loading Consistente:** La ruta `/interno` (index) se carga con `lazy: () => import(...)` nativo de React Router, manteniendo el patrón de code-splitting establecido desde T-39. Chunk resultante: `Dashboard-*.js` (9.55 KB).
+- **Estados de UI Defensivos:** Se implementaron tres estados explícitos: Skeleton animado (carga), Alert con mensaje del error (fallo), y render completo (éxito). El widget de alertas muestra "Sin alertas pendientes" si todo es 0; la tabla muestra "No hay pedidos recientes" si la lista está vacía.
+
+### Pendientes / deuda técnica
+- **BLOQUEADOR SIGA:** La verificación E2E contra datos reales sigue bloqueada. El `.bak` se espera para el 2026-07-13. Ver sección **"Bloqueador SIGA — Estado y seguimiento"** para el checklist de re-verificación obligatorio. No se considera esta tarea cerrada hasta completar dicho checklist.
+- **Campo `area` del usuario:** El mockup HU-22 muestra "Sub. Obras Públicas" como área del funcionario, pero el `UserProfile` del store de auth no incluye un campo `area` — solo `rol.nombre`. Se dejó un `TODO` en el componente para cuando el backend lo devuelva.
+
+### Verificación realizada
+- 7 unit tests en `DashboardWidgets.test.tsx` corriendo en verde, cubriendo: skeletons durante carga, error display, render exitoso de los 3 widgets + tabla, prevención de NaN, estado vacío de alertas, estado vacío de pedidos, y formateo de fecha null.
+- 15 tests de `formatters.test.ts` en verde (regresión de la centralización).
+- 2 tests de `DirectorioProveedores.test.tsx` en verde (regresión T-43 tras fix de props TS).
+- Build estricto (`tsc -b && vite build`) exitoso sin errores de TypeScript.
+
+### Correcciones del supervisor
+- (Pendiente de revisión del supervisor)
+
+### Commits
+- T-44: feat(ui): Dashboard interno con widgets de alertas, pipeline, saldos y pedidos (HU-22) (`5509998`)
+- T-43: fix(ts): eliminar props inexistentes manualPagination/isLoading del DataTable (`88e18af`)
+
 ## Bloqueador SIGA — Estado y seguimiento
 **Fecha de registro:** 2026-07-12
 **Fecha estimada de llegada del .bak:** 2026-07-13 (domingo)
