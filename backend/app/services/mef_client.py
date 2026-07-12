@@ -94,10 +94,15 @@ class MefClient:
             raise MefApiError(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
         payload = resp.json()
-        if not payload.get("success"):
+        
+        # La API MEF a veces devuelve "sucess" en vez de "success"
+        is_success = payload.get("success") or payload.get("sucess")
+        if not is_success and str(is_success).lower() != "true":
             raise MefApiError(f"success=false: {payload.get('error')}")
         
-        records = payload.get("result", {}).get("records", [])
+        records = payload.get("records")
+        if records is None:
+            records = payload.get("result", {}).get("records", [])
         return records  # type: ignore[no-any-return]
 
     def paginar_json(

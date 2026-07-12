@@ -90,111 +90,72 @@ def _registrar_fin_error(conn: Connection, sync_id: int, mensaje: str) -> None:
     conn.commit()
 
 
-# ─── Lectura y merge por CODIGO_UNICO ────────────────────────────────────
+# ─── Lectura unificada ───────────────────────────────────────────────────
 
 def _leer_todo(client: MefClient) -> dict[str, dict[str, Any]]:
-    """Recorre los 7 SQL de Invierte.pe y consolida por CODIGO_UNICO."""
+    """Extrae datos de Invierte.pe usando paginacion JSON nativa."""
     resource = settings.MEF_RESOURCE_INVERSIONES
     consolidado: dict[str, dict[str, Any]] = {}
+    
+    filtros = {
+        "SEC_EJEC": str(settings.SEC_EJEC)
+    }
 
-    def merge(sql_generator, mapper):
-        for pagina in client.paginar_sql(sql_generator):
-            for r in pagina:
-                codigo = _str_o_none(r.get("CODIGO_UNICO"))
-                if not codigo:
-                    continue
-                consolidado.setdefault(codigo, {"codigo_unico": codigo}).update(
-                    mapper(r)
-                )
-
-    logger.info("Invierte: identificacion...")
-    merge(
-        sql_inversiones(resource),
-        lambda r: {
-            "nombre_inversion": _str_o_none(r.get("NOMBRE_INVERSION")),
-            "tipo_inversion": _str_o_none(r.get("TIPO_INVERSION")),
-            "marco": _str_o_none(r.get("MARCO")),
-            "estado": _str_o_none(r.get("ESTADO")),
-            "situacion": _str_o_none(r.get("SITUACION")),
-            "anio_proceso": _int_o_none(r.get("ANIO_PROCESO")),
-            "sec_ejec": _str_o_none(r.get("SEC_EJEC")),
-        },
-    )
-    logger.info("Invierte: avance...")
-    merge(
-        sql_inversiones_avance(resource),
-        lambda r: {
-            "avance_fisico": _num_o_none(r.get("AVANCE_FISICO")),
-            "avance_ejecucion": _num_o_none(r.get("AVANCE_EJECUCION")),
-            "tiene_avan_fisico": _si_no(r.get("TIENE_AVAN_FISICO")),
-            "pim_anio_actual": _num_o_none(r.get("PIM_ANIO_ACTUAL")),
-            "dev_anio_actual": _num_o_none(r.get("DEV_ANIO_ACTUAL")),
-            "deven_acumul_anio_ant": _num_o_none(r.get("DEVEN_ACUMUL_ANIO_ANT")),
-            "comprom_anual_anio_actual": _num_o_none(
-                r.get("COMPROM_ANUAL_ANIO_ACTUAL")
-            ),
-        },
-    )
-    logger.info("Invierte: costo...")
-    merge(
-        sql_inversiones_costo(resource),
-        lambda r: {
-            "certif_anio_actual": _num_o_none(r.get("CERTIF_ANIO_ACTUAL")),
-            "costo_actualizado": _num_o_none(r.get("COSTO_ACTUALIZADO")),
-            "monto_viable": _num_o_none(r.get("MONTO_VIABLE")),
-            "saldo_ejecutar": _num_o_none(r.get("SALDO_EJECUTAR")),
-            "tiene_f8": _si_no(r.get("TIENE_F8")),
-            "etapa_f8": _str_o_none(r.get("ETAPA_F8")),
-            "tiene_f9": _si_no(r.get("TIENE_F9")),
-        },
-    )
-    logger.info("Invierte: etapa...")
-    merge(
-        sql_inversiones_etapa(resource),
-        lambda r: {
-            "tiene_f12b": _si_no(r.get("TIENE_F12B")),
-            "informe_cierre": _si_no(r.get("INFORME_CIERRE")),
-            "expediente_tecnico": _si_no(r.get("EXPEDIENTE_TECNICO")),
-            "des_modalidad": _str_o_none(r.get("DES_MODALIDAD")),
-            "des_tipologia": _str_o_none(r.get("DES_TIPOLOGIA")),
-            "funcion": _str_o_none(r.get("FUNCION")),
-            "programa": _str_o_none(r.get("PROGRAMA")),
-        },
-    )
-    logger.info("Invierte: cronograma...")
-    merge(
-        sql_inversiones_cronograma(resource),
-        lambda r: {
-            "fec_ini_ejecucion": _fecha(r.get("FEC_INI_EJECUCION")),
-            "fec_fin_ejecucion": _fecha(r.get("FEC_FIN_EJECUCION")),
-            "fec_ini_ejec_fisica": _fecha(r.get("FEC_INI_EJEC_FISICA")),
-            "fec_fin_ejec_fisica": _fecha(r.get("FEC_FIN_EJEC_FISICA")),
-            "fecha_viabilidad": _fecha(r.get("FECHA_VIABILIDAD")),
-            "primer_devengado": _fecha(r.get("PRIMER_DEVENGADO")),
-            "ultimo_devengado": _fecha(r.get("ULTIMO_DEVENGADO")),
-        },
-    )
-    logger.info("Invierte: geo...")
-    merge(
-        sql_inversiones_geo(resource),
-        lambda r: {
-            "latitud": _num_o_none(r.get("LATITUD")),
-            "longitud": _num_o_none(r.get("LONGITUD")),
-            "ubigeo": _str_o_none(r.get("UBIGEO")),
-            "departamento": _str_o_none(r.get("DEPARTAMENTO")),
-            "provincia": _str_o_none(r.get("PROVINCIA")),
-            "distrito": _str_o_none(r.get("DISTRITO")),
-            "nombre_uei": _str_o_none(r.get("NOMBRE_UEI")),
-        },
-    )
-    logger.info("Invierte: unidades...")
-    merge(
-        sql_inversiones_unidades(resource),
-        lambda r: {
-            "nombre_uf": _str_o_none(r.get("NOMBRE_UF")),
-            "nombre_opmi": _str_o_none(r.get("NOMBRE_OPMI")),
-        },
-    )
+    logger.info("Leyendo registros Invierte.pe (paginado)...")
+    for pagina in client.paginar_json(resource, filtros, page_size=200):
+        for r in pagina:
+            codigo = _str_o_none(r.get("CODIGO_UNICO"))
+            if not codigo:
+                continue
+                
+            consolidado[codigo] = {
+                "codigo_unico": codigo,
+                "nombre_inversion": _str_o_none(r.get("NOMBRE_INVERSION")),
+                "tipo_inversion": _str_o_none(r.get("TIPO_INVERSION")),
+                "marco": _str_o_none(r.get("MARCO")),
+                "estado": _str_o_none(r.get("ESTADO")),
+                "situacion": _str_o_none(r.get("SITUACION")),
+                "anio_proceso": _int_o_none(r.get("ANIO_PROCESO")),
+                "sec_ejec": _str_o_none(r.get("SEC_EJEC")),
+                "avance_fisico": _num_o_none(r.get("AVANCE_FISICO")),
+                "avance_ejecucion": _num_o_none(r.get("AVANCE_EJECUCION")),
+                "tiene_avan_fisico": _si_no(r.get("TIENE_AVAN_FISICO")),
+                "pim_anio_actual": _num_o_none(r.get("PIM_ANIO_ACTUAL")),
+                "dev_anio_actual": _num_o_none(r.get("DEV_ANIO_ACTUAL")),
+                "deven_acumul_anio_ant": _num_o_none(r.get("DEVEN_ACUMUL_ANIO_ANT")),
+                "comprom_anual_anio_actual": _num_o_none(r.get("COMPROM_ANUAL_ANIO_ACTUAL")),
+                "certif_anio_actual": _num_o_none(r.get("CERTIF_ANIO_ACTUAL")),
+                "costo_actualizado": _num_o_none(r.get("COSTO_ACTUALIZADO")),
+                "monto_viable": _num_o_none(r.get("MONTO_VIABLE")),
+                "saldo_ejecutar": _num_o_none(r.get("SALDO_EJECUTAR")),
+                "tiene_f8": _si_no(r.get("TIENE_F8")),
+                "etapa_f8": _str_o_none(r.get("ETAPA_F8")),
+                "tiene_f9": _si_no(r.get("TIENE_F9")),
+                "tiene_f12b": _si_no(r.get("TIENE_F12B")),
+                "informe_cierre": _si_no(r.get("INFORME_CIERRE")),
+                "expediente_tecnico": _si_no(r.get("EXPEDIENTE_TECNICO")),
+                "des_modalidad": _str_o_none(r.get("DES_MODALIDAD")),
+                "des_tipologia": _str_o_none(r.get("DES_TIPOLOGIA")),
+                "funcion": _str_o_none(r.get("FUNCION")),
+                "programa": _str_o_none(r.get("PROGRAMA")),
+                "fec_ini_ejecucion": _fecha(r.get("FEC_INI_EJECUCION")),
+                "fec_fin_ejecucion": _fecha(r.get("FEC_FIN_EJECUCION")),
+                "fec_ini_ejec_fisica": _fecha(r.get("FEC_INI_EJEC_FISICA")),
+                "fec_fin_ejec_fisica": _fecha(r.get("FEC_FIN_EJEC_FISICA")),
+                "fecha_viabilidad": _fecha(r.get("FECHA_VIABILIDAD")),
+                "primer_devengado": _fecha(r.get("PRIMER_DEVENGADO")),
+                "ultimo_devengado": _fecha(r.get("ULTIMO_DEVENGADO")),
+                "latitud": _num_o_none(r.get("LATITUD")),
+                "longitud": _num_o_none(r.get("LONGITUD")),
+                "ubigeo": _str_o_none(r.get("UBIGEO")),
+                "departamento": _str_o_none(r.get("DEPARTAMENTO")),
+                "provincia": _str_o_none(r.get("PROVINCIA")),
+                "distrito": _str_o_none(r.get("DISTRITO")),
+                "nombre_uei": _str_o_none(r.get("NOMBRE_UEI")),
+                "nombre_uf": _str_o_none(r.get("NOMBRE_UF")),
+                "nombre_opmi": _str_o_none(r.get("NOMBRE_OPMI")),
+            }
+            
     return consolidado
 
 
@@ -285,26 +246,28 @@ def _fecha(v: Any) -> date | None:
 
 def sync_invierte() -> ResultadoSyncInvierte:
     session = SessionLocal()
-    conn = session.connection()
-    sync_id = _registrar_inicio(conn)
+    sync_id = _registrar_inicio(session.connection())
 
     try:
         with MefClient() as client:
             consolidado = _leer_todo(client)
         filas = list(consolidado.values())
-        logger.info("Invierte consolidado: %d inversiones", len(filas))
 
-        conn.begin()
-        _swap(conn, filas)
-        conn.commit()
+        engine = session.get_bind()
+        with engine.begin() as conn:
+            _swap(conn, filas)
 
-        _registrar_fin_exito(conn, sync_id, len(filas))
+        with engine.begin() as conn:
+            _registrar_fin_exito(conn, sync_id, len(filas))
+            
+        logger.info("sync_invierte OK: %d proyectos procesados", len(filas))
         return ResultadoSyncInvierte(inversiones=len(filas))
 
     except Exception as exc:
-        conn.rollback()
-        mensaje = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-        _registrar_fin_error(conn, sync_id, mensaje)
+        engine = session.get_bind()
+        with engine.begin() as conn:
+            mensaje = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            _registrar_fin_error(conn, sync_id, mensaje)
         logger.exception("sync_invierte FALLO")
         raise
     finally:

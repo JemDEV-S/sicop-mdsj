@@ -95,87 +95,57 @@ def _registrar_fin_error(conn: Connection, sync_id: int, mensaje: str) -> None:
     conn.commit()
 
 
-# ─── Lectura de la API MEF ────────────────────────────────────────────────
-
-def _leer_maestros_por_sec_func(
-    client: MefClient, ano: int
-) -> dict[int, dict[str, Any]]:
-    """Devuelve dict indexado por sec_func con identificacion + clasificadores.
-
-    Todos los MES_EJE > 0 comparten el mismo maestro (funcion, meta, etc.); lo
-    leemos una vez desde MES_EJE=0.
-    """
-    maestros: dict[int, dict[str, Any]] = {}
+def _leer_registros(
+    client: MefClient, ano: int, mes_top: int
+) -> list[dict[str, Any]]:
+    """Extrae todos los registros del anio desde datastore_search y filtra por mes."""
     resource = settings.MEF_RESOURCE_EJECUCION
-
-    logger.info("Leyendo identificacion (MES_EJE=0)...")
-    for pagina in client.paginar_sql(sql_ejecucion_identificacion(resource, ano)):
+    filas: list[dict[str, Any]] = []
+    
+    filtros = {
+        "SEC_EJEC": str(settings.SEC_EJEC),
+        "ANO_EJE": str(ano)
+    }
+    
+    for pagina in client.paginar_json(resource, filtros, page_size=200):
+        logger.info(f"Pagina obtenida, len={len(pagina)}")
+        if pagina:
+            logger.info(f"Primera fila: {pagina[0]}")
         for r in pagina:
             sf = _int_o_none(r.get("SEC_FUNC"))
-            if sf is None:
+            mes_eje = _int_o_none(r.get("MES_EJE"))
+            if sf is None or mes_eje is None:
                 continue
-            maestros.setdefault(sf, {}).update(
+                
+            # Filtrar localmente los meses que no nos interesan
+            if mes_eje > mes_top:
+                continue
+                
+            filas.append(
                 {
+                    "sec_func": sf,
+                    "mes_eje": mes_eje,
                     "producto_proyecto": _str_o_none(r.get("PRODUCTO_PROYECTO")),
-                    "producto_proyecto_nombre": _str_o_none(
-                        r.get("PRODUCTO_PROYECTO_NOMBRE")
-                    ),
+                    "producto_proyecto_nombre": _str_o_none(r.get("PRODUCTO_PROYECTO_NOMBRE")),
                     "tipo_act_proy": _str_o_none(r.get("TIPO_ACT_PROY")),
                     "meta": _str_o_none(r.get("META")),
                     "meta_nombre": _str_o_none(r.get("META_NOMBRE")),
                     "funcion": _str_o_none(r.get("FUNCION")),
                     "funcion_nombre": _str_o_none(r.get("FUNCION_NOMBRE")),
-                }
-            )
-
-    logger.info("Leyendo clasificadores (MES_EJE=0)...")
-    for pagina in client.paginar_sql(sql_ejecucion_clasificadores(resource, ano)):
-        for r in pagina:
-            sf = _int_o_none(r.get("SEC_FUNC"))
-            if sf is None:
-                continue
-            maestros.setdefault(sf, {}).update(
-                {
                     "programa_ppto": _str_o_none(r.get("PROGRAMA_PPTO")),
                     "programa_ppto_nombre": _str_o_none(r.get("PROGRAMA_PPTO_NOMBRE")),
                     "generica": _str_o_none(r.get("GENERICA")),
                     "generica_nombre": _str_o_none(r.get("GENERICA_NOMBRE")),
-                    "fuente_financiamiento": _str_o_none(
-                        r.get("FUENTE_FINANCIAMIENTO")
-                    ),
-                    "fuente_financiamiento_nombre": _str_o_none(
-                        r.get("FUENTE_FINANCIAMIENTO_NOMBRE")
-                    ),
+                    "fuente_financiamiento": _str_o_none(r.get("FUENTE_FINANCIAMIENTO")),
+                    "fuente_financiamiento_nombre": _str_o_none(r.get("FUENTE_FINANCIAMIENTO_NOMBRE")),
                     "rubro": _str_o_none(r.get("RUBRO")),
-                }
-            )
-    return maestros
-
-
-def _leer_montos_por_mes(
-    client: MefClient, ano: int, mes: int
-) -> list[dict[str, Any]]:
-    resource = settings.MEF_RESOURCE_EJECUCION
-    filas: list[dict[str, Any]] = []
-    for pagina in client.paginar_sql(sql_ejecucion_por_mes(resource, ano, mes)):
-        for r in pagina:
-            sf = _int_o_none(r.get("SEC_FUNC"))
-            if sf is None:
-                continue
-            filas.append(
-                {
-                    "sec_func": sf,
-                    "mes_eje": mes,
                     "monto_pia": _num(r.get("MONTO_PIA")),
                     "monto_pim": _num(r.get("MONTO_PIM")),
                     "monto_certificado": _num(r.get("MONTO_CERTIFICADO")),
-                    "monto_comprometido_anual": _num(
-                        r.get("MONTO_COMPROMETIDO_ANUAL")
-                    ),
+                    "monto_comprometido_anual": _num(r.get("MONTO_COMPROMETIDO_ANUAL")),
                     "monto_devengado": _num(r.get("MONTO_DEVENGADO")),
                     "monto_girado": _num(r.get("MONTO_GIRADO")),
-                    # monto_comprometido no viene en la API — dejamos 0.
-                    "monto_comprometido": 0.0,
+                    "monto_comprometido": _num(r.get("MONTO_COMPROMETIDO")),
                 }
             )
     return filas
@@ -332,49 +302,26 @@ def sync_siaf(
     mes_top = mes_hasta if mes_hasta is not None else _mes_actual_defecto(ano_ejec)
 
     session = SessionLocal()
-    conn = session.connection()
-    sync_id = _registrar_inicio(conn, ano_ejec)
+    sync_id = _registrar_inicio(session.connection(), ano_ejec)
 
     try:
-        # 1) Leer maestros y montos de la API
+        # 1) Leer montos de la API via datastore_search
         with MefClient() as client:
-            maestros = _leer_maestros_por_sec_func(client, ano_ejec)
-            logger.info("Maestros SIAF: %d sec_func", len(maestros))
+            logger.info("Leyendo registros SIAF Ejecucion (paginado)...")
+            filas = _leer_registros(client, ano_ejec, mes_top)
+            logger.info("Extraidos %d registros totales", len(filas))
 
-            filas: list[dict[str, Any]] = []
-            for mes in range(0, mes_top + 1):
-                logger.info("Leyendo montos MES_EJE=%d...", mes)
-                filas_mes = _leer_montos_por_mes(client, ano_ejec, mes)
-                # Enriquecer con maestros
-                for fila in filas_mes:
-                    m = maestros.get(fila["sec_func"], {})
-                    for k in (
-                        "producto_proyecto",
-                        "producto_proyecto_nombre",
-                        "tipo_act_proy",
-                        "meta",
-                        "meta_nombre",
-                        "funcion",
-                        "funcion_nombre",
-                        "programa_ppto",
-                        "programa_ppto_nombre",
-                        "generica",
-                        "generica_nombre",
-                        "fuente_financiamiento",
-                        "fuente_financiamiento_nombre",
-                        "rubro",
-                    ):
-                        fila.setdefault(k, m.get(k))
-                filas.extend(filas_mes)
+        # 2) Swap atomico con context manager para correcta manipulacion de TX
+        engine = session.get_bind()
+        with engine.begin() as conn:
+            _crear_staging(conn)
+            _insertar_staging(conn, filas)
+            _swap_atomico(conn, ano_ejec)
 
-        # 2) Swap atomico
-        conn.begin()
-        _crear_staging(conn)
-        _insertar_staging(conn, filas)
-        _swap_atomico(conn, ano_ejec)
-        conn.commit()
-
-        _registrar_fin_exito(conn, sync_id, len(filas))
+        # 3) Registrar exito
+        with engine.begin() as conn:
+            _registrar_fin_exito(conn, sync_id, len(filas))
+            
         logger.info(
             "sync_siaf OK: ano=%d meses=0..%d registros=%d",
             ano_ejec, mes_top, len(filas),
@@ -382,9 +329,10 @@ def sync_siaf(
         return ResultadoSyncSiaf(ano=ano_ejec, meses=mes_top + 1, registros=len(filas))
 
     except Exception as exc:
-        conn.rollback()
-        mensaje = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
-        _registrar_fin_error(conn, sync_id, mensaje)
+        engine = session.get_bind()
+        with engine.begin() as conn:
+            mensaje = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
+            _registrar_fin_error(conn, sync_id, mensaje)
         logger.exception("sync_siaf FALLO")
         raise
     finally:
