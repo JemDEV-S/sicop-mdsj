@@ -56,10 +56,10 @@ sicop-mdsj/
 ## Cómo arrancar (dev)
 
 ```bash
-# 1. Levantar PostgreSQL y Redis
+# 1. Levantar PostgreSQL, Redis y SQL Server local (SIGA mock)
 make dev-infra
 
-# 2. Backend
+# 2. Levantar el Backend (en Docker, con ODBC drivers y hot-reload habilitado)
 make backend-dev
 
 # 3. Frontend
