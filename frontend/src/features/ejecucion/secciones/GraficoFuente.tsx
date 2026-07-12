@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { type EjecucionPorFuente } from '../types';
-import { parseMonto, calcularPorcentaje, formatearMoneda } from '../utils';
+import { parseMonto, calcularPorcentaje, formatearMoneda } from '../../../lib/formatters';
 
 interface GraficoFuenteProps {
   data?: EjecucionPorFuente[];

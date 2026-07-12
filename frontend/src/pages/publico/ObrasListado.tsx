@@ -5,7 +5,7 @@ import { useObras, useFunciones, useTipologias } from '../../features/obras/hook
 import type { ObraCardResponse } from '../../features/obras/types';
 import { mapSemaforoApiToEstado } from '../../features/obras/api';
 import Semaforo from '../../components/Semaforo';
-import { formatSoles } from '../../lib/formatters';
+import { formatearMoneda } from '../../lib/formatters';
 
 export default function ObrasListado() {
   const [q, setQ] = useState('');
@@ -55,7 +55,7 @@ export default function ObrasListado() {
       header: 'Presupuesto (PIM)',
       cell: ({ row }) => (
         <span className="font-medium text-gray-900">
-          {formatSoles(row.getValue('pim_anio_actual') as number || 0)}
+          {formatearMoneda(row.getValue('pim_anio_actual') as number || 0)}
         </span>
       ),
     },

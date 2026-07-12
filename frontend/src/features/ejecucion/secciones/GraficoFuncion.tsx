@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { type EjecucionPorFuncion } from '../types';
-import { parseMonto, calcularPorcentaje, formatearMoneda } from '../utils';
+import { parseMonto, calcularPorcentaje, formatearMoneda } from '../../../lib/formatters';
 
 interface GraficoFuncionProps {
   data?: EjecucionPorFuncion[];

@@ -1,6 +1,6 @@
 import { type ColumnDef } from '@tanstack/react-table';
 import { Badge } from '../../../components/ui/badge';
-import { parseMonto, formatearMoneda } from '../../ejecucion/utils';
+import { parseMonto, formatearMoneda } from '../../../lib/formatters';
 import type { ProveedorPublicoItem } from '../types';
 
 export const columnasProveedoresPublico: ColumnDef<ProveedorPublicoItem>[] = [

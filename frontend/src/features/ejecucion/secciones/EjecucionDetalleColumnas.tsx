@@ -2,7 +2,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import type { EjecucionDetalleItem } from '../types';
 import Semaforo from '../../../components/Semaforo';
 import { calcularSemaforo } from '../../../lib/semaforo';
-import { parseMonto, formatearMoneda } from '../utils';
+import { parseMonto, formatearMoneda } from '../../../lib/formatters';
 
 export const ejecucionDetalleColumnas: ColumnDef<EjecucionDetalleItem>[] = [
   {

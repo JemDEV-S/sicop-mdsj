@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { type EjecucionMensual } from '../types';
-import { parseMonto, formatearMoneda } from '../utils';
+import { parseMonto, formatearMoneda } from '../../../lib/formatters';
 
 interface GraficoMensualProps {
   data?: EjecucionMensual[];

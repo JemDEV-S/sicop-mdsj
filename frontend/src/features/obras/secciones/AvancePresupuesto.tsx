@@ -1,5 +1,5 @@
 import type { ObraDetalleResponse } from '../types';
-import { formatSoles } from '../../../lib/formatters';
+import { formatearMoneda } from '../../../lib/formatters';
 import Semaforo from '../../../components/Semaforo';
 import { mapSemaforoApiToEstado } from '../api';
 
@@ -36,19 +36,19 @@ export function AvancePresupuesto({ obra }: { obra: ObraDetalleResponse }) {
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-gray-600">PIA</span>
-            <span className="font-medium text-gray-900">{formatSoles(obra.montos_ejecucion.pia)}</span>
+            <span className="font-medium text-gray-900">{formatearMoneda(obra.montos_ejecucion.pia)}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center pb-2 border-b">
             <span className="text-gray-600">PIM</span>
-            <span className="font-medium text-gray-900">{formatSoles(obra.montos_ejecucion.pim)}</span>
+            <span className="font-medium text-gray-900">{formatearMoneda(obra.montos_ejecucion.pim)}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center pb-2 border-b">
             <span className="text-gray-600">Certificado</span>
-            <span className="font-medium text-gray-900">{formatSoles(obra.montos_ejecucion.certificado)}</span>
+            <span className="font-medium text-gray-900">{formatearMoneda(obra.montos_ejecucion.certificado)}</span>
           </div>
-          <div className="flex justify-between">
+          <div className="flex justify-between items-center">
             <span className="text-gray-600">Devengado</span>
-            <span className="font-medium text-gray-900">{formatSoles(obra.montos_ejecucion.devengado)}</span>
+            <span className="font-medium text-gray-900">{formatearMoneda(obra.montos_ejecucion.devengado)}</span>
           </div>
         </div>
       </div>
