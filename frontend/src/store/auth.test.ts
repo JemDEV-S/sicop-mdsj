@@ -1,3 +1,6 @@
+/**
+ * @vitest-environment jsdom
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { useAuthStore } from './auth';
 import { apiClient, getAccessToken } from '../lib/api-client';

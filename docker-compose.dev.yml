@@ -62,6 +62,15 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # ─── Adminer (Gestor de BD por navegador web) ───────────────────
+  # Accede en tu navegador a http://localhost:8080
+  adminer:
+    image: adminer:latest
+    container_name: sicop_adminer_dev
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     name: sicop_postgres_data

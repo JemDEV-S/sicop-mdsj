@@ -5,11 +5,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useObras } from './hooks';
-import { apiClient } from '../../lib/query-client';
+import { apiClient } from '../../lib/api-client';
 
 // Mockeamos el apiClient base
-vi.mock('../../lib/query-client', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../lib/query-client')>();
+vi.mock('../../lib/api-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/api-client')>();
   return {
     ...actual,
     apiClient: {
@@ -81,6 +81,8 @@ describe('useObras hook', () => {
 
     // Verificamos que el hook no explotó y propagó los datos intactos (incluyendo "desconocido")
     expect(result.current.data).toBeDefined();
-    expect(result.current.data?.items[0].semaforo).toBe('desconocido');
+    const data = result.current.data;
+    if (!data) throw new Error('Data is undefined');
+    expect(data.items[0]?.semaforo).toBe('desconocido');
   });
 });

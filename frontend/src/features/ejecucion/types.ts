@@ -36,7 +36,7 @@ export interface EjecucionMensual {
 export interface EjecucionDetalleItem {
   funcion_codigo: string;
   funcion_nombre: string;
-  sec_func: string;
+  sec_func: number;
   meta_codigo: string;
   meta_nombre: string;
   producto_proyecto: string;

@@ -31,6 +31,8 @@ interface DataTableProps<TData, TValue> {
     pageSize: number;
   };
   onPaginationChange?: (updater: any) => void;
+  manualPagination?: boolean;
+  isLoading?: boolean;
 }
 
 export function DataTable<TData, TValue>({
@@ -39,8 +41,11 @@ export function DataTable<TData, TValue>({
   pageCount,
   pagination,
   onPaginationChange,
+  manualPagination,
+  isLoading,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [internalPagination, setInternalPagination] = useState({ pageIndex: 0, pageSize: 10 });
 
   const table = useReactTable({
     data,
@@ -49,12 +54,12 @@ export function DataTable<TData, TValue>({
     getPaginationRowModel: getPaginationRowModel(),
     onSortingChange: setSorting,
     getSortedRowModel: getSortedRowModel(),
-    manualPagination: pageCount !== undefined,
+    manualPagination: manualPagination ?? (pageCount !== undefined),
     pageCount,
-    onPaginationChange,
+    onPaginationChange: onPaginationChange ?? setInternalPagination,
     state: {
       sorting,
-      ...(pagination ? { pagination } : {}),
+      pagination: pagination ?? internalPagination,
     },
   });
 
@@ -94,6 +99,12 @@ export function DataTable<TData, TValue>({
                   ))}
                 </TableRow>
               ))
+            ) : isLoading ? (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="h-24 text-center text-gray-500">
+                  Cargando...
+                </TableCell>
+              </TableRow>
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center text-gray-500">

@@ -1,0 +1,27 @@
+Iniciando Vite dev server...
+1. Probando Desktop con datos reales...
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/resumen?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/por-funcion?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/por-fuente?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/mensual?ano=2026
+Esperando a que los KPIs terminen de cargar (conectando al backend real)...
+Botón Tabla Detallada -> disabled: True, title: Próximamente
+Captura Desktop: dashboard_desktop.png
+Cambiando año en el selector a 2025...
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/resumen?ano=2025
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/por-funcion?ano=2025
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/por-fuente?ano=2025
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/mensual?ano=2025
+Respuestas capturadas tras cambiar a 2025:
+ - http://127.0.0.1:8000/api/v1/publico/ejecucion/mensual?ano=2025 -> 200 | Body: []
+ - http://127.0.0.1:8000/api/v1/publico/ejecucion/por-funcion?ano=2025 -> 200 | Body: []
+ - http://127.0.0.1:8000/api/v1/publico/ejecucion/por-fuente?ano=2025 -> 200 | Body: []
+ - http://127.0.0.1:8000/api/v1/publico/ejecucion/resumen?ano=2025 -> 200 | Body: {'pia': '0', 'pim': '0', 'certificado': '0', 'comprometido_anual': '0', 'devengado': '0', 'girado': '0', 'metas': 0, 'porcentaje_ejecucion': None}
+Captura 2025 Vacío: dashboard_2025.png
+
+2. Probando Mobile (Responsive)...
+Captura Mobile: dashboard_mobile.png
+
+3. Probando caso sintético de NULLs (Mocking de API)...
+Captura Mock Nulls: dashboard_nulls.png
+Cerrando Vite dev server...

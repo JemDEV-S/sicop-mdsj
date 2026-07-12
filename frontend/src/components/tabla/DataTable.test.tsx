@@ -2,8 +2,11 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { afterEach } from 'vitest';
 import { DataTable } from './DataTable';
+
+afterEach(cleanup);
 
 describe('DataTable', () => {
   const columns = [
@@ -27,7 +30,7 @@ describe('DataTable', () => {
     const nextButton = screen.getByRole('button', { name: /Siguiente/i });
     fireEvent.click(nextButton);
 
-    expect(screen.getAllByText('Item 11')[0]).toBeDefined();
+    expect(screen.getByText('Item 11')).toBeDefined();
     expect(screen.getByText(/Página 2 de 3/)).toBeDefined();
   });
 
@@ -46,7 +49,7 @@ describe('DataTable', () => {
     );
     
     // Muestra los elementos
-    expect(screen.getAllByText('Item 1')[0]).toBeDefined();
+    expect(screen.getByText('Item 1')).toBeDefined();
 
     // Comprueba paginación delegada
     expect(screen.getByText(/Página 1 de 5/)).toBeDefined();
@@ -56,5 +59,9 @@ describe('DataTable', () => {
     fireEvent.click(nextButton);
 
     expect(onPaginationChange).toHaveBeenCalled();
+  });
+  it('renderiza el estado de carga (Cargando...) cuando isLoading es true', () => {
+    render(<DataTable columns={columns} data={[]} isLoading={true} />);
+    expect(screen.getByText('Cargando...')).toBeDefined();
   });
 });

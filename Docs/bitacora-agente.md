@@ -19,6 +19,7 @@
 **Estado:** completado
 
 ### Decisiones tomadas
+- **Fix retroactivo de mock de concurrencia (api-client):** Se corrigió la configuración del test de concurrencia de `api-client.test.ts`. El adaptador `axios-mock-adapter` fallaba devolviendo `404` porque emparejaba strings estrictos y no toleraba que Axios antepusiera el `baseURL`. Se cambió a expresiones regulares (`/\/protegido/`), comprobando exitosamente que la lógica de seguridad y el candado de `refreshPromise` siempre estuvieron intactos.
 - **Almacenamiento del token en memoria** — Se optó por usar una variable en memoria (`let accessToken`) en lugar de `localStorage` para mitigar vulnerabilidades XSS de libro de texto. Sugerido por el supervisor.
 - **Lock de Concurrencia (refreshPromise)** — Se implementó un lock basado en promesas para evitar que múltiples requests concurrentes que devuelven `401` disparen múltiples llamadas de refresh simultáneas. Sugerido por el supervisor.
 - **Traducción de Errores Pydantic** — Se desarrolló un mapeo manual para traducir los errores técnicos de Pydantic al español llano, manteniendo el tono institucional. *Aclaración:* El diccionario usado (`field required`, `string too short`, etc.) asume los mensajes por defecto de Pydantic v2 genéricos y no está validado contra un esquema custom de FastAPI de T-08 (ya que T-08 aún no se ha examinado). Se validará su estructura final posteriormente. Propuesto por el agente, refinado por el supervisor.
@@ -54,6 +55,7 @@
 **Estado:** completado
 
 ### Decisiones tomadas
+- **Fix retroactivo de entorno de testing (JSDOM):** Se inyectó el pragma `/** @vitest-environment jsdom */` en `RequireAuth.test.tsx`, `RequireRole.test.tsx`, `router.test.tsx` y `auth.test.ts`. Estos tests de UI/DOM habían sido creados sin el entorno configurado (el proyecto nunca tuvo un default global en `vite.config.ts`), por lo que fallaban en un entorno Node puro cuando se corría la suite completa. Ya quedaron normalizados y en verde.
 - **Nomenclatura y Rutas:** Se mantuvo `InternoLayout.tsx` y `RequireAuth.tsx`, y se mapeó el panel a `/interno/*` (resolviendo la inconsistencia original del Done-Cuando que decía `/panel/*`).
 - **Separación Público vs Interno:** `/` no redirige forzosamente a `/login`. Utiliza un `PublicLayout` abierto, resguardando así el propósito fundamental del portal ciudadano.
 - **Manejo de Rehidratación (F5):** `useAuth` retorna `{ isAuthenticated, isLoading }`. Mientras `isLoading` es `true`, `RequireAuth` muestra "Cargando..." y no evalúa redirecciones, evitando expulsiones falsas en refrescos de página.
@@ -154,6 +156,7 @@
 **Estado:** completado
 
 ### Decisiones tomadas
+- **Fix retroactivo de tipado (DataTable):** En la revisión de T-44, se oficializó el tipado de `manualPagination?: boolean` y `isLoading?: boolean` en la interfaz `DataTableProps` de `DataTable.tsx`, eliminando la dependencia de inferencias implícitas y dotando al componente de un estado de carga visual seguro ("Cargando..."). Se ha verificado que esta modificación no rompe las implementaciones existentes (T-38, T-42, T-43).
 - **DataTable Base:** Se consolidó `@tanstack/react-table` desde el principio (en lugar de mapeos simples) para garantizar escalabilidad hacia paginación y ordenamiento complejo, integrándolo con las clases Tailwind nativas de shadcn. Originalmente client-side, en T-38 ganó la capacidad retrocompatible de `manualPagination: true` delegando control al servidor sin romper usos locales.
 - **Formateadores Peruanos:** Se crearon funciones usando `Intl.NumberFormat` y `Intl.DateTimeFormat` configuradas para `es-PE`.
 - **Lógica Matemática Pura:** Se aisló la lógica del cálculo de semáforos (`calcularSemaforo`) fuera de la UI, con tipado estricto para direcciones (`mayor` | `menor`) y cobertura de test exhaustiva.
@@ -214,6 +217,7 @@
 **Estado:** completado
 
 ### Decisiones tomadas
+- **Fix retroactivo de estado de paginación (DataTable):** Se corrigió un bug silencioso donde el paso parcial del objeto `state: { sorting }` sobreescribía la paginación interna (client-side) forzándola siempre a la página 1. Se implementó un estado local `internalPagination` como fallback para garantizar que la tabla funcione correctamente de manera autónoma cuando no recibe props de paginación desde el servidor.
 - **UI Paginación Controlada:** Se adaptó el `DataTable` base (T-36) para admitir de forma opcional los props de paginación (`pageCount`, `pagination`, `onPaginationChange`). Si se proporcionan, se activa `manualPagination: true` de TanStack Table, delegando la responsabilidad de fetch al servidor sin romper la compatibilidad cliente (sandbox).
 - **Mapeo Defensivo del Semáforo:** Se encapsuló la función pura `mapSemaforoApiToEstado` para traducir el string crudo del backend al estricto `EstadoSemaforo` ('ok' | 'alerta' | 'critico' | null). Valores no manejados o 'desconocido' se evalúan como `null` y renderizan texto plano ("Sin datos de avance") sin fallas tipo `is undefined`.
 - **Granularidad de Commits:** Se retomó la práctica de separar commits estrictamente (Tipos/Puros, API/Hooks, UI/Rutas) previniendo retrocesos en la trazabilidad (git bisect).

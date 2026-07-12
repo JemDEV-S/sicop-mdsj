@@ -1,0 +1,29 @@
+
+> frontend@0.0.0 dev
+> vite
+
+
+  VITE v8.1.4  ready in 275 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
+1:30:25 AM [vite] (client) [console.warn] No `HydrateFallback` element provided to render during initial hydration
+1:30:28 AM [vite] (client) [console.error] Error exportando reporte AxiosError: Request failed with status code 400
+    at settle (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2ccdc0ec:1838:14)
+    at XMLHttpRequest.onloadend (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2ccdc0ec:2231:4)
+    at Axios$1.request (http://localhost:5173/node_modules/.vite/deps/axios.js?v=2ccdc0ec:3024:37)
+    at async exportarEjecucionPublico (http://localhost:5173/src/features/ejecucion/api.ts:23:19)
+    at async exportar (http://localhost:5173/src/features/ejecucion/hooks.ts:74:4)
+1:30:28 AM [vite] (client) [Unhandled rejection] AxiosError: Request failed with status code 400
+ > settle node_modules/axios/lib/core/settle.js:19:11
+ > XMLHttpRequest.onloadend node_modules/axios/lib/adapters/xhr.js:63:8
+ > Axios$1.request node_modules/axios/lib/core/Axios.js:46:40
+ > exportarEjecucionPublico src/features/ejecucion/api.ts:47:19
+    45 |  
+    46 |  export async function exportarEjecucionPublico(filtros: EjecucionDetalleFiltros): Promise<void> {
+    47 |    const response = await apiClient.post(
+       |                     ^
+    48 |      '/publico/exportar/excel',
+    49 |      { reporte: 'ejecucion_detalle', filtros },
+ > exportar src/features/ejecucion/hooks.ts:71:8
+

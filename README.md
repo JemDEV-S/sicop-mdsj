@@ -32,6 +32,14 @@ sicop-mdsj/
 └── Makefile
 ```
 
+## Bloqueadores Conocidos
+
+> [!WARNING]
+> ### 🛑 Bloqueadores Conocidos: Backup de SIGA
+> El proyecto depende estrictamente de la base de datos **SIGA_300687** para los módulos de Proveedores y futura conciliación SIAF-SIGA.
+> El archivo `SIGA_300687.bak` no se encuentra en el repositorio (ver T-04). El frontend se ha implementado mediante mocks unitarios (MSW) verificando el contrato Pydantic. 
+> **Acción Requerida (Gestión Externa):** El backup oficial debe ser provisto por la Municipalidad y colocado en `scripts/siga-backup/` para desbloquear las pruebas E2E y la integración real.
+
 ## Documentación
 
 | Doc | Contenido |

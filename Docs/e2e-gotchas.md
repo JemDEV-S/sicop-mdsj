@@ -11,5 +11,9 @@ Al correr Chromium contra `localhost:5173` y disparar requests fetch a `127.0.0.
 **Solución/Regla:** El workaround oficial para testing E2E rápido es inyectar `--disable-web-security` en el launch de Chromium para evadir la preflight PNA (solo en contextos de testeo aislado).
 
 ## 3. Recharts y Animaciones E2E (Barras y Donas Invisibles)
-Recharts usa animaciones iniciales (`requestAnimationFrame`) que Playwright headless puede capturar a medio renderizar (barras y donas de tamaño/opacidad 0, generando un SVG con `<rect>` pero sin dimensiones o un `<path>` transparente).
-**Solución/Regla:** Establecer siempre `isAnimationActive={false}` de forma determinista en componentes gráficos (`<Bar>`, `<Pie>`, `<Line>`) para los tests visuales o por decisión institucional de sobriedad.
+Al usar `requestAnimationFrame`, Playwright headless puede capturar gráficos de Recharts a medio renderizar (barras y donas de tamaño/opacidad 0, generando SVG sin dimensiones).
+**Solución/Regla:** Establecer siempre `isAnimationActive={false}` de forma determinista en componentes gráficos (`<Bar>`, `<Pie>`, `<Line>`) para los tests visuales.
+
+## 4. Axios, responseType: 'blob' y Errores JSON
+Cuando un endpoint está configurado para descargar archivos (`responseType: 'blob'`), si el servidor devuelve un error HTTP 400/500 con un JSON de detalle, Axios convierte **toda** la respuesta en un `Blob`. Intentar leer `error.response.data.detail` arrojará `undefined`.
+**Solución/Regla:** Hay que interceptar el error, verificar si `error.response?.data instanceof Blob`, y leer el contenido asíncronamente con `.text()` antes de parsearlo con `JSON.parse()`. Esto evita fallbacks genéricos de UI cuando el backend envió un mensaje explícito.

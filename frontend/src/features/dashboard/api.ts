@@ -1,27 +1,33 @@
-/**
- * Capa de datos del Dashboard Interno (HU-22).
- *
- * Hook de React Query que consume GET /api/v1/interno/dashboard.
- * Requiere autenticación (ruta protegida por RequireAuth).
- */
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../../lib/api-client';
-import type { DashboardResponse } from './types';
+import type { KanbanResponse, SaldosListadoResponse, PedidoCard } from './types';
 
-const DASHBOARD_KEY = ['interno', 'dashboard'] as const;
-
-async function fetchDashboard(): Promise<DashboardResponse> {
-  const { data } = await apiClient.get<DashboardResponse>('/interno/dashboard');
-  return data;
+export function useKanban() {
+  return useQuery({
+    queryKey: ['interno', 'pipeline', 'kanban'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<KanbanResponse>('/interno/pipeline/kanban');
+      return data;
+    },
+  });
 }
 
-/**
- * Hook para obtener los datos del dashboard del funcionario.
- * staleTime de 60s heredado del QueryClient global (T-35).
- */
-export function useDashboard() {
+export function useSaldos(params?: { page?: number; size?: number; ano?: number }) {
   return useQuery({
-    queryKey: DASHBOARD_KEY,
-    queryFn: fetchDashboard,
+    queryKey: ['interno', 'saldos', params],
+    queryFn: async () => {
+      const { data } = await apiClient.get<SaldosListadoResponse>('/interno/saldos', { params });
+      return data;
+    },
+  });
+}
+
+export function usePedidosEstancados() {
+  return useQuery({
+    queryKey: ['interno', 'alertas', 'pedidos-estancados'],
+    queryFn: async () => {
+      const { data } = await apiClient.get<PedidoCard[]>('/interno/alertas/pedidos-estancados');
+      return data;
+    },
   });
 }

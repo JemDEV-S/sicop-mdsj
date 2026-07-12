@@ -25,13 +25,13 @@ describe('apiClient concurrency lock', () => {
     let refreshCalls = 0;
 
     // Mock del refresh endpoint para que falle también (cookie expirada)
-    mockGlobal.onPost('http://localhost:8000/api/v1/auth/refresh').reply(() => {
+    mockGlobal.onPost(/\/auth\/refresh/).reply(() => {
       refreshCalls++;
       return [401, { detail: 'Cookie expired' }];
     });
 
     // Mock de un endpoint protegido que devuelve 401
-    mockApi.onGet('/protegido').reply(401, { detail: 'Unauthorized' });
+    mockApi.onGet(/\/protegido/).reply(401, { detail: 'Unauthorized' });
 
     // Disparamos 5 requests concurrentes al mismo tiempo
     const requests = Array.from({ length: 5 }).map(() => 
@@ -56,14 +56,14 @@ describe('apiClient concurrency lock', () => {
     let protectedCallsWithNewToken = 0;
 
     // Mock del refresh endpoint para que DEVUELVA UN NUEVO TOKEN
-    mockGlobal.onPost('http://localhost:8000/api/v1/auth/refresh').reply(() => {
+    mockGlobal.onPost(/\/auth\/refresh/).reply(() => {
       refreshCalls++;
       return [200, { access_token: 'new-valid-token' }];
     });
 
     // Mock de un endpoint protegido. 
     // Primera vez devuelve 401. Si viene con el nuevo token, devuelve 200.
-    mockApi.onGet('/protegido').reply((config) => {
+    mockApi.onGet(/\/protegido/).reply((config) => {
       if (config.headers?.Authorization === 'Bearer new-valid-token') {
         protectedCallsWithNewToken++;
         return [200, { data: 'ok' }];
