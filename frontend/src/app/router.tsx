@@ -30,7 +30,17 @@ export const router = createBrowserRouter([
       },
       {
         path: 'ejecucion',
-        element: <div data-testid="stub-ejecucion">Módulo Ejecución (En construcción)</div>
+        lazy: async () => {
+          const { default: EjecucionDashboard } = await import('../pages/publico/EjecucionDashboard');
+          return { Component: EjecucionDashboard };
+        }
+      },
+      {
+        path: 'ejecucion/detalle',
+        lazy: async () => {
+          const { default: EjecucionDetalle } = await import('../pages/publico/EjecucionDetalle');
+          return { Component: EjecucionDetalle };
+        }
       },
       {
         path: 'proveedores',
