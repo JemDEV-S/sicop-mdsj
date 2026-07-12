@@ -8,6 +8,11 @@
 - **Corrección post-cierre (detectada durante desbloqueo de T-40, julio 2026):** La API del MEF cambió de comportamiento — `datastore_search_sql` con cláusulas `WHERE` devuelve HTTP 500, mientras que `SELECT 1` y `COUNT(*)` sin filtro siguen funcionando. `datastore_search` (filtros JSON) funciona correctamente. El job tal como está implementado en `mef_client.py` (que usa exclusivamente `datastore_search_sql`) no puede poblar la DB en este momento. **Pendiente:** reescribir `mef_client.py` para usar `datastore_search` en vez de `datastore_search_sql` con `WHERE`, o implementar fallback. Deuda técnica real, no cosmética — bloquea todo el pipeline SIAF/Invierte.
 - **Workaround temporal:** Se creó `backend/scripts/seed_dev_mef_manual.py` que usa `datastore_search` (filtros JSON) para poblar `siaf.inversiones` con datos reales del MEF como seed de desarrollo. No reemplaza la corrección del pipeline, solo desbloquea las tareas de frontend (T-38 verificación visual, T-40 mapa). *Nota de discrepancia:* El seed descargó 74 inversiones para San Jerónimo, de las cuales 73 tienen latitud/longitud. El Done-cuando de T-40 en el plan madre esperaba 58 con coordenadas. Esta discrepancia es real, producto de los datos actuales de la API, y se anota acá para resolverla conceptualmente al llegar a T-40 (no se forzó el número).
 
+## T-26 · Obras públicas (backend) — Corrección retroactiva
+
+### Correcciones del supervisor
+- **Corrección retroactiva (detectada durante inicio de T-40):** El endpoint `/api/v1/publico/obras/mapa` acepta parámetros `ano` y `funcion`, pero el backend solo aplica estos filtros a las inversiones con coordenadas (`obras_para_mapa`), ignorándolos por completo para el arreglo `sin_coordenadas` (la función `obras_sin_coordenadas` en el repositorio ni siquiera recibe dichos argumentos). Esto constituye un defecto funcional que provocará que la lista lateral del mapa en el frontend muestre obras fuera del año o función filtrada. Es una deuda de backend que debe resolverse antes de que la funcionalidad de filtros quede completamente consistente para el usuario final.
+
 ## T-32 · Cliente API con axios + interceptor de auth
 **Fecha:** 2026-07-11
 **Estado:** completado
@@ -253,3 +258,28 @@
 - T-39: tipos y capa de datos para ficha detallada (`a643d03`)
 - T-39: componentes de secciones de la ficha detallada, test de ocultamiento y Leaflet aislado (`e2dabfe`)
 - T-39: implementar página Obra y agregar al router (`99b3bd9`)
+
+## T-40 · Mapa de obras (HU-04)
+**Fecha:** 2026-07-12
+**Estado:** completado
+
+### Decisiones tomadas
+- **Filtro por Defecto de Año (Corregido a "Todos"):** Inicialmente se introdujo un filtro por defecto al año actual (`2026`) en el dropdown para enfocarse en la vigencia, pero se descubrió un bug múltiple (el endpoint del mapa ignora dicho filtro, y había un bug JS descartando latitud 0). Se decidió remover el filtro por defecto (`ano: ''`), mostrando el universo total de inversiones desde el arranque para alinear la UX con el listado (`/obras`) que tampoco filtra inicialmente.
+- **Pines Institucionales CSS puros:** Se utilizaron `L.divIcon` de Leaflet inyectando estilos de Tailwind (`bg-semaforo-*`), evitando SVGs pesados y mapeando 1:1 al diseño institucional. Se aplicó contraste explícito para el estado amarillo.
+- **Validación estricta de coordenadas nulas/cero:** Se añadió exclusión silenciosa (return `null`) a nivel de DOM en React para coordenadas que sean `null` o `undefined`, permitiendo el rendering del cero literal, ya que el motor de JS de lo contrario aplicaba exclusión silenciosa.
+- **Lazy Loading de Leaflet:** La página se montó de forma perezosa aislando exitosamente los 153KB del mapa en su propio chunk (`WrapperMapa-xxx.js`).
+
+### Pendientes / deuda técnica
+- (Ninguna generada directamente).
+
+### Verificación realizada
+- Test unitario puro `utils.test.ts` pasando 4 asserts para las clases tailwind de semáforo.
+- Prueba E2E Visual con Playwright (`verify_mapa_e2e.py` persistido): Verificó montaje real de `.leaflet-pane` y cuantificó 73 pines `custom-leaflet-icon` en el DOM, confirmando inyección exitosa de paleta de colores. Verificó la interacción (clic y popup), demostrando navegación generada a `/obras/:codigo`.
+
+### Correcciones del supervisor
+- **Documentación de la Discrepancia del Criterio de Aceptación:** Se registró una discrepancia trilateral en el número de inversiones renderizadas en el mapa:
+  1. El documento de arquitectura exigía 58 como criterio Done-cuando.
+  2. El universo íntegro disponible de data importada en el backend devolvía 73.
+  3. Inicialmente la prueba E2E arrojó 64 debido a un bug JS (`!obra.latitud`) que filtraba la latitud literalmente igual a `0` (descartando 9 inversiones de la iteración en React).
+Se autorizó oficialmente mantener el universo íntegro real (73), invalidando el número 58 original del plan madre como anómalo/desfasado.
+- **Interacciones Obligatorias:** Se exigió demostrar programáticamente mediante E2E que el tooltip (Popup) de Leaflet funciona y direcciona a `/obras/:codigo` antes de cerrar la tarea, probando su integración con `react-router-dom`.

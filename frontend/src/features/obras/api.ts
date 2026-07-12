@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { ObraListadoResponse, ObraDetalleResponse } from './types';
+import type { ObraListadoResponse, ObraDetalleResponse, ObrasMapaResponse } from './types';
 
 /**
  * Función defensiva para garantizar tipado estricto en el componente visual Semaforo.
@@ -26,6 +26,13 @@ export interface FetchObrasParams {
 
 export async function fetchObrasListado(params: FetchObrasParams): Promise<ObraListadoResponse> {
   const { data } = await apiClient.get<ObraListadoResponse>('/publico/obras', {
+    params
+  });
+  return data;
+}
+
+export async function fetchObrasMapa(params: Pick<FetchObrasParams, 'ano' | 'funcion'>): Promise<ObrasMapaResponse> {
+  const { data } = await apiClient.get<ObrasMapaResponse>('/publico/obras/mapa', {
     params
   });
   return data;

@@ -23,6 +23,33 @@ export interface ObraListadoResponse {
   size: number;
 }
 
+export interface ObraMapaItem {
+  codigo_unico: string;
+  nombre_inversion: string | null;
+  funcion: string | null;
+  avance_fisico: number | null;
+  pim_anio_actual: number | null;
+  latitud: number | null;
+  longitud: number | null;
+  semaforo: string;
+}
+
+export interface ObraMapaSinCoordsItem {
+  codigo_unico: string;
+  nombre_inversion: string | null;
+  funcion: string | null;
+  // Estos vienen como string numéricos ("19.64") desde SQLAlchemy->FastAPI
+  avance_fisico: string | null;
+  pim_anio_actual: string | null;
+}
+
+export interface ObrasMapaResponse {
+  items: ObraMapaItem[];
+  sin_coordenadas: ObraMapaSinCoordsItem[];
+  total_con_coords: number;
+  total_sin_coords: number;
+}
+
 export interface MontosObra {
   pia: number;
   pim: number;
