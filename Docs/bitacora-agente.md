@@ -164,7 +164,9 @@
 
 ### Pendientes / deuda técnica
 - Eliminar la ruta de sandbox (`/interno/sandbox`) una vez validados todos los componentes institucionales.
-- Para los componentes gráficos reales que deriven de `WrapperGrafico`, asegurar que las paletas no pasen defaults de librería y utilicen las variables CSS.
+- Para los Componentes genéricos de UI y layouts (`dashboard_desktop`, `dashboard_mobile`, `mock_nulls` evidenciados).
+- Filtros y exportación (`exportar_publico`) requieren defensas activas (fail-fast >5000, max_hits=2).
+- Manejo de nulls en porcentaje: En `/publico/ejecucion/detalle`, la defensa contra `porcentaje_ejecucion === null` es preventiva (por consistencia con T-41 y porque el SQL backend usa `NULLIF(pim, 0)`), no fue vista empíricamente en el primer payload de muestra.
 
 ### Verificación realizada
 - Test unitarios de `formatters.test.ts` ajustados y exitosos.
@@ -235,6 +237,60 @@
 - T-38: Mapeo defensivo de semaforos y tipos de dominio (`1d24322`)
 - T-38: Hooks de React Query para Obras (`b68d5b3`)
 - T-38: UI de listado de obras con Data Table y filtros (`5505b13`)
+
+## T-42 · Tabla detallada de ejecución (HU-06)
+**Fecha:** 2026-07-12
+**Estado:** completado
+
+### Decisiones tomadas
+- **Fail-Fast en Backend:** Se implementó el hard-cap de 5000 registros devolviendo explícitamente un error HTTP 400 con un mensaje de refinamiento en lugar de truncar los datos de forma silenciosa, protegiendo al ciudadano de falsos negativos de auditoría.
+- **Auditoría Anónima:** Se conectó la tabla de exportación de ejecución al middleware de auditoría configurado en T-11 usando `usuario_id=None`, dejando rastro del query a pesar de ser un endpoint público.
+- **Paginación Server-Side y Deduplicación:** Se integró TanStack Table en modo `manualPagination: true` acoplado con `useDebounce` y TanStack Query para deduper fetches en vuelo.
+- **Parseo Resiliente de Errores (Blob):** Se implementó una verificación de instancia de `Blob` sobre el response de Axios (`responseType: 'blob'`) para deserializar asíncronamente JSONs de error generados por FastAPI y poder mostrar el Toast con el mensaje preciso.
+- **Unificación de Transformación de Moneda:** Se extrajo y unificó la tubería `formatearMoneda(parseMonto(val))` hacia `utils.ts` en lugar de usar `formatSoles(Number())`, previniendo que valores `undefined`, nulos o string vacíos rendericen un silencioso `"S/ NaN"`.
+
+### Pendientes / deuda técnica
+- La tabla de `logs.auditoria` almacena exitosamente los accesos públicos (con `usuario_id=NULL`) pero aún no existe un consumidor o dashboard interno en el frontend que lea esta información para el administrador.
+
+### Verificación realizada
+- Test automatizados backend comprobando `max_hits=2` en la limitación de descargas.
+- Playwright E2E (`screenshot.py` temporal) verificando el fail-fast 400 renderizando exitosamente el `toast.error` del frontend sobre JSDOM/Vite.
+- Unit tests frontend (`utils.test.ts`) certificando la defensa activa contra `NaN`, `null` y `undefined` con el formato `"ND"`.
+
+### Correcciones del supervisor
+- **Restricción de Truncamiento Silencioso:** Se detectó la intención inicial de exportar "solo los top 5000 resultados" (decisión de producto arbitraria), corrigiendo la directriz hacia un fail-fast claro que no compromete la veracidad del universo de datos para la auditoría pública.
+- **Evidencia Literal en Entorno:** Frente a problemas de conexión `ERR_CONNECTION_REFUSED` de Playwright, se exigió solucionar los obstáculos de entorno (puertos/IPv6) y traer capturas de pantalla literales que demostraran el toast renderizado, rechazando descripciones verbales de éxito.
+- **Fuga de NaN a la UI:** Se identificó que la tabla renderizaba "S/ NaN" producto de duplicación de funciones de formateo, lo cual se abordó de inmediato estandarizando `utils.ts`.
+
+### Commits
+- T-42: feat(ui): T-42 component EjecucionDetalle with server-side pagination (`1d7fe84`)
+- T-42: fix(ejecucion): Parse blob error response for detailed toast message in T-42 (`168706e`)
+- T-42: fix(ui): Mount Toaster and update E2E evidence for T-42 (`4c0dbc6`)
+- T-42: feat(frontend): T-42 capa de datos para Ejecucion Detalle y hook de exportacion (`0b67fef`)
+- T-42: feat(backend): T-42.5 endpoint de exportacion publica con rate limit y auditoria anonima (`d716b1c`)
+
+## T-43 · Directorio público de proveedores (HU-07)
+**Fecha:** 2026-07-12
+**Estado:** implementación completa (frontend y unitarios), E2E pausado por bloqueo
+
+### Decisiones tomadas
+- **Desarrollo Guiado por Contrato (Mocking):** Ante la ausencia temporal de la fuente de datos real, el desarrollo se completó apoyándose en MSW y `vi.mock` simulando a la perfección el contrato Pydantic del backend (`items`, `total`, `page`, `size`) para desarrollar y probar la tabla de React completa, los filtros y la paginación.
+- **Adopción Temprana de Fix (NaN):** Se identificó el mismo antipatrón de formateo `parseFloat(...) || 0` de T-42 en esta nueva tabla, y se aprovechó la unificación arquitectónica para proteger tempranamente las columnas contra resultados matemáticos inválidos.
+
+### Pendientes / deuda técnica
+- **BLOQUEADOR SIGA:** La verificación E2E final contra datos reales de producción sigue bloqueada. Esta tarea (y otras relacionadas como T-51) depende de restaurar el archivo `SIGA_300687.bak` que actualmente no se encuentra en `scripts/siga-backup/`. No se utilizará inyección de datos falsos de base de datos; la tarea queda pausada aquí hasta resolución externa.
+
+### Verificación realizada
+- Unit tests robustos (`DirectorioProveedores.test.tsx`) corriendo en verde. Los tests incluyen aserciones rigurosas de renderizado de la tabla con los datos mockeados y de filtrado mediante debounce, superando problemas de fuga de estado del DOM (requirió implementar `afterEach(cleanup)` en JSDOM).
+- Test unificado de formateo en `utils.test.ts`.
+
+### Correcciones del supervisor
+- **Cierre Prematuro Rechazado:** Se intentó considerar el desarrollo completado asumiendo un diseño de APIs antes de confirmar las cabeceras/metadata de la paginación de este endpoint en específico, lo cual fue redirigido a realizar el desarrollo usando MSW de manera que los contratos quedaran validados.
+- **Validación del Flujo Unificado:** Se celebró el haber mitigado proactivamente el bug del `NaN` de la T-42 dentro del componente de esta tarea.
+
+### Commits
+- T-43: feat(ui): T-43 initial DirectorioProveedores and mocks (`a8646bc`)
+- T-43: fix(ui): Unify parseMonto and formatearMoneda to prevent NaN in tables (T-42, T-43) (`e67e38a`)
 
 ## T-39 · Portal de obras — Ficha detallada
 **Fecha:** 2026-07-11
