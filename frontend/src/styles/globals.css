@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* Blanco institucional: 4to color de la paleta, no un default de librería.
+     Domina el espacio negativo (fondo, cards, inputs). */
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(210 15% 15%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(210 15% 15%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(210 15% 15%);
+
+  /* Azul institucional 3484A5 - Pantone 6797 C */
+  --primary: hsl(198 52% 43%);
+  --primary-foreground: hsl(0 0% 100%);
+
+  /* Verde/turquesa institucional 2CA792 - Pantone 7473 C */
+  --secondary: hsl(170 58% 41%);
+  --secondary-foreground: hsl(0 0% 100%);
+
+  /* Amarillo institucional F0C84F - Pantone 141 C, usado como acento/aviso */
+  --accent: hsl(45 84% 63%);
+  --accent-foreground: hsl(210 15% 15%);
+
+  --muted: hsl(210 16% 95%);
+  --muted-foreground: hsl(210 10% 42%);
+  --destructive: hsl(4 70% 48%);
+  --destructive-foreground: hsl(0 0% 100%);
+  --border: hsl(210 16% 88%);
+  --input: hsl(210 16% 88%);
+  --ring: hsl(198 52% 43%);
+  --radius: 0.5rem;
+
+  /* Semaforo: colores de estado segun umbral (RN-01). ok/alerta alineados
+     a la paleta institucional; critico usa rojo funcional estandar
+     (no institucional) porque "peligro/error" necesita ser inequivoco. */
+  --semaforo-ok: hsl(170 58% 41%);
+  --semaforo-alerta: hsl(45 84% 63%);
+  --semaforo-critico: hsl(4 70% 48%);
+
+  /* Paleta Categórica para Gráficos (5 Fuentes de Financiamiento SIAF).
+     Separados intencionalmente por saltos de luminosidad (L) para robustez 
+     ante daltonismo (protanopia/deuteranopia). */
+  --chart-1: var(--primary);                /* Azul Institucional (L: 43%) */
+  --chart-2: hsl(170 58% 55%);              /* Turquesa Medio (L: 55%) - Aclarado del secondary para alejarlo del 43% */
+  --chart-3: var(--accent);                 /* Amarillo Institucional (L: 63%) */
+  --chart-4: hsl(198 70% 25%);              /* Azul Marino (L: 25%) - Oscurecido del primary */
+  --chart-5: hsl(170 45% 75%);              /* Verde Agua Suave (L: 75%) */
+}
+
+.dark {
+  --background: hsl(210 20% 10%);
+  --foreground: hsl(0 0% 96%);
+  --card: hsl(210 18% 14%);
+  --card-foreground: hsl(0 0% 96%);
+  --popover: hsl(210 18% 14%);
+  --popover-foreground: hsl(0 0% 96%);
+  --primary: hsl(198 55% 58%);
+  --primary-foreground: hsl(210 20% 10%);
+  --secondary: hsl(170 50% 48%);
+  --secondary-foreground: hsl(210 20% 10%);
+  --accent: hsl(45 75% 60%);
+  --accent-foreground: hsl(210 20% 10%);
+  --muted: hsl(210 16% 20%);
+  --muted-foreground: hsl(210 10% 65%);
+  --destructive: hsl(4 62% 55%);
+  --destructive-foreground: hsl(0 0% 98%);
+  --border: hsl(0 0% 100% / 10%);
+  --input: hsl(0 0% 100% / 15%);
+  --ring: hsl(198 55% 58%);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-semaforo-ok: var(--semaforo-ok);
+  --color-semaforo-alerta: var(--semaforo-alerta);
+  --color-semaforo-critico: var(--semaforo-critico);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

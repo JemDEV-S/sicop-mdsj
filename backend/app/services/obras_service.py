@@ -13,7 +13,7 @@ from app.services import semaforo_service
 def _con_semaforo(db: Session, fila: dict[str, Any]) -> dict[str, Any]:
     fila["semaforo"] = semaforo_service.color(
         db,
-        modulo="obras",
+        modulo="portal_obras",
         metrica="avance_fisico",
         valor=float(fila["avance_fisico"]) if fila.get("avance_fisico") is not None else None,
     )
@@ -41,7 +41,7 @@ def obtener_obra(
     ficha["montos_ejecucion"] = {**montos, "porcentaje_devengado": porc}
     ficha["semaforo"] = semaforo_service.color(
         db,
-        modulo="obras",
+        modulo="portal_obras",
         metrica="avance_fisico",
         valor=float(ficha["avance_fisico"]) if ficha.get("avance_fisico") is not None else None,
     )

@@ -23,14 +23,15 @@ help:
 
 # ─── Infra ────────────────────────────────────────────────────────
 dev-infra:
-	docker compose -f docker-compose.dev.yml up -d postgres redis
+	docker compose -f docker-compose.dev.yml up -d postgres redis sqlserver
 
 dev:
-	docker compose -f docker-compose.dev.yml up
+	docker compose -f docker-compose.dev.yml up -d backend
+	cd frontend && npm run dev
 
 # ─── Backend ──────────────────────────────────────────────────────
 backend-dev:
-	cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	docker compose -f docker-compose.dev.yml up -d backend
 
 # ─── Frontend ─────────────────────────────────────────────────────
 frontend-dev:

@@ -1,0 +1,50 @@
+Iniciando Vite dev server...
+1. Probando Desktop con datos reales...
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/resumen?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/por-funcion?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/por-fuente?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/mensual?ano=2026
+Esperando a que los KPIs terminen de cargar (conectando al backend real)...
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/resumen?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/por-funcion?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/por-fuente?ano=2026
+FETCH: http://127.0.0.1:8000/api/v1/publico/ejecucion/mensual?ano=2026
+Cerrando Vite dev server...
+Traceback (most recent call last):
+  File "/home/jeanpier/OTI/sicop-mdsj/verify_dashboard_e2e.py", line 169, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/usr/lib64/python3.14/asyncio/runners.py", line 205, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/usr/lib64/python3.14/asyncio/runners.py", line 128, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/lib64/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/home/jeanpier/OTI/sicop-mdsj/verify_dashboard_e2e.py", line 34, in main
+    await page.wait_for_selector("text=% Ejecución")
+  File "/home/jeanpier/OTI/sicop-mdsj/backend/venv/lib64/python3.14/site-packages/playwright/async_api/_generated.py", line 8948, in wait_for_selector
+    await self._impl_obj.wait_for_selector(
+    ...<4 lines>...
+    )
+  File "/home/jeanpier/OTI/sicop-mdsj/backend/venv/lib64/python3.14/site-packages/playwright/_impl/_page.py", line 427, in wait_for_selector
+    return await self._main_frame.wait_for_selector(**locals_to_params(locals()))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jeanpier/OTI/sicop-mdsj/backend/venv/lib64/python3.14/site-packages/playwright/_impl/_frame.py", line 394, in wait_for_selector
+    await self._channel.send(
+        "waitForSelector", self._timeout, locals_to_params(locals())
+    )
+  File "/home/jeanpier/OTI/sicop-mdsj/backend/venv/lib64/python3.14/site-packages/playwright/_impl/_connection.py", line 69, in send
+    return await self._connection.wrap_api_call(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "/home/jeanpier/OTI/sicop-mdsj/backend/venv/lib64/python3.14/site-packages/playwright/_impl/_connection.py", line 563, in wrap_api_call
+    raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+playwright._impl._errors.TimeoutError: Page.wait_for_selector: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("text=% Ejecución") to be visible
+

@@ -32,6 +32,19 @@ sicop-mdsj/
 └── Makefile
 ```
 
+## Bloqueadores Conocidos
+
+> [!WARNING]
+> ### 🛑 Bloqueadores Conocidos: Backup de SIGA
+> El proyecto depende estrictamente de la base de datos **SIGA_300687** para los módulos de Proveedores y futura conciliación SIAF-SIGA.
+> El archivo `SIGA_300687.bak` no se encuentra en el repositorio (ver T-04). El frontend se ha implementado mediante mocks unitarios (MSW) verificando el contrato Pydantic. 
+> **Acción Requerida (Gestión Externa):** El backup oficial debe ser provisto por la Municipalidad y colocado en `scripts/siga-backup/` para desbloquear las pruebas E2E y la integración real.
+
+> [!WARNING]
+> ### 🛑 Bloqueadores Conocidos: Histórico 2025 en MEF
+> El proyecto está calibrado contra el año fiscal 2025 (por la data del SIGA), pero la API pública del MEF (`datastore_search`) expone únicamente un `resource_id` para el año vigente (2026). No se ha encontrado el UUID histórico para Ejecución Presupuestal 2025 (ver `actividad-1-exploracion-mef.md` §13).
+> **Mitigación Temporal:** Se utiliza el script `backend/scripts/dev_seed_sintetico_2025.py` para poblar datos sintéticos marcados con `[DEV-SEED]` y validar visualmente el frontend. El pipeline real (`sync_siaf.py`) permanece bloqueado hasta conseguir el UUID correcto.
+
 ## Documentación
 
 | Doc | Contenido |
@@ -48,10 +61,10 @@ sicop-mdsj/
 ## Cómo arrancar (dev)
 
 ```bash
-# 1. Levantar PostgreSQL y Redis
+# 1. Levantar PostgreSQL, Redis y SQL Server local (SIGA mock)
 make dev-infra
 
-# 2. Backend
+# 2. Levantar el Backend (en Docker, con ODBC drivers y hot-reload habilitado)
 make backend-dev
 
 # 3. Frontend
