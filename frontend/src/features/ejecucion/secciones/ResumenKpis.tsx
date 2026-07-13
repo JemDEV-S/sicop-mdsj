@@ -1,28 +1,12 @@
-import { type EjecucionResumen } from '../types';
-import { parseMonto, formatearMoneda } from '../../../lib/formatters';
+import { Wallet, ShieldCheck, CircleDollarSign, Send, Percent } from 'lucide-react';
+import { KpiCard } from '@/components/KpiCard';
+import { SkeletonKPI } from '@/components/layout/LoadingSkeleton';
+import { parseMonto, formatearMoneda } from '@/lib/formatters';
+import type { EjecucionResumen } from '../types';
 
 interface ResumenKpisProps {
   data?: EjecucionResumen;
   isLoading: boolean;
-}
-
-function KpiCard({ title, value, subtext }: { title: string; value: string; subtext?: string }) {
-  return (
-    <div className="bg-card text-card-foreground p-4 rounded-lg shadow border flex flex-col gap-1">
-      <h3 className="text-sm font-medium text-muted-foreground">{title}</h3>
-      <div className="text-2xl font-bold">{value}</div>
-      {subtext && <p className="text-xs text-muted-foreground">{subtext}</p>}
-    </div>
-  );
-}
-
-function KpiSkeleton() {
-  return (
-    <div className="bg-card p-4 rounded-lg shadow border flex flex-col gap-2 animate-pulse">
-      <div className="h-4 bg-muted rounded w-1/2"></div>
-      <div className="h-8 bg-muted rounded w-3/4"></div>
-    </div>
-  );
 }
 
 export default function ResumenKpis({ data, isLoading }: ResumenKpisProps) {
@@ -30,7 +14,7 @@ export default function ResumenKpis({ data, isLoading }: ResumenKpisProps) {
     return (
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {Array.from({ length: 5 }).map((_, i) => (
-          <KpiSkeleton key={i} />
+          <SkeletonKPI key={i} />
         ))}
       </div>
     );
@@ -42,34 +26,43 @@ export default function ResumenKpis({ data, isLoading }: ResumenKpisProps) {
   const certificado = parseMonto(data.certificado);
   const devengado = parseMonto(data.devengado);
   const girado = parseMonto(data.girado);
-  
-  // Porcentaje viene calculado por la DB, pero lo tratamos defensivamente
+
   const pctNum = parseMonto(data.porcentaje_ejecucion);
   const pctText = pctNum === null ? 'ND' : `${pctNum}%`;
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-      <KpiCard 
-        title="PIM" 
-        value={formatearMoneda(pim, true)} 
-        subtext="Presupuesto Institucional"
+      <KpiCard
+        label="PIM"
+        valor={formatearMoneda(pim, true)}
+        ayuda="Presupuesto Institucional Modificado"
+        icono={Wallet}
+        tono="primario"
       />
-      <KpiCard 
-        title="Certificado" 
-        value={formatearMoneda(certificado, true)} 
+      <KpiCard
+        label="Certificado"
+        valor={formatearMoneda(certificado, true)}
+        icono={ShieldCheck}
+        tono="secundario"
       />
-      <KpiCard 
-        title="Devengado" 
-        value={formatearMoneda(devengado, true)} 
+      <KpiCard
+        label="Devengado"
+        valor={formatearMoneda(devengado, true)}
+        icono={CircleDollarSign}
+        tono="primario"
       />
-      <KpiCard 
-        title="Girado" 
-        value={formatearMoneda(girado, true)} 
+      <KpiCard
+        label="Girado"
+        valor={formatearMoneda(girado, true)}
+        icono={Send}
+        tono="neutro"
       />
-      <KpiCard 
-        title="% Ejecución" 
-        value={pctText} 
-        subtext="Avance Devengado/PIM"
+      <KpiCard
+        label="% Ejecución"
+        valor={pctText}
+        ayuda="Devengado sobre PIM"
+        icono={Percent}
+        tono="acento"
       />
     </div>
   );

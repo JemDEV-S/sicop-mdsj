@@ -1,56 +1,91 @@
+import { Wallet } from 'lucide-react';
+import { formatearMoneda } from '@/lib/formatters';
+import { BarraEjecucion } from '@/components/publico/BarraEjecucion';
+import { cn } from '@/lib/utils';
 import type { ObraDetalleResponse } from '../types';
-import { formatearMoneda } from '../../../lib/formatters';
-import Semaforo from '../../../components/Semaforo';
-import { mapSemaforoApiToEstado } from '../api';
 
 export function AvancePresupuesto({ obra }: { obra: ObraDetalleResponse }) {
-  const estado = mapSemaforoApiToEstado(obra.semaforo);
-  const fisico = obra.avance_fisico;
-  const textoFisico = fisico !== null && fisico !== undefined ? `${fisico.toFixed(1)}%` : 'Desconocido';
+  const m = obra.montos_ejecucion;
+  const pim = m.pim;
+
+  const filas = [
+    { label: 'PIA', valor: m.pia, ayuda: 'Presupuesto Inicial Asignado' },
+    { label: 'PIM', valor: m.pim, ayuda: 'Presupuesto Institucional Modificado' },
+    { label: 'Certificado', valor: m.certificado, ayuda: 'Reservado para un fin específico' },
+    { label: 'Comprometido', valor: m.comprometido_anual, ayuda: 'Con contrato u orden firmada' },
+    { label: 'Devengado', valor: m.devengado, ayuda: 'Obligación reconocida por la entidad' },
+    { label: 'Girado', valor: m.girado, ayuda: 'Efectivamente pagado' },
+  ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <div className="bg-white border border-gray-200 shadow-sm p-4 rounded-sm">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wider">Avance</h3>
-        <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <span className="text-gray-600 text-sm">Físico</span>
-            {estado ? <Semaforo estado={estado} texto={textoFisico} /> : <span className="text-sm font-medium text-gray-900">{textoFisico}</span>}
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-gray-600 text-sm">Financiero</span>
-            <span className="text-sm font-medium text-gray-900">
-              {obra.montos_ejecucion.porcentaje_devengado !== null && obra.montos_ejecucion.porcentaje_devengado !== undefined 
-                ? `${obra.montos_ejecucion.porcentaje_devengado.toFixed(1)}%` 
-                : '0%'}
-            </span>
-          </div>
-          <div className="pt-2 border-t border-gray-100 flex justify-between">
-            <span className="text-gray-600 text-sm">Etapa</span>
-            <span className="text-sm font-medium text-gray-900">{obra.etapa_f8 || '-'}</span>
+    <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6">
+      {/* Barra + narrativa */}
+      <div className="rounded-2xl bg-card border border-border p-6 md:p-8">
+        <div className="flex items-center gap-2 mb-6">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Wallet className="w-4 h-4" aria-hidden="true" />
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Etapas de ejecución</h3>
+            <p className="text-xs text-muted-foreground">
+              Cada capa muestra qué porcentaje del PIM ha avanzado.
+            </p>
           </div>
         </div>
+
+        {pim > 0 ? (
+          <BarraEjecucion
+            pim={pim}
+            certificado={m.certificado}
+            comprometido={m.comprometido_anual}
+            devengado={m.devengado}
+            girado={m.girado}
+            formatoMonto={(v) => formatearMoneda(v)}
+          />
+        ) : (
+          <div className="rounded-lg bg-muted/40 border border-border p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              Esta obra aún no tiene presupuesto (PIM) asignado en el ejercicio vigente.
+            </p>
+          </div>
+        )}
       </div>
-      <div className="bg-white border border-gray-200 shadow-sm p-4 rounded-sm">
-        <h3 className="text-sm font-semibold text-gray-900 mb-3 uppercase tracking-wider">Presupuesto</h3>
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between">
-            <span className="text-gray-600">PIA</span>
-            <span className="font-medium text-gray-900">{formatearMoneda(obra.montos_ejecucion.pia)}</span>
-          </div>
-          <div className="flex justify-between items-center pb-2 border-b">
-            <span className="text-gray-600">PIM</span>
-            <span className="font-medium text-gray-900">{formatearMoneda(obra.montos_ejecucion.pim)}</span>
-          </div>
-          <div className="flex justify-between items-center pb-2 border-b">
-            <span className="text-gray-600">Certificado</span>
-            <span className="font-medium text-gray-900">{formatearMoneda(obra.montos_ejecucion.certificado)}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-gray-600">Devengado</span>
-            <span className="font-medium text-gray-900">{formatearMoneda(obra.montos_ejecucion.devengado)}</span>
-          </div>
-        </div>
+
+      {/* Detalle numérico */}
+      <div className="rounded-2xl bg-card border border-border p-6 md:p-8">
+        <h3 className="text-sm font-semibold text-foreground mb-4">Detalle en soles</h3>
+        <dl className="space-y-3">
+          {filas.map((fila, idx) => {
+            const esDestacado = fila.label === 'PIM' || fila.label === 'Devengado';
+            return (
+              <div
+                key={fila.label}
+                className={cn(
+                  'flex items-baseline justify-between gap-4',
+                  idx < filas.length - 1 ? 'pb-3 border-b border-border' : '',
+                )}
+              >
+                <div className="min-w-0">
+                  <dt className={cn(
+                    'text-sm',
+                    esDestacado ? 'font-semibold text-foreground' : 'text-muted-foreground',
+                  )}>
+                    {fila.label}
+                  </dt>
+                  <p className="text-[11px] text-muted-foreground truncate">{fila.ayuda}</p>
+                </div>
+                <dd
+                  className={cn(
+                    'shrink-0 tabular-nums',
+                    esDestacado ? 'text-base font-bold text-foreground' : 'text-sm font-medium text-foreground',
+                  )}
+                >
+                  {formatearMoneda(fila.valor)}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
       </div>
     </div>
   );

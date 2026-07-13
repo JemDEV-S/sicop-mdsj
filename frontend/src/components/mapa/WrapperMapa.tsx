@@ -22,7 +22,7 @@ export default function WrapperMapa({
   className
 }: WrapperMapaProps) {
   return (
-    <div className={`w-full rounded-lg overflow-hidden border border-gray-200 z-0 relative ${className || ''}`} style={{ height }}>
+    <div className={`w-full rounded-md overflow-hidden border border-border z-0 relative ${className || ''}`} style={{ height }}>
       <MapContainer 
         center={center} 
         zoom={zoom} 

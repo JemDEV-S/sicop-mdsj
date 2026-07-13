@@ -20,12 +20,12 @@ describe('UbicacionMapa', () => {
   it('renderiza mensaje de fallback cuando las coordenadas son null', () => {
     const obraNull = { ...mockObraBase, latitud: null, longitud: null };
     render(<UbicacionMapa obra={obraNull} />);
-    expect(screen.getByText('No hay coordenadas de ubicación registradas para esta obra.')).toBeDefined();
+    expect(screen.getByText('Sin ubicación registrada')).toBeDefined();
   });
 
   it('renderiza mensaje de fallback cuando las coordenadas son exactamente (0, 0) - Null Island', () => {
     const obraCero = { ...mockObraBase, latitud: 0, longitud: 0 };
     render(<UbicacionMapa obra={obraCero} />);
-    expect(screen.getByText('No hay coordenadas de ubicación registradas para esta obra.')).toBeDefined();
+    expect(screen.getByText('Sin ubicación registrada')).toBeDefined();
   });
 });

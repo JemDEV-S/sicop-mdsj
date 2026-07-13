@@ -44,7 +44,10 @@ export const router = createBrowserRouter([
       },
       {
         path: 'proveedores',
-        element: <div data-testid="stub-proveedores">Módulo Proveedores (En construcción)</div>
+        lazy: async () => {
+          const { default: DirectorioProveedores } = await import('../pages/publico/DirectorioProveedores');
+          return { Component: DirectorioProveedores };
+        }
       },
       {
         path: 'mapa',
