@@ -44,6 +44,9 @@ Sistema web dual para la **Municipalidad Distrital de San Jerónimo (Cusco)**:
    - Avance físico obra → Invierte.pe `AVANCE_FISICO`
 4. **Llave cruce SIAF↔SIGA:** `ANO_EJE + SEC_EJEC + SEC_FUNC` (+ `EXP_SIAF` como secundaria).
 5. **API MEF:** máximo 8 columnas por query, `LIMIT 100 OFFSET n`, sin tildes en filtros.
+   - **Granularidad SIAF:** `PIA` y `PIM` solo tienen valor en `MES_EJE=0`. En meses 1-N vienen en 0.
+   - **Montos de ejecución** (`devengado`, `girado`, `certificado`, `comprometido`) son flujos mensuales, **no acumulados**. Para el total anual hay que `SUM` de todos los meses `> 0` agrupando por `sec_func`.
+   - **Trampa:** tomar solo `MAX(mes_eje)` borra el PIA/PIM de las metas activas → subcuenteo grave. Ver `Docs/hallazgos-granularidad-siaf.md`.
 6. **Filtro por CC:** Operativo = sus CC; Decisor = jerarquía por `CENTRO_PADRE`; Admin = todo.
 7. **Umbrales configurables** en `sistema.umbrales_*` — no hardcodear.
 8. **Auditoría** en `logs.auditoria` para: login, exportación, cambio de umbrales, subida docs, publicación observación.
@@ -58,6 +61,7 @@ Sistema web dual para la **Municipalidad Distrital de San Jerónimo (Cusco)**:
 | [Docs/idea-principal.md](Docs/idea-principal.md) | Contexto general y módulos | §5 usuarios · §6 módulos · §10 priorización MVP |
 | [Docs/diccionario-datos-unificado.md](Docs/diccionario-datos-unificado.md) | Cualquier query o modelo | §4 META · §7 montos · §8 Invierte.pe · §10 cadena logística · §17 llaves cruce · §18 reglas |
 | [Docs/actividad-1-exploracion-mef.md](Docs/actividad-1-exploracion-mef.md) | Limitaciones API MEF y queries validadas | §3 diccionario campos · §4 limitaciones · §10 queries validadas · §12 Invierte.pe |
+| [Docs/hallazgos-granularidad-siaf.md](Docs/hallazgos-granularidad-siaf.md) | Reglas de agregación SIAF (PIA/PIM vs ejecución) | §1 estructura real · §4 tabla reglas de agregación — leer antes de cualquier query de montos |
 | [Docs/datos-iniciales-siga.md](Docs/datos-iniciales-siga.md) | Estructura SIGA y validación cruce | §2 conexión dev · §5 metas · §11 queries · §12 cadena logística · §13 módulos funcionarios |
 | [Docs/actividad-2-requerimientos-funcionales.md](Docs/actividad-2-requerimientos-funcionales.md) | Antes de implementar una HU | §2 RN globales · §3-9 HU por módulo · §10 priorización MoSCoW |
 | [Docs/actividad-3-arquitectura-tecnica.md](Docs/actividad-3-arquitectura-tecnica.md) | Setup, modelo BD, API, despliegue | §3.0 principios · §3.1 schemas · §3.1.2 ENUMs · §3.2 auth · §3.3 ref (ltree) · §3.4 siaf + vista · §3.5 sistema · §3.6 logs · §3.7 resumen · §4 endpoints · §5 adaptador SIGA · §6 sync SIAF · §9 despliegue · §11 estructura repo |

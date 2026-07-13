@@ -1,8 +1,13 @@
 """Servicio de ejecucion presupuestal publica (HU-05, HU-06).
 
 Se apoya en `siaf.v_ejecucion_normalizada` (nombres autoritativos vienen de
-`ref.*`; ver CLAUDE.md §10). Todas las sumas usan el MAX(mes_eje) por
-sec_func para no duplicar montos entre meses.
+`ref.*`; ver CLAUDE.md §10).
+
+Nota sobre granularidad de la API MEF:
+  - PIA y PIM solo vienen con valor en mes_eje=0 (fila maestra). En meses 1-N
+    esos campos llegan en 0 desde la API.
+  - Devengado/Girado/Certificado son acumulados y solo aparecen en meses > 0.
+Por eso el CTE bifurca: presupuesto desde mes_0, ejecucion desde max(mes>0).
 """
 
 from __future__ import annotations
@@ -14,21 +19,63 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 
-# El PIA/PIM se leen de la fila mas reciente por sec_func (max mes_eje);
-# el certificado/devengado son acumulados y tambien se toman del ultimo mes.
-_ULTIMOS_MESES_CTE = """
-    WITH ultimos AS (
-        SELECT sec_func, MAX(mes_eje) AS max_mes
+# PIA/PIM: solo vienen en mes_eje=0 (fila maestra de la API MEF). En meses 1-N vienen en 0.
+# Devengado/Girado/Certificado/Comprometido: son flujos mensuales (no acumulados).
+# Para obtener el total anual hay que sumar TODOS los meses > 0.
+_PRESUPUESTO_EJECUCION_CTE = """
+    WITH maestros AS (
+        SELECT sec_func,
+               SUM(monto_pia) AS monto_pia,
+               SUM(monto_pim) AS monto_pim,
+               MAX(meta_codigo)     AS meta_codigo,
+               MAX(meta_nombre)     AS meta_nombre,
+               MAX(tipo_meta)       AS tipo_meta,
+               MAX(producto_proyecto) AS producto_proyecto,
+               MAX(funcion_codigo)  AS funcion_codigo,
+               MAX(funcion_nombre)  AS funcion_nombre,
+               MAX(fuente_codigo)   AS fuente_codigo,
+               MAX(fuente_nombre)   AS fuente_nombre,
+               MAX(generica)        AS generica,
+               MAX(generica_nombre) AS generica_nombre,
+               MAX(categoria_gasto) AS categoria_gasto
           FROM siaf.v_ejecucion_normalizada
-         WHERE ano_eje = :ano AND sec_ejec = :sec_ejec
+         WHERE ano_eje = :ano AND sec_ejec = :sec_ejec AND mes_eje = 0
+         GROUP BY sec_func
+    ),
+    ejecucion AS (
+        SELECT sec_func,
+               SUM(monto_certificado)        AS monto_certificado,
+               SUM(monto_comprometido_anual) AS monto_comprometido_anual,
+               SUM(monto_comprometido)       AS monto_comprometido,
+               SUM(monto_devengado)          AS monto_devengado,
+               SUM(monto_girado)             AS monto_girado
+          FROM siaf.v_ejecucion_normalizada
+         WHERE ano_eje = :ano AND sec_ejec = :sec_ejec AND mes_eje > 0
          GROUP BY sec_func
     ),
     vigentes AS (
-        SELECT v.*
-          FROM siaf.v_ejecucion_normalizada v
-          JOIN ultimos u
-            ON u.sec_func = v.sec_func AND u.max_mes = v.mes_eje
-         WHERE v.ano_eje = :ano AND v.sec_ejec = :sec_ejec
+        SELECT
+            m.sec_func,
+            m.monto_pia,
+            m.monto_pim,
+            m.meta_codigo,
+            m.meta_nombre,
+            m.tipo_meta,
+            m.producto_proyecto,
+            m.funcion_codigo,
+            m.funcion_nombre,
+            m.fuente_codigo,
+            m.fuente_nombre,
+            m.generica,
+            m.generica_nombre,
+            m.categoria_gasto,
+            COALESCE(e.monto_certificado, 0)        AS monto_certificado,
+            COALESCE(e.monto_comprometido_anual, 0) AS monto_comprometido_anual,
+            COALESCE(e.monto_comprometido, 0)       AS monto_comprometido,
+            COALESCE(e.monto_devengado, 0)          AS monto_devengado,
+            COALESCE(e.monto_girado, 0)             AS monto_girado
+          FROM maestros m
+          LEFT JOIN ejecucion e ON e.sec_func = m.sec_func
     )
 """
 
@@ -41,7 +88,7 @@ def resumen(db: Session, *, ano: int | None = None) -> dict[str, Any]:
     """KPIs para el dashboard (HU-05 AC-05.1)."""
     row = db.execute(
         text(
-            _ULTIMOS_MESES_CTE
+            _PRESUPUESTO_EJECUCION_CTE
             + """
             SELECT
                 COALESCE(SUM(monto_pia), 0)             AS pia,
@@ -70,7 +117,7 @@ def por_funcion(db: Session, *, ano: int | None = None) -> list[dict[str, Any]]:
     """Agregado por funcion (HU-05 AC-05.2)."""
     rows = db.execute(
         text(
-            _ULTIMOS_MESES_CTE
+            _PRESUPUESTO_EJECUCION_CTE
             + """
             SELECT
                 funcion_codigo,
@@ -93,7 +140,7 @@ def por_fuente(db: Session, *, ano: int | None = None) -> list[dict[str, Any]]:
     """Distribucion por fuente de financiamiento (HU-05 AC-05.3)."""
     rows = db.execute(
         text(
-            _ULTIMOS_MESES_CTE
+            _PRESUPUESTO_EJECUCION_CTE
             + """
             SELECT
                 fuente_codigo,
@@ -148,7 +195,7 @@ def detalle(
     sort: str = "pim_desc",
 ) -> tuple[list[dict[str, Any]], int]:
     """Tabla detallada con filtros (HU-06)."""
-    where = ["v.ano_eje = :ano", "v.sec_ejec = :sec_ejec"]
+    where = ["1=1"]
     params = _params(ano)
     if funcion:
         where.append("v.funcion_codigo = :funcion")
@@ -168,14 +215,14 @@ def detalle(
     order_by = order_map.get(sort, order_map["pim_desc"])
 
     where_sql = " AND ".join(where)
-    inner_cte = _ULTIMOS_MESES_CTE
+    inner_cte = _PRESUPUESTO_EJECUCION_CTE
 
     sql_total = f"""
         {inner_cte}
         SELECT COUNT(*) FROM (
-            SELECT sec_func FROM vigentes v
-             WHERE {where_sql.replace('v.ano_eje = :ano AND v.sec_ejec = :sec_ejec', '1=1')}
-             GROUP BY sec_func
+            SELECT v.sec_func FROM vigentes v
+             WHERE {where_sql}
+             GROUP BY v.sec_func
         ) t
     """
     total = int(db.execute(text(sql_total), params).scalar_one())
@@ -183,22 +230,21 @@ def detalle(
     sql_rows = f"""
         {inner_cte}
         SELECT
-            MAX(v.funcion_codigo)  AS funcion_codigo,
-            MAX(v.funcion_nombre)  AS funcion_nombre,
+            v.funcion_codigo,
+            v.funcion_nombre,
             v.sec_func,
-            MAX(v.meta_codigo)     AS meta_codigo,
-            MAX(v.meta_nombre)     AS meta_nombre,
-            MAX(v.producto_proyecto) AS producto_proyecto,
-            SUM(v.monto_pim)       AS pim,
-            SUM(v.monto_certificado) AS certificado,
-            SUM(v.monto_devengado) AS devengado,
-            SUM(v.monto_girado)    AS girado,
-            CASE WHEN SUM(v.monto_pim) > 0
-                 THEN ROUND(SUM(v.monto_devengado) / SUM(v.monto_pim) * 100, 2)
-                 ELSE NULL END     AS porcentaje_ejecucion
+            v.meta_codigo,
+            v.meta_nombre,
+            v.producto_proyecto,
+            v.monto_pim       AS pim,
+            v.monto_certificado AS certificado,
+            v.monto_devengado AS devengado,
+            v.monto_girado    AS girado,
+            CASE WHEN v.monto_pim > 0
+                 THEN ROUND(v.monto_devengado / v.monto_pim * 100, 2)
+                 ELSE NULL END AS porcentaje_ejecucion
           FROM vigentes v
-         WHERE {where_sql.replace('v.ano_eje = :ano AND v.sec_ejec = :sec_ejec', '1=1')}
-         GROUP BY v.sec_func
+         WHERE {where_sql}
          ORDER BY {order_by}
          LIMIT :limit OFFSET :offset
     """

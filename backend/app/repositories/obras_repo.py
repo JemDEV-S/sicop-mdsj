@@ -124,34 +124,25 @@ def montos_de_obra(
 ) -> dict[str, float]:
     """Suma PIA/PIM/certificado/devengado/girado desde `siaf.ejecucion_presupuestal`.
 
-    Usa el mes con mayor MES_EJE (mas reciente disponible) — el PIM/PIA son
-    saldos acumulados, sumarlos por sec_func trae el total del proyecto.
+    PIA/PIM solo vienen en mes_eje=0. Devengado/girado/certificado son flujos
+    mensuales — se suman todos los meses > 0. Ver Docs/hallazgos-granularidad-siaf.md.
     """
     ano_ejec = ano or settings.ANO_VIGENTE
     row = (
         db.execute(
             text(
                 """
-                WITH ultimo AS (
-                    SELECT sec_func, MAX(mes_eje) AS max_mes
-                      FROM siaf.ejecucion_presupuestal
-                     WHERE ano_eje = :ano
-                       AND sec_ejec = :sec_ejec
-                       AND producto_proyecto = :codigo
-                     GROUP BY sec_func
-                )
                 SELECT
-                    COALESCE(SUM(e.monto_pia), 0)              AS pia,
-                    COALESCE(SUM(e.monto_pim), 0)              AS pim,
-                    COALESCE(SUM(e.monto_certificado), 0)      AS certificado,
-                    COALESCE(SUM(e.monto_comprometido_anual), 0) AS comprometido_anual,
-                    COALESCE(SUM(e.monto_devengado), 0)        AS devengado,
-                    COALESCE(SUM(e.monto_girado), 0)           AS girado
-                  FROM siaf.ejecucion_presupuestal e
-                  JOIN ultimo u
-                    ON u.sec_func = e.sec_func AND u.max_mes = e.mes_eje
-                 WHERE e.ano_eje = :ano
-                   AND e.sec_ejec = :sec_ejec
+                    COALESCE(SUM(CASE WHEN mes_eje = 0 THEN monto_pia  ELSE 0 END), 0) AS pia,
+                    COALESCE(SUM(CASE WHEN mes_eje = 0 THEN monto_pim  ELSE 0 END), 0) AS pim,
+                    COALESCE(SUM(CASE WHEN mes_eje > 0 THEN monto_certificado       ELSE 0 END), 0) AS certificado,
+                    COALESCE(SUM(CASE WHEN mes_eje > 0 THEN monto_comprometido_anual ELSE 0 END), 0) AS comprometido_anual,
+                    COALESCE(SUM(CASE WHEN mes_eje > 0 THEN monto_devengado         ELSE 0 END), 0) AS devengado,
+                    COALESCE(SUM(CASE WHEN mes_eje > 0 THEN monto_girado            ELSE 0 END), 0) AS girado
+                  FROM siaf.ejecucion_presupuestal
+                 WHERE ano_eje = :ano
+                   AND sec_ejec = :sec_ejec
+                   AND producto_proyecto = :codigo
                 """
             ),
             {"ano": ano_ejec, "sec_ejec": settings.SEC_EJEC, "codigo": codigo_unico},

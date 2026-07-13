@@ -127,7 +127,9 @@ El dataset contiene **64 campos** por registro. Se clasifican en las siguientes 
 | `MONTO_DEVENGADO` | Numérico | Monto devengado |
 | `MONTO_GIRADO` | Numérico | Monto girado/pagado |
 
-> **Observación importante:** `MONTO_PIA` aparece en `0` para todos los registros de 2026. El PIA real debe consultarse en registros con `MES_EJE = 0` para `MONTO_PIM`, que representa la programación inicial. Los montos de ejecución mensual acumulada se obtienen filtrando por `MES_EJE` específico.
+> **Observación importante:** `MONTO_PIA` y `MONTO_PIM` aparecen en `0` en todos los registros con `MES_EJE > 0`. Solo vienen con valor en `MES_EJE = 0` (fila maestra de presupuesto).
+>
+> Los montos de ejecución (`MONTO_DEVENGADO`, `MONTO_GIRADO`, `MONTO_CERTIFICADO`, `MONTO_COMPROMETIDO`) son **flujos del período mensual**, NO acumulados del año. Para obtener el total anual hay que sumar todos los meses disponibles (`MES_EJE > 0`). Ver análisis completo en `Docs/hallazgos-granularidad-siaf.md`.
 
 ---
 
@@ -150,7 +152,9 @@ Para cada consulta al SIAF hacer:
 1. Filtrar SIEMPRE por SEC_EJEC = '300687' AND ANO_EJE = '{año}'
 2. Seleccionar máximo 8 columnas por request
 3. Paginar con LIMIT 100 OFFSET n
-4. Para MES_EJE: usar 0 para obtener el PIM base, y el mes actual para ejecución
+4. Para PIA/PIM: filtrar MES_EJE=0 y agrupar por sec_func (SUM)
+5. Para ejecución (devengado/girado/certificado): SUM de todos los meses > 0 por sec_func
+   — NO tomar solo el mes más reciente; los montos son flujos mensuales, no acumulados
 ```
 
 ---
@@ -314,7 +318,7 @@ LIMIT 50
 | Solo hay datos del año vigente en el resource_id explorado | El sistema deberá identificar o almacenar los resource_id históricos para comparativos multianuales |
 | Los campos PLIEGO y SECTOR están vacíos para GL | No usar estos campos como filtro; usar siempre SEC_EJEC |
 | La API falla con más de ~8 columnas por query | El backend debe dividir las consultas en múltiples requests y unirlas en memoria |
-| MES_EJE = 0 contiene el PIM vigente sin ejecución mensual | Usar MES_EJE = 0 para dashboards de presupuesto; MES_EJE = mes_actual para ejecución acumulada |
+| MES_EJE = 0 contiene PIA y PIM; meses 1-N contienen ejecución | PIA/PIM: sumar filas de MES_EJE=0. Devengado/Girado/Certificado: sumar TODOS los meses > 0 (son flujos mensuales, no acumulados). Ver `Docs/hallazgos-granularidad-siaf.md`. |
 | SEC_FUNC es la llave de cruce principal SIAF↔SIGA | Confirmar con exploración SIGA que el valor es el mismo numéricamente |
 | ~70 proyectos de inversión activos en 2026 | El Portal de Obras tendrá fichas para todos ellos |
 | TIPO_ACT_PROY = '2' para proyectos, '3' para actividades | Filtrar con el valor numérico, no el nombre texto |

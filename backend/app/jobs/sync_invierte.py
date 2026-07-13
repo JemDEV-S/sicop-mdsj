@@ -154,6 +154,15 @@ def _leer_todo(client: MefClient) -> dict[str, dict[str, Any]]:
                 "nombre_uei": _str_o_none(r.get("NOMBRE_UEI")),
                 "nombre_uf": _str_o_none(r.get("NOMBRE_UF")),
                 "nombre_opmi": _str_o_none(r.get("NOMBRE_OPMI")),
+                # Alta prioridad — agregados 2026-07-13
+                "pia_anio_actual": _num_o_none(r.get("PIA_ANIO_ACTUAL")),
+                "num_habitantes_benef": _int_o_none(r.get("NUM_HABITANTES_BENEF")),
+                "registrado_pmi": _si_no(r.get("REGISTRADO_PMI")),
+                "pmi_anio_1": _num_o_none(r.get("PMI_ANIO_1")),
+                "pmi_anio_2": _num_o_none(r.get("PMI_ANIO_2")),
+                "pmi_anio_3": _num_o_none(r.get("PMI_ANIO_3")),
+                "pmi_anio_4": _num_o_none(r.get("PMI_ANIO_4")),
+                "ult_fec_decla_estim": _fecha(r.get("ULT_FEC_DECLA_ESTIM")),
             }
             
     return consolidado
@@ -173,6 +182,10 @@ _COLUMNAS = [
     "fec_fin_ejec_fisica", "fecha_viabilidad", "primer_devengado",
     "ultimo_devengado", "latitud", "longitud", "ubigeo", "departamento",
     "provincia", "distrito", "nombre_uei", "nombre_uf", "nombre_opmi",
+    # Alta prioridad
+    "pia_anio_actual", "num_habitantes_benef", "registrado_pmi",
+    "pmi_anio_1", "pmi_anio_2", "pmi_anio_3", "pmi_anio_4",
+    "ult_fec_decla_estim",
 ]
 
 

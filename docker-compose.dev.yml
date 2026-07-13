@@ -39,28 +39,10 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # ─── SQL Server 2022 (SIGA restaurado localmente) ─────────────
-  # Nota: el backup SIGA_300687.bak se restaura mediante scripts/restore-siga.ps1
-  # tras el primer arranque.
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    container_name: sicop_sqlserver_siga_dev
-    environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Sicop_Dev_2026!}
-      MSSQL_PID: "Developer"
-    ports:
-      - "${MSSQL_PORT:-1433}:1433"
-    volumes:
-      - sqlserver_data:/var/opt/mssql
-      - ./scripts/siga-backup:/backups
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
-    restart: unless-stopped
+  # ─── SQL Server (SIGA) ────────────────────────────────────────
+  # En dev el SQL Server corre en el HOST (instalación nativa Windows) con la
+  # BD SIGA_300687 ya restaurada. El backend se conecta vía host.docker.internal.
+  # (Servicio 'sqlserver' de Docker removido para no ocupar el puerto 1433.)
 
   # ─── Adminer (Gestor de BD por navegador web) ───────────────────
   # Accede en tu navegador a http://localhost:8080
@@ -79,8 +61,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: sicop_backend_dev
-    # Usamos bash -c para asegurarnos de activar el entorno y correr uvicorn desde /app
-    command: bash -c "source venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     volumes:
@@ -91,7 +72,11 @@ services:
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
       - REDIS_URL=redis://redis:6379/0
-      - MSSQL_SERVER=sqlserver
+      # SIGA vive en el host (SQL Server nativo Windows). Desde el contenedor
+      # Linux se llega vía host.docker.internal (Docker Desktop).
+      - MSSQL_SERVER=host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,8 +89,6 @@ volumes:
     name: sicop_postgres_data_dev
   redis_data:
     name: sicop_redis_data_dev
-  sqlserver_data:
-    name: sicop_sqlserver_data_dev
   uploads_dev:
     name: sicop_uploads_dev
 

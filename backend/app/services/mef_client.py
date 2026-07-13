@@ -24,7 +24,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_S = 30.0
+TIMEOUT_S = 90.0
 PAGE_LIMIT = 100
 
 
