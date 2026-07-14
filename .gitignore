@@ -47,6 +47,11 @@ logs/
 var/
 _data/
 
+# ─── Logs y artefactos runtime ────────────────────────────────────
+*.log
+openapi.json
+all_routes.txt
+
 # ─── IDE / OS ─────────────────────────────────────────────────────
 .vscode/
 !.vscode/settings.json.example

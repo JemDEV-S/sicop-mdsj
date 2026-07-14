@@ -1,5 +1,0 @@
-[[32m[1minfo     [0m] [1mapp_ready                     [0m [36menv[0m=[35mdevelopment[0m [36mprefix[0m=[35m/api/v1[0m [36mservice[0m=[35mbackend[0m [36mts[0m=[35m2026-07-12T05:45:35.847506Z[0m
-/api/v1/openapi.json
-/api/v1/docs
-/docs/oauth2-redirect
-/api/v1/redoc
