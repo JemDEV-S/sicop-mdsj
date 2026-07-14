@@ -34,8 +34,24 @@ def obtener_obra(
     if ficha is None:
         return None
     montos = obras_repo.montos_de_obra(db, codigo_unico=codigo_unico, ano=ano)
-    porc = None
+
+    # Fallback: si SIAF no tiene filas para este CUI pero Invierte.pe sí trae montos,
+    # usamos los denormalizados de siaf.inversiones como fuente de respaldo.
     pim = float(montos.get("pim") or 0)
+    if pim == 0:
+        pim_inv = float(ficha.get("pim_anio_actual") or 0)
+        if pim_inv > 0:
+            montos = {
+                "pia": float(ficha.get("pia_anio_actual") or 0),
+                "pim": pim_inv,
+                "certificado": float(ficha.get("certif_anio_actual") or 0),
+                "comprometido_anual": float(ficha.get("comprom_anual_anio_actual") or 0),
+                "devengado": float(ficha.get("dev_anio_actual") or 0),
+                "girado": 0.0,
+            }
+            pim = pim_inv
+
+    porc = None
     if pim > 0:
         porc = round(float(montos.get("devengado") or 0) / pim * 100, 2)
     ficha["montos_ejecucion"] = {**montos, "porcentaje_devengado": porc}

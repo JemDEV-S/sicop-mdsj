@@ -1,4 +1,7 @@
+'use client';
+
 import { cn } from '@/lib/utils';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 interface BarraEjecucionProps {
   pim: number;
@@ -13,11 +16,21 @@ interface BarraEjecucionProps {
   ariaLabel?: string;
 }
 
+interface Etapa {
+  key: string;
+  label: string;
+  pct: number;
+  monto: number | null;
+  color: string;
+  text: string;
+}
+
 /**
  * Barra de ejecución escalonada del presupuesto.
  * Muestra Certificado → Comprometido → Devengado → Girado como capas
  * apiladas de mayor a menor porcentaje, sobre el fondo del PIM.
- * Debajo, marcadores puntuales con el porcentaje respectivo.
+ * Debajo, marcadores puntuales con el porcentaje respectivo, con
+ * detección de colisiones para que no se superpongan entre sí.
  */
 export function BarraEjecucion({
   pim,
@@ -37,7 +50,7 @@ export function BarraEjecucion({
   const pDev = pct(devengado);
   const pGir = pct(girado);
 
-  const etapas = [
+  const etapas: Etapa[] = [
     { key: 'cer', label: 'Certificado', pct: pCer, monto: certificado, color: 'bg-accent', text: 'text-accent-foreground' },
     { key: 'com', label: 'Comprometido', pct: pCom, monto: comprometido, color: 'bg-secondary/60', text: 'text-secondary' },
     { key: 'dev', label: 'Devengado', pct: pDev, monto: devengado, color: 'bg-primary', text: 'text-primary' },
@@ -66,20 +79,10 @@ export function BarraEjecucion({
         ))}
       </div>
 
-      {/* Etiquetas debajo, alineadas por porcentaje real */}
-      <div className="relative h-14 hidden sm:block" aria-hidden="true">
-        {etapas.map((etapa) => (
-          <MarcadorEtapa
-            key={etapa.key}
-            porcentaje={etapa.pct}
-            label={etapa.label}
-            monto={formatoMonto(etapa.monto)}
-            colorTexto={etapa.text}
-          />
-        ))}
-      </div>
+      {/* Etiquetas debajo, con anti-colisión */}
+      <EtiquetasEtapas etapas={etapas} formatoMonto={formatoMonto} />
 
-      {/* Versión móvil apilada */}
+      {/* Versión móvil apilada (sin problema de solape, va en lista vertical) */}
       <ul className="sm:hidden space-y-2 text-sm">
         {etapas.map((etapa) => (
           <li key={etapa.key} className="flex items-center justify-between gap-3">
@@ -97,30 +100,121 @@ export function BarraEjecucion({
   );
 }
 
-interface MarcadorEtapaProps {
-  porcentaje: number;
-  label: string;
-  monto: string;
-  colorTexto: string;
+interface EtiquetasEtapasProps {
+  etapas: Etapa[];
+  formatoMonto: (v: number | null) => string;
 }
 
-function MarcadorEtapa({ porcentaje, label, monto, colorTexto }: MarcadorEtapaProps) {
-  // Anclamos por la izquierda excepto al extremo derecho donde flipeamos.
-  const flipDerecha = porcentaje > 85;
+const GAP_MIN_PX = 10; // separación mínima horizontal entre etiquetas
+const ANCHO_ESTIMADO_PX = 76; // ancho de respaldo antes de la primera medición real
+
+/**
+ * Renderiza las etiquetas debajo de la barra y las reacomoda para que
+ * nunca se superpongan, sin importar qué tan cerca estén los porcentajes.
+ *
+ * Estrategia:
+ * 1. Se renderiza cada etiqueta en su posición "real" (según %) para poder medir su ancho.
+ * 2. Se calcula, de izquierda a derecha, el desplazamiento mínimo necesario
+ *    para que cada etiqueta no invada el espacio de la anterior.
+ * 3. Si el bloque completo se sale del contenedor por la derecha, se retrocede
+ *    en conjunto; luego se re-verifica que no se generen nuevos solapes.
+ * 4. El resultado se guarda como un offset en px por etiqueta y se aplica con `transform`.
+ */
+function EtiquetasEtapas({ etapas, formatoMonto }: EtiquetasEtapasProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const [offsets, setOffsets] = useState<Record<string, number>>({});
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const recalcular = () => {
+      const containerWidth = container.offsetWidth;
+      if (containerWidth === 0) return;
+
+      const ordenadas = [...etapas].sort((a, b) => a.pct - b.pct);
+
+      const nodos = ordenadas.map((e) => ({
+        key: e.key,
+        centro: (e.pct / 100) * containerWidth,
+        ancho: itemRefs.current[e.key]?.offsetWidth || ANCHO_ESTIMADO_PX,
+      }));
+
+      // Empuje de izquierda a derecha: cada etiqueta respeta el espacio de la anterior
+      for (let i = 1; i < nodos.length; i++) {
+        const prev = nodos[i - 1];
+        const cur = nodos[i];
+        const minCentro = prev.centro + prev.ancho / 2 + GAP_MIN_PX + cur.ancho / 2;
+        if (cur.centro < minCentro) cur.centro = minCentro;
+      }
+
+      // Si el bloque se sale por la derecha, se retrocede todo en conjunto
+      const ultimo = nodos[nodos.length - 1];
+      if (ultimo) {
+        const exceso = ultimo.centro + ultimo.ancho / 2 - containerWidth;
+        if (exceso > 0) {
+          nodos.forEach((n) => (n.centro -= exceso));
+          // Re-verifica solapes de derecha a izquierda tras el retroceso
+          for (let i = nodos.length - 2; i >= 0; i--) {
+            const next = nodos[i + 1];
+            const cur = nodos[i];
+            const maxCentro = next.centro - next.ancho / 2 - GAP_MIN_PX - cur.ancho / 2;
+            if (cur.centro > maxCentro) cur.centro = maxCentro;
+          }
+        }
+      }
+
+      // Evita que la primera etiqueta se salga por la izquierda
+      const primero = nodos[0];
+      if (primero && primero.centro < primero.ancho / 2) {
+        const ajuste = primero.ancho / 2 - primero.centro;
+        nodos.forEach((n) => (n.centro += ajuste));
+      }
+
+      const nuevosOffsets: Record<string, number> = {};
+      nodos.forEach((n) => {
+        const centroReal = (etapas.find((e) => e.key === n.key)!.pct / 100) * containerWidth;
+        nuevosOffsets[n.key] = n.centro - centroReal;
+      });
+      setOffsets(nuevosOffsets);
+    };
+
+    recalcular();
+
+    const resizeObserver = new ResizeObserver(recalcular);
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [etapas.map((e) => `${e.key}:${e.pct}`).join(',')]);
+
   return (
-    <div
-      className="absolute top-0 flex flex-col text-xs"
-      style={{
-        left: `${porcentaje}%`,
-        transform: flipDerecha ? 'translateX(-100%)' : 'translateX(-1px)',
-      }}
-    >
-      <span className={cn('h-2 w-px bg-border')} aria-hidden="true" />
-      <span className={cn('mt-1 font-semibold tabular-nums text-foreground')}>
-        {porcentaje.toFixed(1)}%
-      </span>
-      <span className={cn('font-medium', colorTexto)}>{label}</span>
-      <span className="text-muted-foreground tabular-nums">{monto}</span>
+    <div ref={containerRef} className="relative h-14 hidden sm:block" aria-hidden="true">
+      {etapas.map((etapa) => {
+        const offset = offsets[etapa.key] ?? 0;
+        return (
+          <div
+            key={etapa.key}
+            ref={(el) => {
+              itemRefs.current[etapa.key] = el;
+            }}
+            className="absolute top-0 flex flex-col items-center text-xs"
+            style={{
+              left: `calc(${etapa.pct}% + ${offset}px)`,
+              transform: 'translateX(-50%)',
+            }}
+          >
+            <span className="h-2 w-px bg-border" aria-hidden="true" />
+            <span className="mt-1 font-semibold tabular-nums text-foreground whitespace-nowrap">
+              {etapa.pct.toFixed(1)}%
+            </span>
+            <span className={cn('font-medium whitespace-nowrap', etapa.text)}>{etapa.label}</span>
+            <span className="text-muted-foreground tabular-nums whitespace-nowrap">
+              {formatoMonto(etapa.monto)}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

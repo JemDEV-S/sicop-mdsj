@@ -1,11 +1,17 @@
 import { apiClient } from '../../lib/api-client';
-import type { 
-  EjecucionResumen, 
-  EjecucionPorFuncion, 
-  EjecucionPorFuente, 
+import type {
+  EjecucionResumen,
+  EjecucionPorFuncion,
+  EjecucionPorFuente,
   EjecucionMensual,
   EjecucionDetalleFiltros,
-  EjecucionDetalleResponse
+  EjecucionDetalleResponse,
+  JerarquiaNodo,
+  JerarquiaParams,
+  EjecucionPorRubro,
+  EjecucionPorGenerica,
+  EjecucionMensualAcumulado,
+  MetaDesgloseResponse,
 } from './types';
 
 export interface EjecucionParams {
@@ -40,6 +46,42 @@ export interface EjecucionDetalleParams extends EjecucionDetalleFiltros {
 
 export async function fetchEjecucionDetalle(params: EjecucionDetalleParams): Promise<EjecucionDetalleResponse> {
   const { data } = await apiClient.get<EjecucionDetalleResponse>('/publico/ejecucion/detalle', { params });
+  return data;
+}
+
+export async function fetchEjecucionJerarquia(params: JerarquiaParams): Promise<JerarquiaNodo[]> {
+  const { data } = await apiClient.get<JerarquiaNodo[]>('/publico/ejecucion/jerarquia', { params });
+  return data;
+}
+
+export async function fetchEjecucionPorRubro(params?: EjecucionParams): Promise<EjecucionPorRubro[]> {
+  const { data } = await apiClient.get<EjecucionPorRubro[]>('/publico/ejecucion/por-rubro', { params });
+  return data;
+}
+
+export async function fetchEjecucionPorGenerica(params?: EjecucionParams): Promise<EjecucionPorGenerica[]> {
+  const { data } = await apiClient.get<EjecucionPorGenerica[]>('/publico/ejecucion/por-generica', { params });
+  return data;
+}
+
+export async function fetchEjecucionMensualAcumulado(
+  params?: EjecucionParams,
+): Promise<EjecucionMensualAcumulado[]> {
+  const { data } = await apiClient.get<EjecucionMensualAcumulado[]>(
+    '/publico/ejecucion/mensual-acumulado',
+    { params },
+  );
+  return data;
+}
+
+export async function fetchMetaDesglose(
+  secFunc: number,
+  params?: EjecucionParams,
+): Promise<MetaDesgloseResponse> {
+  const { data } = await apiClient.get<MetaDesgloseResponse>(
+    `/publico/ejecucion/meta/${secFunc}/desglose`,
+    { params },
+  );
   return data;
 }
 
