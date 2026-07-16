@@ -225,7 +225,7 @@ Smoke test manual: arrancar `npm run dev`, entrar como funcionario semilla, reco
 - [x] **T-44** · Dashboard bienvenida — rediseñar widgets y layout — [2026-07-15]
 
 ### Etapa B — Núcleo operativo
-- [ ] **T-45** · Pipeline kanban
+- [x] **T-45** · Pipeline kanban — [2026-07-16]
 - [ ] **T-46** · Detalle pedido
 - [ ] **T-47** · Alertas estancados
 
@@ -439,6 +439,36 @@ Endpoints modificados: `/interno/pipeline/kanban`, `/interno/pedidos`, `/interno
 - `WidgetPipeline` con `var(--chart-1..5)` → los tokens `--chart-*` son categóricos (5 fuentes de financiamiento); el pipeline es un flujo lineal donde la intensidad debe crecer con el avance. Se usa gradación `primary/25 → primary/50 → primary/75 → secondary → muted-foreground/40`.
 
 **Impacto:** cierra la Etapa A. El sistema queda listo para arrancar Etapa B (T-45 Pipeline kanban). El patrón "hooks leen store + queryKey incluye año/CC" es la referencia para el resto del interno.
+
+---
+
+### [2026-07-16] · T-45 Pipeline kanban con 6 macrofases (no 5 columnas)
+
+**Contexto:** el mockup textual de HU-09 propone "5 columnas: Solicitado, Con orden, Conformidad, Devengado, Cerrado" pero el backend/SIGA ya modela el pipeline con **6 macrofases**: solicitud, programacion, certificacion, contratacion, ejecucion, cierre. El widget del dashboard (Etapa A · paso 3) también las usa. Adoptar las "5 columnas" del mockup implicaría duplicar taxonomía y desalinear miniatura vs. pantalla completa.
+
+**Decisión:** el kanban usa **6 columnas correspondientes a las macrofases del SIGA**. Cada columna es expandible a sus etapas (13 servicios / 16 bienes) con un botón "Ver etapas" — respeta §1 principio 5 (jerarquía MEF/SIGA) y §1.1 (densidad progresiva).
+
+**Filtros MVP (AC-09.3 parcial):**
+- Tipo B/S (radio group) — implementado.
+- Solo estancados (toggle) — implementado, atajo a vista de trabajo urgente.
+- Búsqueda por N° pedido — implementado.
+- **Diferidos a v2:** rango de fechas y filtro por proveedor (requieren backend/query nuevos que no aportan al día a día del operativo — anotado en §7.1).
+
+**Paginación por columna:** con 1023 pedidos en `cierre` y 782 en `ejecucion`, renderizar todo bloquea el DOM. Cada columna muestra los primeros 20 (estancados primero, luego por días descendente) y ofrece "Cargar 20 más". Es la opción más simple sin introducir virtualización — si en la práctica el usuario se cansa de paginar, escalar a `react-virtual`.
+
+**Estilo:** misma gradación de colores que el `WidgetPipeline` del dashboard (primary/25 → primary → secondary → muted). Semáforo NO se usa (según design-master); estancados se marcan con `border-l-4 border-l-destructive` + `AlertTriangle`, respetando §1.1 "Semáforo con etiqueta, color como refuerzo".
+
+**Alternativas descartadas:**
+- 5 columnas literales del mockup HU-09 → contradice taxonomía SIGA canónica y widget dashboard.
+- Virtualización con `@tanstack/react-virtual` → complejidad prematura; paginación explícita cubre el caso.
+- Filtros avanzados (fecha + proveedor) en MVP → no aportan a lo urgente y complican el estado local; postergado.
+
+**Impacto:**
+- Nuevo feature `features/pipeline/` con `PedidoCard`, `KanbanColumn`, `FiltrosPipeline`, `secciones/PipelineKanban`.
+- Nueva página `pages/interno/Pipeline.tsx`.
+- Router: stub `/interno/pipeline` reemplazado por lazy-load.
+- `DashboardWidgets.RESUMEN_VACIO` extendido con `mef: null` (para satisfacer el tipo actualizado en la sesión previa).
+- `useKanban()` en `features/dashboard/api.ts` se reutiliza tal cual — cambio del año/CC en topbar dispara refetch automático (patrón del paso 3 de Etapa A confirmado).
 
 ---
 

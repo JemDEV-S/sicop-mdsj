@@ -34,6 +34,7 @@ const RESUMEN_VACIO: SaldosResumen = {
   metas_total: 0,
   metas_criticas: 0,
   top_metas_criticas: [],
+  mef: null,
 };
 
 

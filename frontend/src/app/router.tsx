@@ -85,7 +85,10 @@ export const router = createBrowserRouter([
           },
           {
             path: 'pipeline',
-            element: <div>Pipeline (Stub · T-45)</div>
+            lazy: async () => {
+              const { default: Pipeline } = await import('../pages/interno/Pipeline');
+              return { Component: Pipeline };
+            }
           },
           {
             path: 'pedidos/:nroPedido/:tipoBien',
