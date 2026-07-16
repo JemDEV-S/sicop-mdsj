@@ -1,184 +1,174 @@
 import { useMemo } from 'react';
-import { BarChart3, FileText, GitBranch, Wallet } from 'lucide-react';
-import { useAuthStore } from '@/store/auth';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { ErrorState } from '@/components/layout/ErrorState';
-import { SkeletonKPI } from '@/components/layout/LoadingSkeleton';
-import { AccesosRapidos, type AccesoRapido } from '@/components/nav/AccesosRapidos';
+import {
+  SkeletonCard,
+  SkeletonTable,
+} from '@/components/layout/LoadingSkeleton';
+import { useAuthStore } from '@/store/auth';
+import { useContextoInterno } from '@/store/contexto-interno';
 import { WidgetAlertas } from '../widgets/WidgetAlertas';
 import { WidgetPipeline } from '../widgets/WidgetPipeline';
 import { WidgetSaldos } from '../widgets/WidgetSaldos';
 import { UltimosPedidos } from '../widgets/UltimosPedidos';
-import { useKanban, useSaldos, usePedidosEstancados } from '../api';
-import type { SaldosResumen } from '../types';
+import {
+  useContratosPorVencer,
+  useKanban,
+  useMetasRezagadas,
+  usePedidosEstancados,
+  useResumenSaldos,
+} from '../api';
+import type { PedidoCard, SaldosResumen } from '../types';
 
-const ACCESOS: AccesoRapido[] = [
-  { label: 'Pipeline', icono: GitBranch, href: '/interno/pipeline' },
-  { label: 'Saldos', icono: Wallet, href: '/interno/saldos' },
-  { label: 'Reportes', icono: FileText, href: '/interno/reportes' },
-  { label: 'Ejecución', icono: BarChart3, href: '/ejecucion' },
-];
+const RESUMEN_VACIO: SaldosResumen = {
+  ano: 0,
+  pia: 0,
+  pim: 0,
+  certificado: 0,
+  comprometido: 0,
+  devengado: 0,
+  saldo_disponible: 0,
+  reservado_pedido: 0,
+  porcentaje_devengado: 0,
+  semaforo: 'desconocido',
+  metas_total: 0,
+  metas_criticas: 0,
+  top_metas_criticas: [],
+};
+
+
+const ROL_LABEL: Record<string, string> = {
+  admin: 'Administrador',
+  decisor: 'Decisor',
+  operativo: 'Operativo',
+  ciudadano: 'Ciudadano',
+};
 
 export default function DashboardWidgets() {
   const user = useAuthStore((s) => s.user);
+  const año = useContextoInterno((s) => s.añoActivo);
+  const cc = useContextoInterno((s) => s.ccActivo);
 
-  const {
-    data: kanban,
-    isLoading: isLoadingK,
-    isError: isErrorK,
-    error: errorK,
-    refetch: refetchK,
-  } = useKanban();
-  const {
-    data: saldosData,
-    isLoading: isLoadingS,
-    isError: isErrorS,
-    error: errorS,
-    refetch: refetchS,
-  } = useSaldos({ page: 1, size: 100 });
-  const {
-    data: estancados,
-    isLoading: isLoadingE,
-    isError: isErrorE,
-    error: errorE,
-    refetch: refetchE,
-  } = usePedidosEstancados();
+  const kanbanQ = useKanban();
+  const resumenQ = useResumenSaldos();
+  const estancadosQ = usePedidosEstancados();
+  const contratosQ = useContratosPorVencer(30);
+  const metasRezagadasQ = useMetasRezagadas(50);
 
-  const isLoading = isLoadingK || isLoadingS || isLoadingE;
-  const isError = isErrorK || isErrorS || isErrorE;
-  const error = errorK || errorS || errorE;
+  const isLoading =
+    kanbanQ.isLoading ||
+    resumenQ.isLoading ||
+    estancadosQ.isLoading ||
+    contratosQ.isLoading ||
+    metasRezagadasQ.isLoading;
 
-  const alertasResumen = useMemo(
-    () => ({
-      pedidos_estancados: estancados?.length ?? 0,
-      contratos_por_vencer: 0,
-      metas_rezagadas: 0,
-    }),
-    [estancados],
+  const isError =
+    kanbanQ.isError ||
+    resumenQ.isError ||
+    estancadosQ.isError ||
+    contratosQ.isError ||
+    metasRezagadasQ.isError;
+
+  const primerError =
+    kanbanQ.error || resumenQ.error || estancadosQ.error ||
+    contratosQ.error || metasRezagadasQ.error;
+
+  const macrofasesPipeline = useMemo(
+    () => kanbanQ.data?.macrofases ?? [],
+    [kanbanQ.data],
   );
 
-  const pipelineResumen = useMemo(() => {
-    if (!kanban) {
-      return { solicitados: 0, con_orden: 0, conformidad: 0, devengado: 0, cerrado: 0 };
-    }
-    return {
-      solicitados: kanban.solicitado.length,
-      con_orden: kanban.con_orden.length,
-      conformidad: kanban.conformidad.length,
-      devengado: kanban.devengado.length,
-      cerrado: kanban.cerrado.length,
-    };
-  }, [kanban]);
-
-  const saldosResumen = useMemo<SaldosResumen>(() => {
-    if (!saldosData || !saldosData.items) {
-      return {
-        saldo_disponible: 0,
-        pim_total: 0,
-        devengado_total: 0,
-        porcentaje_ejecucion: 0,
-        semaforo: null,
-      };
-    }
-
-    let pim_total = 0;
-    let devengado_total = 0;
-    let saldo_disponible = 0;
-
-    saldosData.items.forEach((item) => {
-      pim_total += item.pim || 0;
-      devengado_total += item.devengado || 0;
-      saldo_disponible += item.saldo_disponible || 0;
-    });
-
-    const porcentaje_ejecucion = pim_total > 0 ? (devengado_total / pim_total) * 100 : 0;
-
-    let semaforo: SaldosResumen['semaforo'] = 'ok';
-    if (porcentaje_ejecucion < 40) semaforo = 'critico';
-    else if (porcentaje_ejecucion < 70) semaforo = 'alerta';
-
-    return {
-      saldo_disponible,
-      pim_total,
-      devengado_total,
-      porcentaje_ejecucion,
-      semaforo,
-    };
-  }, [saldosData]);
-
-  const ultimosPedidos = useMemo(() => {
-    if (!kanban) return [];
-    const todos = [
-      ...kanban.solicitado,
-      ...kanban.con_orden,
-      ...kanban.conformidad,
-      ...kanban.devengado,
-      ...kanban.cerrado,
-    ];
-    todos.sort((a, b) => {
-      if (!a.fecha_pedido) return 1;
-      if (!b.fecha_pedido) return -1;
-      return new Date(b.fecha_pedido).getTime() - new Date(a.fecha_pedido).getTime();
-    });
-
-    return todos.slice(0, 5).map((p) => ({
-      nro_pedido: p.nro_pedido.toString(),
-      monto: p.monto_total,
-      descripcion: p.motivo || 'Sin descripción',
-      estado: p.etapa,
-      fecha: p.fecha_pedido || null,
-    }));
-  }, [kanban]);
+  const ultimosPedidos = useMemo<PedidoCard[]>(() => {
+    const k = kanbanQ.data;
+    if (!k) return [];
+    const todos: PedidoCard[] = Object.values(k.pedidos_por_etapa ?? {})
+      .flatMap((lista) => lista ?? []);
+    return [...todos]
+      .sort((a, b) => {
+        if (!a.fecha_pedido) return 1;
+        if (!b.fecha_pedido) return -1;
+        return new Date(b.fecha_pedido).getTime() - new Date(a.fecha_pedido).getTime();
+      })
+      .slice(0, 5);
+  }, [kanbanQ.data]);
 
   function reintentar() {
-    void refetchK();
-    void refetchS();
-    void refetchE();
+    void kanbanQ.refetch();
+    void resumenQ.refetch();
+    void estancadosQ.refetch();
+    void contratosQ.refetch();
+    void metasRezagadasQ.refetch();
   }
+
+  const descripcionContexto = construirDescripcion({
+    año,
+    ccNombre: cc?.nombre ?? null,
+    ccCodigo: cc?.codigo ?? null,
+    rol: user?.rol ?? null,
+    nombre: user?.nombre_completo ?? null,
+  });
 
   return (
     <div className="space-y-6">
-      {/* Saludo */}
-      <header>
-        <h1 className="text-2xl font-bold text-foreground">
-          Bienvenido{user?.nombre_completo ? `, ${user.nombre_completo}` : ''}
-        </h1>
-        {user?.rol ? (
-          <p className="text-sm text-muted-foreground mt-1 capitalize">{user.rol}</p>
-        ) : null}
-      </header>
+      <PageHeader titulo="Panel de trabajo" descripcion={descripcionContexto} />
 
       {isError ? (
         <ErrorState
-          titulo="No se pudo cargar el dashboard"
+          titulo="No se pudo cargar el panel"
           descripcion={
-            error instanceof Error ? error.message : 'Ocurrió un error al consultar los datos.'
+            primerError instanceof Error
+              ? primerError.message
+              : 'Ocurrió un error al consultar los datos. Puede ser un corte temporal del SIGA o SIAF.'
           }
           onReintentar={reintentar}
         />
       ) : isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <SkeletonKPI />
-          <SkeletonKPI />
-          <SkeletonKPI />
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </div>
+          <SkeletonTable rows={5} cols={5} />
         </div>
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <WidgetAlertas alertas={alertasResumen} />
-            <WidgetPipeline pipeline={pipelineResumen} />
-            <WidgetSaldos saldos={saldosResumen} />
+            <WidgetAlertas
+              pedidosEstancados={estancadosQ.data?.length ?? 0}
+              contratosPorVencer={contratosQ.data?.length ?? 0}
+              metasRezagadas={metasRezagadasQ.data?.length ?? 0}
+            />
+            <WidgetPipeline macrofases={macrofasesPipeline} />
+            <WidgetSaldos resumen={resumenQ.data ?? RESUMEN_VACIO} />
           </div>
 
           <UltimosPedidos pedidos={ultimosPedidos} />
-
-          <div>
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-              Accesos rápidos
-            </h2>
-            <AccesosRapidos items={ACCESOS} />
-          </div>
         </>
       )}
     </div>
   );
+}
+
+function construirDescripcion({
+  año,
+  ccNombre,
+  ccCodigo,
+  rol,
+  nombre,
+}: {
+  año: number;
+  ccNombre: string | null;
+  ccCodigo: string | null;
+  rol: string | null;
+  nombre: string | null;
+}) {
+  const partes: string[] = [];
+  if (nombre) partes.push(nombre);
+  if (rol) partes.push(ROL_LABEL[rol] ?? rol);
+  const cabecera = partes.join(' · ');
+  const contexto = ccNombre
+    ? `${ccNombre}${ccCodigo ? ` (${ccCodigo})` : ''} · Año ${año}`
+    : `Año ${año}`;
+  return cabecera ? `${cabecera} — ${contexto}` : contexto;
 }

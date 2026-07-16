@@ -110,6 +110,29 @@ def _centros_costo_directos(db: Session, usuario_id: UUID) -> list[str]:
     return [r[0] for r in rows]
 
 
+def _centros_costo_directos_detalle(
+    db: Session, usuario_id: UUID
+) -> list[dict[str, Any]]:
+    """Como `_centros_costo_directos` pero con nombre y abreviado.
+
+    Usado por `/auth/me` para que el frontend pueda mostrar el CC activo
+    con nombre legible sin un round-trip adicional a `/ref/centros-costo`.
+    """
+    rows = db.execute(
+        text(
+            """
+            SELECT cc.codigo, cc.nombre, cc.abreviado
+              FROM auth.usuarios_centros_costo ucc
+              JOIN ref.centros_costo cc ON cc.codigo = ucc.centro_costo
+             WHERE ucc.usuario_id = :usuario_id
+          ORDER BY cc.ruta
+            """
+        ),
+        {"usuario_id": str(usuario_id)},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
 def _rol_codigo(db: Session, rol_id: int) -> str:
     row = db.execute(select(Rol.codigo).where(Rol.id == rol_id)).first()
     if row is None:
@@ -352,6 +375,6 @@ def obtener_perfil(db: Session, usuario_id: UUID) -> dict[str, Any]:
         "nombre_completo": usuario.nombre_completo,
         "email": usuario.email,
         "rol": _rol_codigo(db, usuario.rol_id),
-        "centros_costo": _centros_costo_directos(db, usuario.id),
+        "centros_costo": _centros_costo_directos_detalle(db, usuario.id),
         "debe_cambiar_password": bool(usuario.debe_cambiar_password),
     }

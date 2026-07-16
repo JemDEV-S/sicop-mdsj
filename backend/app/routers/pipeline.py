@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
@@ -9,55 +12,88 @@ from app.config import settings
 from app.database import get_db
 from app.repositories import pipeline_repo
 from app.schemas.pipeline import (
+    ETAPA_A_LABEL,
+    ETAPA_A_MACROFASE,
+    ETAPA_A_NUMERO,
+    ETAPAS_ORDEN,
     KanbanResponse,
+    MACROFASE_A_LABEL,
+    MACROFASES,
     PedidoCard,
     PedidoDetalleResponse,
 )
 from app.security.deps import CurrentUser, get_current_user
-from app.services import pipeline_service
+from app.services import permisos_service, pipeline_service
 
 pipeline_router = APIRouter(prefix="/interno/pipeline", tags=["interno-pipeline"])
 pedidos_router = APIRouter(prefix="/interno/pedidos", tags=["interno-pedidos"])
 alertas_router = APIRouter(prefix="/interno/alertas", tags=["interno-alertas"])
 
+_ETAPA_PATTERN = "^(" + "|".join(ETAPAS_ORDEN) + ")$"
+_MACROFASE_PATTERN = "^(" + "|".join(MACROFASES) + ")$"
+
+
+def _coerce(v: Any) -> Any:
+    if isinstance(v, datetime):
+        return v.date()
+    return v
+
+
+def _mapear(row: dict[str, Any], mapping: dict[str, str]) -> dict[str, Any]:
+    return {mapping.get(k, k.lower()): _coerce(v) for k, v in row.items()}
+
 
 @pipeline_router.get("/kanban", response_model=KanbanResponse)
 def kanban(
     ano: int | None = None,
+    centro_costo: str | None = Query(
+        None,
+        description="Restringe el resultado a la subrama del CC indicado (dentro del alcance del usuario).",
+    ),
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> KanbanResponse:
+    centros = permisos_service.restringir_a_subrama(
+        db, user.centros_permitidos, centro_costo
+    )
     kb = pipeline_service.kanban(
         db,
         ano=ano or settings.ANO_VIGENTE,
-        centros=user.centros_permitidos,
+        centros=centros,
     )
-    return KanbanResponse(
-        solicitado=[PedidoCard.model_validate(f) for f in kb["solicitado"]],
-        con_orden=[PedidoCard.model_validate(f) for f in kb["con_orden"]],
-        conformidad=[PedidoCard.model_validate(f) for f in kb["conformidad"]],
-        devengado=[PedidoCard.model_validate(f) for f in kb["devengado"]],
-        cerrado=[PedidoCard.model_validate(f) for f in kb["cerrado"]],
-    )
+    return KanbanResponse.model_validate({
+        "ano": kb["ano"],
+        "macrofases": kb["macrofases"],
+        "pedidos_por_etapa": {
+            etapa: [PedidoCard.model_validate(f) for f in filas]
+            for etapa, filas in kb["pedidos_por_etapa"].items()
+        },
+    })
 
 
 @pedidos_router.get("", response_model=list[PedidoCard])
 def listar_pedidos(
     ano: int | None = None,
-    etapa: str | None = Query(None, pattern="^(solicitado|con_orden|conformidad|devengado|cerrado)$"),
+    etapa: str | None = Query(None, pattern=_ETAPA_PATTERN),
+    macrofase: str | None = Query(None, pattern=_MACROFASE_PATTERN),
     q: str | None = None,
+    centro_costo: str | None = None,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[PedidoCard]:
-    kb = pipeline_service.kanban(
-        db, ano=ano or settings.ANO_VIGENTE, centros=user.centros_permitidos
+    centros = permisos_service.restringir_a_subrama(
+        db, user.centros_permitidos, centro_costo
     )
+    filas = pipeline_service.clasificar_pedidos(
+        db, ano=ano or settings.ANO_VIGENTE, centros=centros
+    )
+
     if etapa:
-        filas = kb.get(etapa, [])
-    else:
-        filas = [f for lst in kb.values() for f in lst]
+        filas = [f for f in filas if f.get("etapa") == etapa]
+    elif macrofase:
+        filas = [f for f in filas if f.get("macrofase") == macrofase]
 
     if q:
         ql = q.lower()
@@ -102,7 +138,6 @@ def detalle_pedido(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="pedido fuera del alcance del usuario",
             )
-    # Renombrar keys que vienen en mayusculas.
     mapping = {
         "ANO_EJE": "ano_eje", "SEC_EJEC": "sec_ejec",
         "NRO_PEDIDO": "nro_pedido", "TIPO_BIEN": "tipo_bien",
@@ -110,30 +145,46 @@ def detalle_pedido(
         "FECHA_PEDIDO": "fecha_pedido", "FECHA_APROB": "fecha_aprob",
         "FECHA_ATENC": "fecha_atenc",
     }
-    renombrado = {mapping.get(k, k): v for k, v in ficha.items()}
-    # Los items/ordenes/conformidades vienen con keys mayusculas tambien
-    renombrado["items"] = [
-        {mapping.get(k, k.lower()): v for k, v in it.items()}
-        for it in ficha.get("items", [])
-    ]
-    renombrado["ordenes"] = [
-        {mapping.get(k, k.lower()): v for k, v in o.items()}
-        for o in ficha.get("ordenes", [])
-    ]
-    renombrado["conformidades"] = [
-        {mapping.get(k, k.lower()): v for k, v in c.items()}
-        for c in ficha.get("conformidades", [])
-    ]
+    renombrado = _mapear(ficha, mapping)
+    if renombrado.get("sec_ejec") is not None:
+        renombrado["sec_ejec"] = str(renombrado["sec_ejec"])
+    for key in ("items", "ordenes", "conformidades", "cuadros",
+                "certificaciones", "expedientes", "movimientos_almacen"):
+        renombrado[key] = [_mapear(row, mapping) for row in ficha.get(key, [])]
+
+    # Timeline con las 13/16 etapas + etapa actual del pedido.
+    timeline = pipeline_service.construir_timeline(ficha)
+    renombrado["timeline"] = timeline
+
+    # Etapa actual = la ultima alcanzada del timeline (o pedido_registrado).
+    alcanzadas = [h for h in timeline if h.get("alcanzada")]
+    if alcanzadas:
+        # El timeline sale ordenado por numero de etapa; la ultima alcanzada
+        # es la etapa maxima verificable.
+        actual = max(alcanzadas, key=lambda h: h["etapa_numero"])
+        etapa_actual = actual["etapa"]
+    else:
+        etapa_actual = ETAPAS_ORDEN[0]
+    renombrado["etapa_actual"] = etapa_actual
+    renombrado["etapa_actual_numero"] = ETAPA_A_NUMERO[etapa_actual]
+    renombrado["etapa_actual_label"] = ETAPA_A_LABEL[etapa_actual]
+    renombrado["macrofase_actual"] = ETAPA_A_MACROFASE[etapa_actual]
+    renombrado["macrofase_actual_label"] = MACROFASE_A_LABEL[ETAPA_A_MACROFASE[etapa_actual]]
+
     return PedidoDetalleResponse.model_validate(renombrado)
 
 
 @alertas_router.get("/pedidos-estancados", response_model=list[PedidoCard])
 def pedidos_estancados(
     ano: int | None = None,
+    centro_costo: str | None = None,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[PedidoCard]:
+    centros = permisos_service.restringir_a_subrama(
+        db, user.centros_permitidos, centro_costo
+    )
     filas = pipeline_service.estancados(
-        db, ano=ano or settings.ANO_VIGENTE, centros=user.centros_permitidos
+        db, ano=ano or settings.ANO_VIGENTE, centros=centros
     )
     return [PedidoCard.model_validate(f) for f in filas]

@@ -1,5 +1,12 @@
 import { create } from 'zustand';
 import { apiClient, setAccessToken, refreshAuthToken, setResetSessionCallback } from '../lib/api-client';
+import { useContextoInterno } from './contexto-interno';
+
+export interface CentroCostoBreve {
+  codigo: string;
+  nombre: string;
+  abreviado: string | null;
+}
 
 export interface UserProfile {
   id: string;
@@ -7,6 +14,8 @@ export interface UserProfile {
   nombre_completo: string;
   email: string | null;
   rol: string;
+  centros_costo: CentroCostoBreve[];
+  debe_cambiar_password: boolean;
 }
 
 interface AuthState {
@@ -26,20 +35,16 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   resetSession: () => {
     setAccessToken(null);
+    useContextoInterno.getState().reset();
     set({ user: null, isAuthenticated: false, isLoading: false });
   },
 
   login: async (usuario, password) => {
-    // 1. Llamada a la API para loguear
     const res = await apiClient.post('/auth/login', { usuario, password });
-    
-    // 2. Inyectar el token en memoria antes de la siguiente petición
     setAccessToken(res.data.access_token);
 
-    // 3. Obtener el perfil
     const userRes = await apiClient.get<UserProfile>('/auth/me');
-    
-    // 4. Actualizar estado global
+    useContextoInterno.getState().hidratarDesdePerfil(userRes.data.centros_costo);
     set({ user: userRes.data, isAuthenticated: true });
   },
 
@@ -59,13 +64,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   checkAuth: async () => {
     try {
-      // Intentar refrescar token. Usa la misma Promise de api-client si hay concurrencia.
       await refreshAuthToken();
-      // Si tuvo éxito, la memoria ya tiene token, ahora traemos perfil.
       const userRes = await apiClient.get<UserProfile>('/auth/me');
+      useContextoInterno.getState().hidratarDesdePerfil(userRes.data.centros_costo);
       set({ user: userRes.data, isAuthenticated: true, isLoading: false });
     } catch (error) {
-      // Fallo de hidratación. Reseteo silencioso. No expulsa a nadie a /login.
       useAuthStore.getState().resetSession();
     }
   }

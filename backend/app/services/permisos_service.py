@@ -94,3 +94,53 @@ def _centros_por_jerarquia(db: Session, usuario_id: UUID) -> list[str]:
         {"uid": str(usuario_id)},
     ).all()
     return [r[0] for r in rows]
+
+
+def restringir_a_subrama(
+    db: Session,
+    permitidos: list[str] | None,
+    cc_activo: str | None,
+) -> list[str] | None:
+    """Restringe los CC permitidos a la subrama del CC activo del contexto.
+
+    El frontend guarda un `ccActivo` en `store/contexto-interno` que el usuario
+    elige como foco de trabajo. Los endpoints internos aceptan ese código como
+    query param `centro_costo` y llaman aquí para reducir el alcance.
+
+    Comportamiento:
+    - `cc_activo` vacío o None → devuelve `permitidos` tal cual.
+    - `permitidos = None` (admin): devuelve la subrama descendente de `cc_activo`
+      sin restricción previa (admin puede enfocar cualquier CC).
+    - `permitidos = []`: devuelve `[]` (usuario sin CC no puede filtrar nada).
+    - `permitidos = [...]`: intersecta la subrama descendente de `cc_activo`
+      con los permitidos. Si `cc_activo` no está en la subrama de ninguno de los
+      permitidos, devuelve `[]` (el frontend recibirá vacío en vez de un 403,
+      porque el CC pudo ser válido en otro momento y quedar fuera al cambiar rol).
+    """
+    if not cc_activo:
+        return permitidos
+
+    subrama = db.execute(
+        text(
+            """
+            SELECT descendientes.codigo
+              FROM ref.centros_costo raiz
+              JOIN ref.centros_costo descendientes
+                ON descendientes.ruta <@ raiz.ruta
+             WHERE raiz.codigo = :cc
+               AND descendientes.activo = true
+             ORDER BY descendientes.codigo
+            """
+        ),
+        {"cc": cc_activo},
+    ).all()
+    subrama_codigos = [r[0] for r in subrama]
+    if not subrama_codigos:
+        # CC inexistente o inactivo → no devolvemos nada.
+        return []
+
+    if permitidos is None:
+        return subrama_codigos
+
+    permitidos_set = set(permitidos)
+    return [c for c in subrama_codigos if c in permitidos_set]

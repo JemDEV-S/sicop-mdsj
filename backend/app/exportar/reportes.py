@@ -123,22 +123,20 @@ REPORTE_EJECUCION_DETALLE = Reporte(
 def _datos_pedidos(
     db: Session, filtros: dict[str, Any], user: CurrentUser | None
 ) -> list[dict[str, Any]]:
+    from app.services import pipeline_service
     centros = user.centros_permitidos if user else None
-    kb = pipeline_repo.pipeline_kanban(
+    filas = pipeline_service.clasificar_pedidos(
+        db,
         ano=filtros.get("ano") or settings.ANO_VIGENTE,
         centros=centros,
     )
-    filas = [f for lst in kb.values() for f in lst]
-    if filtros.get("etapa"):
-        filas = [f for f in filas if f.get("etapa") == filtros["etapa"]]
-    # Normalizar keys uppercase → snake_case
-    mapa = {
-        "ANO_EJE": "ano_eje", "SEC_EJEC": "sec_ejec",
-        "NRO_PEDIDO": "nro_pedido", "TIPO_BIEN": "tipo_bien",
-        "CENTRO_COSTO": "centro_costo",
-        "FECHA_PEDIDO": "fecha_pedido", "FECHA_APROB": "fecha_aprob",
-    }
-    return [{mapa.get(k, k): v for k, v in f.items()} for f in filas]
+    etapa = filtros.get("etapa")
+    macrofase = filtros.get("macrofase")
+    if etapa:
+        filas = [f for f in filas if f.get("etapa") == etapa]
+    elif macrofase:
+        filas = [f for f in filas if f.get("macrofase") == macrofase]
+    return filas
 
 
 REPORTE_PEDIDOS = Reporte(
@@ -150,7 +148,9 @@ REPORTE_PEDIDOS = Reporte(
         Columna("tipo_bien", "Tipo"),
         Columna("centro_costo", "CC"),
         Columna("sec_func", "Meta"),
-        Columna("etapa", "Etapa"),
+        Columna("macrofase_label", "Macrofase"),
+        Columna("etapa_numero", "Etapa #", "numero"),
+        Columna("etapa_label", "Etapa"),
         Columna("fecha_pedido", "Fecha", "fecha"),
         Columna("motivo", "Motivo"),
         Columna("solicitante", "Solicitante"),

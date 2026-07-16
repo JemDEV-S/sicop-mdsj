@@ -24,11 +24,17 @@ class CambiarPasswordRequest(BaseModel):
     password_nueva: str = Field(min_length=8, max_length=128)
 
 
+class CentroCostoBreve(BaseModel):
+    codigo: str
+    nombre: str
+    abreviado: str | None = None
+
+
 class MeResponse(BaseModel):
     id: UUID
     usuario: str
     nombre_completo: str
     email: str | None
     rol: str
-    centros_costo: list[str]
+    centros_costo: list[CentroCostoBreve]
     debe_cambiar_password: bool

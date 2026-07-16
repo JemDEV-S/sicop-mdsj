@@ -1,54 +1,67 @@
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Clock, FileWarning, TrendingDown } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { SectionCard } from '@/components/layout/SectionCard';
 import { EmptyState } from '@/components/layout/EmptyState';
-import type { AlertasResumen } from '../types';
 
 interface WidgetAlertasProps {
-  alertas: AlertasResumen;
+  pedidosEstancados: number;
+  contratosPorVencer: number;
+  metasRezagadas: number;
 }
 
-export function WidgetAlertas({ alertas }: WidgetAlertasProps) {
-  const total =
-    alertas.pedidos_estancados + alertas.contratos_por_vencer + alertas.metas_rezagadas;
+/**
+ * Widget consolidado de alertas del funcionario (HU-11 + HU-16 + HU-20).
+ * Cada fila enlaza a la vista dedicada del alerta (T-47/T-49/T-53).
+ */
+export function WidgetAlertas({
+  pedidosEstancados,
+  contratosPorVencer,
+  metasRezagadas,
+}: WidgetAlertasProps) {
+  const total = pedidosEstancados + contratosPorVencer + metasRezagadas;
 
   return (
     <SectionCard
-      titulo="Alertas"
+      titulo="Alertas del día"
       icono={AlertTriangle}
       padding="md"
-      className="h-full"
+      className="h-full flex flex-col"
     >
-      <div data-testid="widget-alertas">
+      <div data-testid="widget-alertas" className="flex flex-col gap-2">
         {total === 0 ? (
           <EmptyState
             icono={AlertTriangle}
             titulo="Sin alertas pendientes"
-            descripcion="No hay pedidos estancados, contratos por vencer ni metas rezagadas."
+            descripcion="Nada estancado, sin contratos por vencer y todas las metas ejecutan a tiempo."
           />
         ) : (
-          <ul className="space-y-2">
-            {alertas.pedidos_estancados > 0 ? (
-              <Fila
-                label="Pedidos estancados"
-                valor={alertas.pedidos_estancados}
-                severidad="alerta"
-              />
-            ) : null}
-            {alertas.contratos_por_vencer > 0 ? (
-              <Fila
-                label="Contratos por vencer"
-                valor={alertas.contratos_por_vencer}
-                severidad="alerta"
-              />
-            ) : null}
-            {alertas.metas_rezagadas > 0 ? (
-              <Fila
-                label="Metas rezagadas"
-                valor={alertas.metas_rezagadas}
-                severidad="critico"
-              />
-            ) : null}
-          </ul>
+          <>
+            <Fila
+              icono={Clock}
+              label="Pedidos estancados"
+              valor={pedidosEstancados}
+              href="/interno/pipeline?filtro=estancados"
+              severidad="alerta"
+              hint=">15 días sin avance"
+            />
+            <Fila
+              icono={TrendingDown}
+              label="Metas rezagadas"
+              valor={metasRezagadas}
+              href="/interno/saldos?filtro=rezagadas"
+              severidad="critico"
+              hint="< 50% devengado"
+            />
+            <Fila
+              icono={FileWarning}
+              label="Contratos por vencer"
+              valor={contratosPorVencer}
+              href="/interno/contratos?filtro=por-vencer"
+              severidad="alerta"
+              hint="Próximos 30 días"
+            />
+          </>
         )}
       </div>
     </SectionCard>
@@ -57,22 +70,54 @@ export function WidgetAlertas({ alertas }: WidgetAlertasProps) {
 
 type Severidad = 'alerta' | 'critico';
 
-function Fila({
-  label,
-  valor,
-  severidad,
-}: {
+interface FilaProps {
+  icono: LucideIcon;
   label: string;
   valor: number;
+  href: string;
   severidad: Severidad;
-}) {
-  const color =
+  hint: string;
+}
+
+function Fila({ icono: Icono, label, valor, href, severidad, hint }: FilaProps) {
+  const disabled = valor === 0;
+  const colorValor =
     severidad === 'critico' ? 'text-destructive' : 'text-accent-foreground';
+
+  const contenido = (
+    <div className="flex items-center gap-3 py-1.5">
+      <Icono
+        className={`w-4 h-4 shrink-0 ${disabled ? 'text-muted-foreground' : colorValor}`}
+        aria-hidden="true"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm text-foreground leading-tight">{label}</p>
+        <p className="text-xs text-muted-foreground leading-tight">{hint}</p>
+      </div>
+      <span
+        className={`font-bold text-lg tabular-nums ${
+          disabled ? 'text-muted-foreground' : colorValor
+        }`}
+      >
+        {valor}
+      </span>
+      {!disabled ? (
+        <ArrowRight className="w-4 h-4 text-muted-foreground shrink-0" aria-hidden="true" />
+      ) : null}
+    </div>
+  );
+
+  if (disabled) {
+    return <div className="opacity-60">{contenido}</div>;
+  }
+
   return (
-    <li className="flex items-center justify-between text-sm">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`font-bold ${color}`}>{valor}</span>
-    </li>
+    <Link
+      to={href}
+      className="block rounded-md px-2 -mx-2 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+    >
+      {contenido}
+    </Link>
   );
 }
 

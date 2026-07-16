@@ -1,0 +1,56 @@
+-- =====================================================================
+-- Sesión 5 · Script 05
+-- Buscar el puente estructural entre el pedido y el PAAC consolidado.
+--
+-- Estrategia: enumerar tablas que contengan (a) columnas para pedido y (b)
+-- columnas para consolidado o cuadro modificado; y verificar valores del
+-- testigo (SEC_CUA_MOD_SAL=11553, NRO_CONSOLID=2266, NRO_PEDIDO=232).
+-- =====================================================================
+
+PRINT '=== 5.1 Tablas que contienen SEC_CUA_MOD_SAL ===';
+SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE COLUMN_NAME = 'SEC_CUA_MOD_SAL'
+ORDER BY TABLE_NAME;
+
+PRINT '';
+PRINT '=== 5.2 Tablas que contienen NRO_CONSOLID ===';
+SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE COLUMN_NAME = 'NRO_CONSOLID'
+ORDER BY TABLE_NAME;
+
+PRINT '';
+PRINT '=== 5.3 Tablas que contienen NRO_EST_MDO ===';
+SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE COLUMN_NAME LIKE '%EST_MDO%'
+   OR COLUMN_NAME LIKE '%ESTUDIO%MERCADO%'
+   OR COLUMN_NAME LIKE '%NRO_EM%'
+ORDER BY TABLE_NAME, COLUMN_NAME;
+
+PRINT '';
+PRINT '=== 5.4 Tablas que tienen simultáneamente NRO_PEDIDO Y (NRO_CONSOLID o NRO_CONS_PAAC o SEC_CUA_MOD_SAL) ===';
+SELECT p.TABLE_NAME,
+       MAX(CASE WHEN p.COLUMN_NAME='NRO_PEDIDO' THEN 1 END) AS con_nro_pedido,
+       MAX(CASE WHEN p.COLUMN_NAME='NRO_CONSOLID' THEN 1 END) AS con_nro_consolid,
+       MAX(CASE WHEN p.COLUMN_NAME='NRO_CONS_PAAC' THEN 1 END) AS con_nro_cons_paac,
+       MAX(CASE WHEN p.COLUMN_NAME='SEC_CUA_MOD_SAL' THEN 1 END) AS con_sec_cua_mod_sal
+FROM INFORMATION_SCHEMA.COLUMNS p
+WHERE p.COLUMN_NAME IN ('NRO_PEDIDO','NRO_CONSOLID','NRO_CONS_PAAC','SEC_CUA_MOD_SAL')
+GROUP BY p.TABLE_NAME
+HAVING MAX(CASE WHEN p.COLUMN_NAME='NRO_PEDIDO' THEN 1 END)=1
+   AND (
+        MAX(CASE WHEN p.COLUMN_NAME='NRO_CONSOLID' THEN 1 END)=1
+     OR MAX(CASE WHEN p.COLUMN_NAME='NRO_CONS_PAAC' THEN 1 END)=1
+     OR MAX(CASE WHEN p.COLUMN_NAME='SEC_CUA_MOD_SAL' THEN 1 END)=1
+       )
+ORDER BY p.TABLE_NAME;
+
+PRINT '';
+PRINT '=== 5.5 Estructura de SIG_PAAC_RESUMEN y familias PAAC ===';
+SELECT TABLE_NAME
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_TYPE='BASE TABLE'
+  AND TABLE_NAME LIKE 'SIG_PAAC%'
+ORDER BY TABLE_NAME;

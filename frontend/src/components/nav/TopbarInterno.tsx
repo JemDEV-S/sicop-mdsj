@@ -4,17 +4,13 @@ import { ChevronDown, LogOut, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useAuthStore } from '@/store/auth';
 import { cn } from '@/lib/utils';
+import BreadcrumbsAuto from './BreadcrumbsAuto';
+import { ChipAñoActivo, ChipCentroCostoActivo } from './ChipContexto';
 
 interface TopbarInternoProps {
   breadcrumbs?: React.ReactNode;
 }
 
-/**
- * Topbar del panel interno.
- * - Breadcrumbs a la izquierda (recibidos por prop).
- * - Buscador global de EXP_SIAF centrado/derecha.
- * - Menú de usuario con dropdown (cerrar sesión).
- */
 export function TopbarInterno({ breadcrumbs }: TopbarInternoProps) {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
@@ -45,22 +41,21 @@ export function TopbarInterno({ breadcrumbs }: TopbarInternoProps) {
 
   return (
     <header
-      className="sticky top-0 z-30 h-14 bg-card border-b border-border flex items-center gap-4 px-6"
+      className="sticky top-0 z-30 h-14 bg-card border-b border-border flex items-center gap-3 px-4 md:px-6"
       role="banner"
     >
       <div className="flex-1 min-w-0 flex items-center">
-        {breadcrumbs ? (
-          <div className="text-sm text-muted-foreground truncate">
-            {breadcrumbs}
-          </div>
-        ) : (
-          <span className="text-sm text-muted-foreground">Panel Interno</span>
-        )}
+        {breadcrumbs ?? <BreadcrumbsAuto />}
+      </div>
+
+      <div className="hidden md:flex items-center gap-2 shrink-0">
+        <ChipAñoActivo />
+        <ChipCentroCostoActivo />
       </div>
 
       <form
         onSubmit={onBuscar}
-        className="hidden md:block w-72"
+        className="hidden lg:block w-64"
         role="search"
         aria-label="Buscar expediente SIAF"
       >
@@ -80,8 +75,7 @@ export function TopbarInterno({ breadcrumbs }: TopbarInternoProps) {
         </div>
       </form>
 
-      {/* Menú de usuario */}
-      <div className="relative" ref={menuRef}>
+      <div className="relative shrink-0" ref={menuRef}>
         <button
           type="button"
           className={cn(
@@ -98,7 +92,7 @@ export function TopbarInterno({ breadcrumbs }: TopbarInternoProps) {
           >
             {(user?.nombre_completo?.[0] ?? user?.usuario?.[0] ?? '?').toUpperCase()}
           </span>
-          <span className="hidden lg:flex flex-col text-left leading-tight max-w-[10rem]">
+          <span className="hidden xl:flex flex-col text-left leading-tight max-w-[10rem]">
             <span className="text-sm font-medium text-foreground truncate">
               {user?.nombre_completo || user?.usuario || 'Usuario'}
             </span>
@@ -112,7 +106,7 @@ export function TopbarInterno({ breadcrumbs }: TopbarInternoProps) {
         {menuAbierto ? (
           <div
             role="menu"
-            className="absolute right-0 mt-2 w-56 bg-card border border-border rounded-md py-1 z-40"
+            className="absolute right-0 mt-2 w-56 bg-card border border-border rounded-md py-1 z-40 shadow-md"
           >
             <div className="px-3 py-2 border-b border-border">
               <p className="text-sm font-medium text-foreground truncate">
@@ -127,7 +121,7 @@ export function TopbarInterno({ breadcrumbs }: TopbarInternoProps) {
               role="menuitem"
               onClick={() => {
                 setMenuAbierto(false);
-                logout();
+                void logout();
               }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted focus-visible:outline-none focus-visible:bg-muted"
             >

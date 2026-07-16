@@ -81,7 +81,31 @@ export const router = createBrowserRouter([
           },
           {
             path: 'saldos',
-            element: <div>Módulo Saldos (Stub)</div>
+            element: <div>Módulo Saldos (Stub · T-48)</div>
+          },
+          {
+            path: 'pipeline',
+            element: <div>Pipeline (Stub · T-45)</div>
+          },
+          {
+            path: 'pedidos/:nroPedido/:tipoBien',
+            element: <div>Detalle de pedido (Stub · T-46)</div>
+          },
+          {
+            path: 'contratos',
+            element: <div>Contratos (Stub · T-53)</div>
+          },
+          {
+            path: 'cruce',
+            element: <div>Cruce SIAF-SIGA (Stub · T-50)</div>
+          },
+          {
+            path: 'proveedores',
+            element: <div>Directorio interno de proveedores (Stub · T-53)</div>
+          },
+          {
+            path: 'cruce/expediente-siaf/:exp',
+            element: <div>Buscador EXP_SIAF (Stub · T-50)</div>
           },
           {
             // TODO T-35: eliminar tras validar funcionalidad

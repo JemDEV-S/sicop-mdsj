@@ -52,6 +52,32 @@ def listar_saldos(
     return [_con_semaforo(db, f) for f in filas], total
 
 
+def resumen_saldos(
+    db: Session,
+    *,
+    ano: int,
+    centros: list[str] | None,
+) -> dict[str, Any]:
+    """Totales agregados + top-3 metas críticas para el dashboard T-44.
+
+    Delega la agregación al repo (una sola pasada por SIG_TECHO_PRESUPUESTO) y
+    aplica el semáforo global sobre el % devengado agregado y a cada meta crítica.
+    """
+    resumen = saldos_repo.resumen_saldos(ano=ano, centros=centros)
+
+    resumen["ano"] = ano
+    resumen["semaforo"] = semaforo_service.color(
+        db,
+        modulo="saldos",
+        metrica="porcentaje_devengado",
+        valor=float(resumen.get("porcentaje_devengado") or 0),
+    )
+    resumen["top_metas_criticas"] = [
+        _con_semaforo(db, m) for m in resumen.get("top_metas_criticas", [])
+    ]
+    return resumen
+
+
 def metas_rezagadas(
     db: Session,
     *,
