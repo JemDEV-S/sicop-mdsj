@@ -1,11 +1,32 @@
 """Repositorio SIGA: saldos presupuestales (`SIG_TECHO_PRESUPUESTO`).
 
-Fuente autoritativa para PIM y saldo disponible (§18.2, §18.3 del diccionario).
-Todas las queries fijan SEC_EJEC=300687 y filtran por centros_costo del usuario
-cuando aplica (RN-04 filtro por CC).
+Fuente para PIM/certificado/comprometido a nivel meta (§18.2, §18.3 del
+diccionario). Todas las queries fijan SEC_EJEC=300687 y filtran por
+centros_costo del usuario cuando aplica (RN-04 filtro por CC).
 
 `SIG_TECHO_PRESUPUESTO` tiene PK compuesta `ANO_EJE + SEC_EJEC + sec_func +
-CLASIFICADOR + CENTRO_COSTO` (10,049 registros 2023-2026).
+CLASIFICADOR + CENTRO_COSTO`.
+
+Hallazgos empíricos (2026-07-16, ver backend/scripts/diagnostico_cruce_mef_siga.py):
+
+  1. **264 filas con SEC_FUNC IS NULL en 2026** — S/ 116.6M de PIM cargado a
+     nivel de pliego (canon, impuestos, FONCOMUN) que aún no se ha desagregado
+     a metas ejecutables. Se **excluyen** de las agregaciones para que el PIM
+     y % de ejecución del widget reflejen "lo asignado a metas" y no infle.
+     Estas filas tienen PPTO_DISP_SIAF=0 (no aparecen en la ejecución SIAF).
+
+  2. **MNTO_ACUM_DEVGDO_SIGA = 0** en 2026 (columna no poblada por el SIGA de
+     la muni). Antes usábamos `PPTO_MODIF - PPTO_DISP_SIAF` como proxy, pero
+     ese proxy incluye el techo huérfano y sobreestima brutalmente (S/ 92M
+     vs. S/ 31M reales). Ahora reportamos:
+       - certificado (mnto_acum_cert) — S/ ~15.8M
+       - comprometido (mnto_acum_coma) — S/ ~12.9M
+     Y el widget usa el snapshot MEF (siaf.ejecucion_presupuestal) para el
+     devengado oficial que sí cuadra con el portal público.
+
+  3. El PIM SIGA (asignado a metas) = S/ 46.7M vs. PIM MEF = S/ 69.5M. La
+     diferencia (S/ 22.8M) son fuentes cargadas en el SIAF pero aún no en el
+     SIGA — es un lag operativo de la muni, no un bug del código.
 """
 
 from __future__ import annotations
@@ -40,6 +61,10 @@ def listar_saldos(
     where = [
         "t.ANO_EJE = :ano",
         "t.SEC_EJEC = :sec_ejec",
+        # Excluye ~264 filas de "techo del pliego sin desagregar a meta"
+        # que inflan artificialmente el PIM (S/ 116M en 2026). Ver
+        # diagnostico_cruce_mef_siga.py.
+        "t.SEC_FUNC IS NOT NULL",
     ]
     params: dict[str, Any] = {
         "ano": ano,
@@ -78,11 +103,16 @@ def listar_saldos(
             COALESCE(t.mnto_acum_cert, 0)                         AS certificado,
             COALESCE(t.mnto_acum_coma, 0)                         AS comprometido_anual,
             COALESCE(t.mnto_acum_comm, 0)                         AS comprometido_mensual,
-            COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0)                  AS devengado,
+            -- "Devengado" SIGA = certificado + comprometido (la col
+            -- MNTO_ACUM_DEVGDO_SIGA está en 0 en 2026). El devengado
+            -- oficial viene del snapshot MEF en el service.
+            COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0) AS devengado,
             COALESCE(t.PPTO_DISP_SIAF, 0)                         AS saldo_disponible,
             COALESCE(t.MNTO_RESERVA_PEDIDO, 0)                    AS reservado_pedido,
             CASE WHEN COALESCE(t.PPTO_MODIF, 0) > 0
-                 THEN ROUND(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0) / t.PPTO_MODIF * 100, 2)
+                 THEN ROUND(
+                    (COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
+                    / t.PPTO_MODIF * 100, 2)
                  ELSE 0 END                                       AS porcentaje_devengado
         FROM SIG_TECHO_PRESUPUESTO t
         INNER JOIN META m
@@ -112,7 +142,11 @@ def contar_saldos(
     if centros is not None and len(centros) == 0:
         return 0
 
-    where = ["ANO_EJE = :ano", "SEC_EJEC = :sec_ejec"]
+    where = [
+        "ANO_EJE = :ano",
+        "SEC_EJEC = :sec_ejec",
+        "SEC_FUNC IS NOT NULL",  # Excluir techo del pliego sin desagregar.
+    ]
     params: dict[str, Any] = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
     if solo_con_pim:
         where.append("PPTO_MODIF > 0")
@@ -150,7 +184,12 @@ def resumen_saldos(
             "top_metas_criticas": [],
         }
 
-    where = ["t.ANO_EJE = :ano", "t.SEC_EJEC = :sec_ejec", "t.PPTO_MODIF > 0"]
+    where = [
+        "t.ANO_EJE = :ano",
+        "t.SEC_EJEC = :sec_ejec",
+        "t.PPTO_MODIF > 0",
+        "t.SEC_FUNC IS NOT NULL",  # Excluir techo del pliego sin desagregar.
+    ]
     params: dict[str, Any] = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
     if centros is not None:
         binds = [f":cc{i}" for i in range(len(centros))]
@@ -166,7 +205,9 @@ def resumen_saldos(
             COALESCE(SUM(t.PPTO_MODIF), 0)                  AS pim,
             COALESCE(SUM(t.mnto_acum_cert), 0)              AS certificado,
             COALESCE(SUM(t.mnto_acum_coma), 0)              AS comprometido,
-            COALESCE(SUM(t.MNTO_ACUM_DEVGDO_SIGA), 0)       AS devengado,
+            -- "Devengado" SIGA = certificado + comprometido (MNTO_ACUM_DEVGDO_SIGA
+            -- está en 0 en 2026). El devengado oficial viene del snapshot MEF.
+            COALESCE(SUM(t.mnto_acum_cert + t.mnto_acum_coma), 0) AS devengado,
             COALESCE(SUM(t.PPTO_DISP_SIAF), 0)              AS saldo_disponible,
             COALESCE(SUM(t.MNTO_RESERVA_PEDIDO), 0)         AS reservado_pedido,
             COUNT(DISTINCT t.sec_func)                      AS metas_total
@@ -185,9 +226,10 @@ def resumen_saldos(
             t.sec_func,
             LTRIM(RTRIM(m.nombre))                          AS nombre_meta,
             SUM(COALESCE(t.PPTO_MODIF, 0))                  AS pim,
-            SUM(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0))       AS devengado,
+            SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0)) AS devengado,
             CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                 THEN ROUND(SUM(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0)) / SUM(t.PPTO_MODIF) * 100, 2)
+                 THEN ROUND(SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
+                            / SUM(t.PPTO_MODIF) * 100, 2)
                  ELSE 0 END                                 AS porcentaje_devengado
         FROM SIG_TECHO_PRESUPUESTO t
         INNER JOIN META m
@@ -195,7 +237,8 @@ def resumen_saldos(
         WHERE {where_sql}
         GROUP BY t.sec_func, m.nombre
         HAVING CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                    THEN SUM(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0)) / SUM(t.PPTO_MODIF) * 100
+                    THEN SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
+                         / SUM(t.PPTO_MODIF) * 100
                     ELSE 0 END < :umbral_critico
         ORDER BY SUM(t.PPTO_MODIF) DESC
     """
@@ -207,7 +250,8 @@ def resumen_saldos(
             WHERE {where_sql}
             GROUP BY t.sec_func
             HAVING CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                        THEN SUM(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0)) / SUM(t.PPTO_MODIF) * 100
+                        THEN SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
+                             / SUM(t.PPTO_MODIF) * 100
                         ELSE 0 END < :umbral_critico
         ) x
     """
@@ -243,7 +287,12 @@ def metas_rezagadas(
     if centros is not None and len(centros) == 0:
         return []
 
-    where = ["t.ANO_EJE = :ano", "t.SEC_EJEC = :sec_ejec", "t.PPTO_MODIF > 0"]
+    where = [
+        "t.ANO_EJE = :ano",
+        "t.SEC_EJEC = :sec_ejec",
+        "t.PPTO_MODIF > 0",
+        "t.SEC_FUNC IS NOT NULL",  # Excluir techo del pliego sin desagregar.
+    ]
     params: dict[str, Any] = {
         "ano": ano,
         "sec_ejec": settings.SEC_EJEC,
@@ -262,9 +311,10 @@ def metas_rezagadas(
             LTRIM(RTRIM(m.nombre))          AS nombre_meta,
             LTRIM(RTRIM(m.act_proy))        AS act_proy,
             SUM(COALESCE(t.PPTO_MODIF, 0))              AS pim,
-            SUM(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0))   AS devengado,
+            SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0)) AS devengado,
             CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                 THEN ROUND(SUM(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0)) / SUM(t.PPTO_MODIF) * 100, 2)
+                 THEN ROUND(SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
+                            / SUM(t.PPTO_MODIF) * 100, 2)
                  ELSE 0 END                 AS porcentaje_devengado
         FROM SIG_TECHO_PRESUPUESTO t
         INNER JOIN META m
@@ -272,7 +322,8 @@ def metas_rezagadas(
         WHERE {" AND ".join(where)}
         GROUP BY t.sec_func, m.nombre, m.act_proy
         HAVING CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                    THEN SUM(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0)) / SUM(t.PPTO_MODIF) * 100
+                    THEN SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
+                         / SUM(t.PPTO_MODIF) * 100
                     ELSE 0 END < :umbral
         ORDER BY porcentaje_devengado ASC
     """

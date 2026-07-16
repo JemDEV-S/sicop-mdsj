@@ -3,17 +3,26 @@ import { ArrowRight, Wallet } from 'lucide-react';
 import { SectionCard } from '@/components/layout/SectionCard';
 import Semaforo from '@/components/Semaforo';
 import { formatearMoneda, formatPorcentaje } from '@/lib/formatters';
-import { mapSemaforoApiToEstado } from '@/features/obras/api';
-import type { MetaCritica, SaldosResumen } from '../types';
+import type { EjecucionMef, MetaCritica, SaldosResumen } from '../types';
 
 interface WidgetSaldosProps {
   resumen: SaldosResumen;
 }
 
+// El backend de saldos devuelve 'verde' | 'amarillo' | 'rojo' | 'desconocido'
+// (ver backend/app/services/semaforo_service.py), no el vocabulario 'ok/alerta/critico'
+// que usa el módulo de obras.
+function mapSemaforoSaldos(valor: string): 'ok' | 'alerta' | 'critico' | null {
+  if (valor === 'verde') return 'ok';
+  if (valor === 'amarillo') return 'alerta';
+  if (valor === 'rojo') return 'critico';
+  return null;
+}
+
 export function WidgetSaldos({ resumen }: WidgetSaldosProps) {
-  const semaforoEstado = mapSemaforoApiToEstado(resumen.semaforo);
-  const porcentaje = formatPorcentaje(resumen.porcentaje_devengado);
-  const sinDatos = resumen.pim <= 0;
+  const semaforoEstado = mapSemaforoSaldos(resumen.semaforo);
+  const sinDatosSiga = resumen.pim <= 0;
+  const mef = resumen.mef;
 
   return (
     <SectionCard
@@ -30,55 +39,121 @@ export function WidgetSaldos({ resumen }: WidgetSaldosProps) {
         </Link>
       }
     >
-      <div data-testid="widget-saldos" className="flex flex-col gap-3">
-        <div>
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Saldo disponible
-          </p>
-          <p className="text-2xl font-bold text-foreground leading-tight">
-            {formatearMoneda(resumen.saldo_disponible)}
-          </p>
-        </div>
+      <div data-testid="widget-saldos" className="flex flex-col gap-4">
+        {mef ? <BloqueMef mef={mef} /> : <BloqueSaldoDisponible pim={resumen.pim} saldo={resumen.saldo_disponible} />}
 
-        {!sinDatos ? (
-          <>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-              <dt className="text-muted-foreground">PIM</dt>
-              <dd className="text-right font-medium text-foreground">
-                {formatearMoneda(resumen.pim)}
-              </dd>
-              <dt className="text-muted-foreground">Devengado</dt>
-              <dd className="text-right font-medium text-foreground">
-                {formatearMoneda(resumen.devengado)}
-              </dd>
-              <dt className="text-muted-foreground">Ejecución</dt>
-              <dd className="text-right font-semibold text-foreground">{porcentaje}</dd>
-              <dt className="text-muted-foreground">Metas activas</dt>
-              <dd className="text-right font-medium text-foreground">
-                {resumen.metas_total}
-                {resumen.metas_criticas > 0 ? (
-                  <span className="text-destructive font-semibold ml-1">
-                    · {resumen.metas_criticas} críticas
-                  </span>
-                ) : null}
-              </dd>
-            </dl>
-
-            {semaforoEstado ? (
-              <Semaforo estado={semaforoEstado} texto={etiquetaSemaforo(semaforoEstado)} />
-            ) : null}
-
-            {resumen.top_metas_criticas.length > 0 ? (
-              <TopMetasCriticas metas={resumen.top_metas_criticas} />
-            ) : null}
-          </>
+        {!sinDatosSiga ? (
+          <BloqueSiga resumen={resumen} />
         ) : (
           <p className="text-sm text-muted-foreground">
-            No hay presupuesto asignado para el año y unidad seleccionados.
+            No hay presupuesto asignado a esta unidad.
           </p>
         )}
+
+        {semaforoEstado ? (
+          <Semaforo estado={semaforoEstado} texto={etiquetaSemaforo(semaforoEstado)} />
+        ) : null}
+
+        {resumen.top_metas_criticas.length > 0 ? (
+          <TopMetasCriticas metas={resumen.top_metas_criticas} />
+        ) : null}
       </div>
     </SectionCard>
+  );
+}
+
+// Bloque principal cuando el usuario ve el pliego completo: número oficial
+// que cuadra con el portal MEF público.
+function BloqueMef({ mef }: { mef: EjecucionMef }) {
+  return (
+    <div>
+      <p
+        className="text-xs font-medium text-muted-foreground uppercase tracking-wide"
+        title="Fuente: portal MEF (Consulta amigable). Es el mismo número que ve el ciudadano."
+      >
+        Devengado oficial (MEF)
+      </p>
+      <p className="text-2xl font-bold text-foreground leading-tight">
+        {formatearMoneda(mef.devengado)}
+      </p>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mt-2">
+        <dt className="text-muted-foreground">PIM</dt>
+        <dd className="text-right font-medium text-foreground">
+          {formatearMoneda(mef.pim)}
+        </dd>
+        <dt className="text-muted-foreground">% Devengado</dt>
+        <dd className="text-right font-semibold text-foreground">
+          {formatPorcentaje(mef.porcentaje_devengado)}
+        </dd>
+        <dt className="text-muted-foreground">Saldo disponible</dt>
+        <dd className="text-right font-medium text-foreground">
+          {formatearMoneda(mef.saldo_disponible)}
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+// Fallback cuando el usuario está restringido a un subárbol de CC y no tiene
+// visión del pliego completo (por privacidad no exponemos el MEF entero).
+function BloqueSaldoDisponible({ pim, saldo }: { pim: number; saldo: number }) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+        Saldo disponible
+      </p>
+      <p className="text-2xl font-bold text-foreground leading-tight">
+        {formatearMoneda(saldo)}
+      </p>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mt-2">
+        <dt className="text-muted-foreground">PIM asignado</dt>
+        <dd className="text-right font-medium text-foreground">
+          {formatearMoneda(pim)}
+        </dd>
+      </dl>
+    </div>
+  );
+}
+
+// Bloque interno: lo que la unidad tiene asignado en el SIGA a nivel meta.
+function BloqueSiga({ resumen }: { resumen: SaldosResumen }) {
+  return (
+    <div className="pt-3 border-t border-border">
+      <p
+        className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2"
+        title="Datos del SIGA de la muni a nivel meta. Puede diferir del MEF porque no todo el techo del pliego está desagregado a metas ejecutables."
+      >
+        Ejecución interna (SIGA)
+      </p>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        <dt className="text-muted-foreground">PIM asignado</dt>
+        <dd className="text-right font-medium text-foreground">
+          {formatearMoneda(resumen.pim)}
+        </dd>
+        <dt
+          className="text-muted-foreground"
+          title="Certificado + Comprometido en el SIGA. En 2026 la col MNTO_ACUM_DEVGDO_SIGA no está poblada por la muni."
+        >
+          Cert. + Comprometido
+        </dt>
+        <dd className="text-right font-medium text-foreground">
+          {formatearMoneda(resumen.devengado)}
+        </dd>
+        <dt className="text-muted-foreground">% Ejecución</dt>
+        <dd className="text-right font-semibold text-foreground">
+          {formatPorcentaje(resumen.porcentaje_devengado)}
+        </dd>
+        <dt className="text-muted-foreground">Metas activas</dt>
+        <dd className="text-right font-medium text-foreground">
+          {resumen.metas_total}
+          {resumen.metas_criticas > 0 ? (
+            <span className="text-destructive font-semibold ml-1">
+              · {resumen.metas_criticas} críticas
+            </span>
+          ) : null}
+        </dd>
+      </dl>
+    </div>
   );
 }
 

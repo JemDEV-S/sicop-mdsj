@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, field_validator
@@ -76,12 +77,40 @@ class MetaCritica(BaseModel):
     semaforo: str = "desconocido"
 
 
+class EjecucionMef(BaseModel):
+    """Snapshot oficial MEF (portal ciudadano). Sin filtro por CC.
+
+    - PIA/PIM: fila maestra `mes_eje = 0` de la API MEF.
+    - Certificado/Comprometido/Devengado/Girado: suma de flujos `mes_eje > 0`.
+    - `sincronizado_en`: momento del último sync desde la API MEF (job de sync).
+    """
+    pia: float = 0
+    pim: float = 0
+    certificado: float = 0
+    comprometido: float = 0
+    devengado: float = 0
+    girado: float = 0
+    saldo_disponible: float = 0
+    porcentaje_devengado: float = 0
+    sincronizado_en: datetime | None = None
+
+
 class SaldosResumenResponse(BaseModel):
     """Totales agregados de saldos para el dashboard de bienvenida (T-44).
 
-    Se calcula sobre el mismo universo que `/interno/saldos` (SIG_TECHO_PRESUPUESTO
-    filtrado por año + CC del usuario, con `PPTO_MODIF > 0`). El semáforo se
-    aplica al % devengado global usando `sistema.umbrales_alertas.saldo_bajo`.
+    Contiene dos bloques de datos:
+
+    1. **Campos planos (pia, pim, devengado, ...):** vienen del SIGA
+       (`SIG_TECHO_PRESUPUESTO`), excluyendo las filas sin `SEC_FUNC`
+       (techo del pliego no desagregado a metas). Filtrado por CC del usuario.
+       Refleja "lo asignado a las unidades del usuario".
+
+    2. **Bloque `mef`:** snapshot del portal MEF (sin filtro por CC). Es el
+       número oficial que ve el ciudadano. Sólo se llena cuando el usuario
+       ve el pliego completo (admin/decisor sin restricción de CC).
+
+    El semáforo global se calcula sobre el % del bloque MEF cuando existe
+    (número oficial), y sobre el % SIGA en caso contrario.
     """
 
     ano: int
@@ -97,3 +126,4 @@ class SaldosResumenResponse(BaseModel):
     metas_total: int = 0
     metas_criticas: int = 0
     top_metas_criticas: list[MetaCritica] = []
+    mef: EjecucionMef | None = None

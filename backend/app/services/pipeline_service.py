@@ -46,8 +46,29 @@ from app.schemas.pipeline import (
 DEFAULT_DIAS = 15
 ETAPAS_FINALES = {ETAPA_CIERRE}
 
+# Umbrales por defecto por macrofase (usados si sistema.umbrales_alertas no
+# los define). Calibrado con el diagnóstico 2026-07-16:
+#   - solicitud/programacion: días bajos porque son etapas administrativas.
+#   - ejecucion: alto porque un servicio/obra puede durar meses legítimamente.
+#   - cierre: None → nunca estancado (es etapa terminal).
+DEFAULT_DIAS_POR_MACROFASE: dict[str, int | None] = {
+    "solicitud":     15,
+    "programacion":  30,
+    "certificacion": 30,
+    "contratacion":  45,
+    "ejecucion":     180,
+    "cierre":        None,
+}
 
-def _umbral_dias(db: Session) -> int:
+
+def _cargar_umbrales(db: Session) -> tuple[int, dict[str, int | None]]:
+    """Devuelve (dias_fallback, dias_por_macrofase) desde `sistema.umbrales_alertas`.
+
+    El JSON puede tener las llaves:
+      - "dias": entero de fallback si la macrofase no está en el mapping.
+      - "dias_por_macrofase": mapping macrofase → días o null. `null` desactiva
+        la alerta para esa macrofase.
+    """
     row = db.execute(
         text(
             """
@@ -58,11 +79,24 @@ def _umbral_dias(db: Session) -> int:
         )
     ).first()
     if row is None:
-        return DEFAULT_DIAS
+        return DEFAULT_DIAS, dict(DEFAULT_DIAS_POR_MACROFASE)
     params = row[0]
     if isinstance(params, str):
         params = json.loads(params)
-    return int(params.get("dias", DEFAULT_DIAS))
+    dias = int(params.get("dias", DEFAULT_DIAS))
+    por_macrofase = dict(DEFAULT_DIAS_POR_MACROFASE)
+    if isinstance(params.get("dias_por_macrofase"), dict):
+        for k, v in params["dias_por_macrofase"].items():
+            por_macrofase[k] = None if v is None else int(v)
+    return dias, por_macrofase
+
+
+def _umbral_para(macrofase: str, dias_fallback: int,
+                 por_macrofase: dict[str, int | None]) -> int | None:
+    """Devuelve el umbral en días para una macrofase, o None si está desactivada."""
+    if macrofase in por_macrofase:
+        return por_macrofase[macrofase]
+    return dias_fallback
 
 
 # ─── Clasificacion pedido -> etapa maxima alcanzada ───────────────────────
@@ -137,28 +171,61 @@ def _etapa_maxima(fila: dict[str, Any]) -> str:
 
 
 def _fecha_etapa(fila: dict[str, Any]) -> date | None:
-    """Fecha aproximada del cambio a la etapa actual — para computar dias en etapa."""
+    """Fecha del evento que llevó al pedido a su etapa actual.
+
+    Antes usaba solo las 3 fechas cabecera del pedido (FECHA_PEDIDO/APROB/ATENC),
+    lo que hacía que un pedido en 'certificacion' con solo FECHA_PEDIDO cayera
+    a esa fecha e inflara dias_en_etapa a "hace medio año" → ~1700 falsos
+    estancados en 2026. El repo ahora expone fecha_ccmn, fecha_certificacion,
+    fecha_orden, fecha_compromiso, fecha_ejecucion, fecha_pecosa, fecha_cierre_seg.
+    """
     etapa = fila["etapa"]
-    if etapa in (ETAPA_CIERRE, ETAPA_DEVENGADO):
-        return fila.get("FECHA_ATENC") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa in (ETAPA_EJECUCION, ETAPA_DESPACHO_PECOSA,
-                 ETAPA_RECEPCION_KARDEX, ETAPA_PEDIDO_INTERNO,
-                 ETAPA_COMPROMISO_SIAF, ETAPA_ORDEN_EMITIDA):
-        return fila.get("FECHA_ATENC") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa in (ETAPA_CERTIFICACION, ETAPA_CUADRO_ADQUISICION,
-                 ETAPA_COTIZACION, ETAPA_CCMN, ETAPA_PUENTE_PAAC,
-                 ETAPA_CUADRO_NECESIDAD, ETAPA_PEDIDO_APROBADO):
+    if etapa == ETAPA_CIERRE:
+        return (fila.get("fecha_cierre_seg")
+                or fila.get("FECHA_ATENC")
+                or fila.get("fecha_ejecucion")
+                or fila.get("FECHA_APROB")
+                or fila.get("FECHA_PEDIDO"))
+    if etapa == ETAPA_DEVENGADO:
+        return (fila.get("fecha_ejecucion")
+                or fila.get("fecha_compromiso")
+                or fila.get("FECHA_ATENC")
+                or fila.get("FECHA_APROB")
+                or fila.get("FECHA_PEDIDO"))
+    if etapa == ETAPA_DESPACHO_PECOSA:
+        return fila.get("fecha_pecosa") or fila.get("fecha_ejecucion") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
+    if etapa in (ETAPA_EJECUCION, ETAPA_RECEPCION_KARDEX, ETAPA_PEDIDO_INTERNO):
+        return fila.get("fecha_ejecucion") or fila.get("fecha_compromiso") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
+    if etapa == ETAPA_COMPROMISO_SIAF:
+        return fila.get("fecha_compromiso") or fila.get("fecha_orden") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
+    if etapa == ETAPA_ORDEN_EMITIDA:
+        return fila.get("fecha_orden") or fila.get("fecha_certificacion") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
+    if etapa == ETAPA_CERTIFICACION:
+        return fila.get("fecha_certificacion") or fila.get("fecha_ccmn") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
+    if etapa == ETAPA_CUADRO_ADQUISICION:
+        return fila.get("fecha_cuadro_adq") or fila.get("fecha_ccmn") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
+    if etapa in (ETAPA_COTIZACION, ETAPA_CCMN, ETAPA_PUENTE_PAAC, ETAPA_CUADRO_NECESIDAD):
+        return fila.get("fecha_ccmn") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
+    if etapa == ETAPA_PEDIDO_APROBADO:
         return fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
     return fila.get("FECHA_PEDIDO")
 
 
-def _enriquecer(fila: dict[str, Any], hoy: date, umbral: int) -> dict[str, Any]:
+def _enriquecer(
+    fila: dict[str, Any],
+    hoy: date,
+    dias_fallback: int,
+    dias_por_macrofase: dict[str, int | None],
+) -> dict[str, Any]:
     etapa = _etapa_maxima(fila)
+    macrofase = ETAPA_A_MACROFASE[etapa]
     fila["etapa"] = etapa
     fila["etapa_numero"] = ETAPA_A_NUMERO[etapa]
     fila["etapa_label"] = ETAPA_A_LABEL[etapa]
-    fila["macrofase"] = ETAPA_A_MACROFASE[etapa]
-    fila["macrofase_label"] = MACROFASE_A_LABEL[ETAPA_A_MACROFASE[etapa]]
+    fila["macrofase"] = macrofase
+    fila["macrofase_label"] = MACROFASE_A_LABEL[macrofase]
+
+    umbral_macro = _umbral_para(macrofase, dias_fallback, dias_por_macrofase)
 
     f = _fecha_etapa(fila)
     if f is not None:
@@ -166,7 +233,13 @@ def _enriquecer(fila: dict[str, Any], hoy: date, umbral: int) -> dict[str, Any]:
             f = f.date()
         dias = (hoy - f).days
         fila["dias_en_etapa"] = dias
-        fila["estancado"] = dias > umbral and etapa not in ETAPAS_FINALES
+        # Estancado sólo si (1) hay umbral definido para la macrofase, (2) la
+        # etapa no es terminal, y (3) los días superan el umbral.
+        fila["estancado"] = (
+            umbral_macro is not None
+            and dias > umbral_macro
+            and etapa not in ETAPAS_FINALES
+        )
     else:
         fila["dias_en_etapa"] = None
         fila["estancado"] = False
@@ -212,9 +285,12 @@ def clasificar_pedidos(
     ya enriquecidos con dias_en_etapa y estancado, y renombrados a snake_case.
     """
     raw = pipeline_repo.pipeline_pedidos_raw(ano, centros)
-    umbral = _umbral_dias(db)
+    dias_fallback, por_macrofase = _cargar_umbrales(db)
     hoy = date.today()
-    return [_renombrar(_enriquecer(f, hoy, umbral)) for f in raw]
+    return [
+        _renombrar(_enriquecer(f, hoy, dias_fallback, por_macrofase))
+        for f in raw
+    ]
 
 
 def kanban(

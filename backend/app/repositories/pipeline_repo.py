@@ -102,7 +102,8 @@ programacion AS (
         MAX(CASE WHEN pc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)   AS tiene_ccmn,
         MIN(pc.NRO_CONSOLID)                                            AS nro_consolid_muestra,
         MIN(pc.NRO_EST_MDO)                                             AS nro_est_mdo_muestra,
-        MIN(pc.NRO_CERTIFICA)                                           AS nro_certifica_via_paac
+        MIN(pc.NRO_CERTIFICA)                                           AS nro_certifica_via_paac,
+        MAX(pc.FECHA_CONS)                                              AS fecha_ccmn
     FROM det d
     LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
         ON cmn.SEC_EJEC = d.SEC_EJEC
@@ -140,7 +141,8 @@ cuadro_adq AS (
     SELECT
         d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN,
         MAX(CASE WHEN ca.SEC_CUADRO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cuadro_adq,
-        MIN(ca.SEC_CUADRO)                                          AS sec_cuadro_muestra
+        MIN(ca.SEC_CUADRO)                                          AS sec_cuadro_muestra,
+        MAX(ca.FECHA_CUADRO)                                        AS fecha_cuadro_adq
     FROM det d
     LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
         ON cmn.SEC_EJEC = d.SEC_EJEC
@@ -161,7 +163,8 @@ certificacion AS (
         MAX(CASE WHEN c.NRO_CERTIFICA IS NOT NULL THEN 1 ELSE 0 END)         AS tiene_certificacion,
         MAX(CASE WHEN c.NRO_CERTIFICA_SIAF IS NOT NULL THEN 1 ELSE 0 END)    AS tiene_ccp_siaf,
         MIN(c.NRO_CERTIFICA)                                                  AS nro_certifica_muestra,
-        MIN(c.NRO_CERTIFICA_SIAF)                                             AS nro_certifica_siaf_muestra
+        MIN(c.NRO_CERTIFICA_SIAF)                                             AS nro_certifica_siaf_muestra,
+        MAX(c.FECHA)                                                          AS fecha_certificacion
     FROM det d
     LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
         ON cmn.SEC_EJEC = d.SEC_EJEC
@@ -254,6 +257,7 @@ orden_enriquecida AS (
         dm.NRO_PECOSA, dm.ESTADO_CONFOR, dm.valor_soles,
         dm.nro_orden_final, dm.match_metodo,
         o.EXP_SIAF, o.EXP_SIGA, o.TOTAL_FACT_SOLES,
+        o.FECHA_ORDEN,
         exd.FECHA_INTERFASE,
         MAX(CASE WHEN LTRIM(RTRIM(exd.TIPO_OPERACION)) = 'DV'
                  THEN 1 ELSE 0 END) OVER (
@@ -282,10 +286,15 @@ ejecucion AS (
         END)                                                          AS tiene_ejecucion,
         MAX(CASE WHEN ma_r.NRO_MOVIMTO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_kardex,
         -- Suma facturada acumulada por orden (para umbral devengado servicio).
-        SUM(COALESCE(cf.n_confor, 0))                                 AS n_conformidades_srv
+        SUM(COALESCE(cf.n_confor, 0))                                 AS n_conformidades_srv,
+        -- Última fecha de movimiento (conformidad para S, entrada al almacén para B).
+        MAX(COALESCE(cf.ultima_fecha_confor, ma_i.FECHA_MOVIMTO))     AS fecha_ejecucion,
+        MAX(ma_r.FECHA_MOVIMTO)                                       AS fecha_kardex
     FROM orden_enriquecida oe
     LEFT JOIN (
-        SELECT ANO_ORDEN, SEC_EJEC, TIPO_BIEN, NRO_ORDEN, COUNT(*) AS n_confor
+        SELECT ANO_ORDEN, SEC_EJEC, TIPO_BIEN, NRO_ORDEN,
+               COUNT(*)               AS n_confor,
+               MAX(FECHA_MOVIMTO)     AS ultima_fecha_confor
         FROM SIG_MOVIM_CONFOR_SERVICIO
         WHERE ANO_ORDEN = :ano AND SEC_EJEC = :sec_ejec
         GROUP BY ANO_ORDEN, SEC_EJEC, TIPO_BIEN, NRO_ORDEN
@@ -328,7 +337,8 @@ pedido_interno AS (
 pecosa AS (
     SELECT
         d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN,
-        MAX(CASE WHEN ma.NRO_MOVIMTO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_pecosa
+        MAX(CASE WHEN ma.NRO_MOVIMTO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_pecosa,
+        MAX(ma.FECHA_MOVIMTO)                                        AS fecha_pecosa
     FROM det d
     LEFT JOIN SIG_MOVIM_ALMACEN ma
         ON ma.ANO_EJE = d.ANO_EJE
@@ -344,7 +354,8 @@ cierre AS (
     SELECT
         pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN,
         MAX(CASE WHEN pb.estado_pedido = '7' THEN 1
-                 WHEN sg.NRO_PEDIDO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cierre
+                 WHEN sg.NRO_PEDIDO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cierre,
+        MAX(sg.FECHA_TRANSACCION)                                   AS fecha_cierre_seg
     FROM pedidos_base pb
     LEFT JOIN SIG_SEGUIMIENTO sg
         ON sg.ANO_EJE = pb.ANO_EJE
@@ -396,7 +407,17 @@ agrup AS (
         MIN(cad.sec_cuadro_muestra)                           AS sec_cuadro_muestra,
         MIN(cer.nro_certifica_muestra)                        AS nro_certifica_muestra,
         MIN(cer.nro_certifica_siaf_muestra)                   AS nro_certifica_siaf_muestra,
-        MAX(oe.match_metodo)                                  AS match_metodo
+        MAX(oe.match_metodo)                                  AS match_metodo,
+        -- Fechas por etapa (para calcular dias_en_etapa correctamente en el service).
+        MAX(pg.fecha_ccmn)                                    AS fecha_ccmn,
+        MAX(cad.fecha_cuadro_adq)                             AS fecha_cuadro_adq,
+        MAX(cer.fecha_certificacion)                          AS fecha_certificacion,
+        MAX(oe.FECHA_ORDEN)                                   AS fecha_orden,
+        MAX(oe.FECHA_INTERFASE)                               AS fecha_compromiso,
+        MAX(ej.fecha_ejecucion)                               AS fecha_ejecucion,
+        MAX(ej.fecha_kardex)                                  AS fecha_kardex,
+        MAX(pec.fecha_pecosa)                                 AS fecha_pecosa,
+        MAX(cie.fecha_cierre_seg)                             AS fecha_cierre_seg
     FROM pedidos_base pb
     LEFT JOIN programacion pg
         ON pg.ANO_EJE = pb.ANO_EJE AND pg.SEC_EJEC = pb.SEC_EJEC

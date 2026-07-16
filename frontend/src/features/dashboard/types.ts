@@ -112,8 +112,23 @@ export interface MetaCritica {
   semaforo: string;
 }
 
+// Snapshot MEF (portal ciudadano). Sin filtro por CC; sólo aparece cuando el
+// usuario ve el pliego completo. Es el número oficial que ve el ciudadano.
+export interface EjecucionMef {
+  pia: number;
+  pim: number;
+  certificado: number;
+  comprometido: number;
+  devengado: number;
+  girado: number;
+  saldo_disponible: number;
+  porcentaje_devengado: number;
+  sincronizado_en: string | null;
+}
+
 export interface SaldosResumen {
   ano: number;
+  // Campos SIGA (a nivel meta, con filtro por CC).
   pia: number;
   pim: number;
   certificado: number;
@@ -126,6 +141,9 @@ export interface SaldosResumen {
   metas_total: number;
   metas_criticas: number;
   top_metas_criticas: MetaCritica[];
+  // Bloque MEF (oficial, sin filtro por CC). null si el usuario está
+  // restringido a un subárbol de CC.
+  mef: EjecucionMef | null;
 }
 
 // ─── Contratos por vencer (endpoint /interno/alertas/contratos-por-vencer)

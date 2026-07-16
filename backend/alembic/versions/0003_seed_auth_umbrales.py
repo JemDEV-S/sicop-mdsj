@@ -51,9 +51,21 @@ UMBRALES_SEMAFOROS = [
     ("ejecucion", "devengado_vs_pim", 90.00, 60.00, "mayor"),
 ]
 
-# codigo_alerta -> parámetros (RN-02)
+# codigo_alerta -> parámetros (RN-02).
+#
+# `pedido_estancado` acepta dos formas:
+#   - `dias`: umbral global de fallback cuando no hay macrofase específica.
+#   - `dias_por_macrofase`: mapping macrofase → días. Reflejo del hallazgo
+#     empírico 2026-07: un pedido en "ejecucion" (servicios/obras) puede
+#     legítimamente durar meses; en cambio en "solicitud" 15 días ya es
+#     tarde. Un valor `null` desactiva la alerta para esa macrofase.
 UMBRALES_ALERTAS = [
-    ("pedido_estancado", '{"dias": 15}'),
+    (
+        "pedido_estancado",
+        '{"dias": 15, "dias_por_macrofase": '
+        '{"solicitud": 15, "programacion": 30, "certificacion": 30, '
+        '"contratacion": 45, "ejecucion": 180, "cierre": null}}',
+    ),
     ("contrato_por_vencer", '{"dias": 30}'),
     ("meta_baja_ejecucion", '{"pct_q3": 50, "pct_q4": 90}'),
 ]
