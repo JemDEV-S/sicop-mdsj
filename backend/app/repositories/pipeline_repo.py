@@ -673,7 +673,8 @@ def pipeline_pedidos_raw(
         fila["ccmn_declarado_cert"] = _elegir_declarado(
             decl_cert, tipo_bien, nro_pedido, candidatos
         )
-        # `ccmn_manual` se alimenta desde Postgres en el punto 4 del plan.
+        # `ccmn_manual` vive en Postgres, no en SIGA: lo inyecta el service
+        # (aqui solo se deja el campo para que la cascada lo encuentre).
         fila["ccmn_manual"] = None
         out.append(fila)
 

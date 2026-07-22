@@ -10,13 +10,15 @@ Reglas RN-02 (estancado):
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.repositories import pipeline_repo
+from app.config import settings
+from app.repositories import pipeline_repo, resolucion_ccmn_repo
 from app.schemas.pipeline import (
     CONFIANZA_A_ESTADO,
     CONFIANZA_A_LABEL,
@@ -45,6 +47,8 @@ from app.schemas.pipeline import (
     MACROFASES,
     Macrofase,
 )
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DIAS = 15
 ETAPAS_FINALES = {ETAPA_CIERRE}
@@ -329,7 +333,7 @@ def _renombrar(fila: dict[str, Any]) -> dict[str, Any]:
     # Campos de trabajo de la cascada: ya se consumieron en _enriquecer y no
     # son serializables (frozenset). `confianza_ccmn` es lo que sale al API.
     internos = {"ccmn_candidatos", "ccmn_declarado_orden",
-                "ccmn_declarado_cert", "ccmn_manual"}
+                "ccmn_declarado_cert", "ccmn_manual", "ccmn_manual_todos"}
 
     out: dict[str, Any] = {}
     for k, v in fila.items():
@@ -349,6 +353,53 @@ def _renombrar(fila: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# ─── Resoluciones manuales (Postgres) sobre las filas de SIGA ────────────
+
+
+def _aplicar_resoluciones_manuales(
+    db: Session, filas: list[dict[str, Any]], *, ano: int
+) -> None:
+    """Inyecta `ccmn_manual` en las filas que vienen de SIGA.
+
+    El pedido y el CCMN viven en SIGA; la asociacion manual vive en Postgres
+    (regla 2: jamas se escribe en SIGA). Por eso el cruce se hace aqui y no
+    en el repo del pipeline.
+
+    La resolucion manual es **referencial y opcional** (§5): si esta consulta
+    falla, el pipeline sigue funcionando con la cascada automatica y solo
+    pierde precision en los `ambiguo`. No se propaga el error.
+    """
+    try:
+        activas = resolucion_ccmn_repo.resoluciones_activas(
+            db, ano=ano, sec_ejec=int(settings.SEC_EJEC)
+        )
+    except Exception:  # noqa: BLE001 — degradar, no romper el pipeline
+        logger.warning(
+            "No se pudieron leer las resoluciones manuales pedido<->CCMN; "
+            "el pipeline continua solo con la cascada automatica",
+            exc_info=True,
+        )
+        return
+
+    if not activas:
+        return
+
+    for fila in filas:
+        clave = (
+            str(fila.get("TIPO_BIEN") or "").strip(),
+            str(fila.get("TIPO_PEDIDO") or "").strip(),
+            int(fila["NRO_PEDIDO"]),
+        )
+        ccmns = activas.get(clave)
+        if not ccmns:
+            continue
+        # N:M: un pedido puede tener varios CCMN asociados. Para la cascada
+        # basta uno (el nivel es `resuelto_manual` igual); la lista completa
+        # se expone aparte para el panel de trazabilidad.
+        fila["ccmn_manual"] = ccmns[0]
+        fila["ccmn_manual_todos"] = list(ccmns)
+
+
 # ─── API publica del servicio ─────────────────────────────────────────────
 
 
@@ -359,6 +410,7 @@ def clasificar_pedidos(
     ya enriquecidos con dias_en_etapa y estancado, y renombrados a snake_case.
     """
     raw = pipeline_repo.pipeline_pedidos_raw(ano, centros)
+    _aplicar_resoluciones_manuales(db, raw, ano=ano)
     dias_fallback, por_macrofase = _cargar_umbrales(db)
     hoy = date.today()
     return [

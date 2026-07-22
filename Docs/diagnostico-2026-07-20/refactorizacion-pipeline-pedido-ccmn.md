@@ -18,8 +18,8 @@ Lo que sigue es implementación, con el diseño ya acordado con el usuario.
 | | |
 |---|---|
 | ✅ Decidido | Cascada de confianza, 4 estados de UI, resolución manual N:M, orden por fecha |
-| ✅ Implementado | Puntos **1, 2 y 3** de §9 (`119f776`, `62d7454`, + §9.3) |
-| ⏳ Por implementar | Puntos **4 a 9** de §9 |
+| ✅ Implementado | Puntos **1 a 4** de §9 (`119f776`, `62d7454`, + §9.3, §9.4) |
+| ⏳ Por implementar | Puntos **5 a 9** de §9 |
 | ❌ Cerrado | `SIG_SEGUIMIENTO` (§3.2), `SEC_RESUMEN` (§3.1), y todo lo de §2 |
 
 ---
@@ -427,14 +427,14 @@ En el **timeline del pipeline** el orden se mantiene **ascendente** (etapa 1 arr
 | ~~1~~ | ✅ Corregir llave a `TIPO_BIEN+TIPO_PEDIDO+NRO_PEDIDO` | `pipeline_repo.py` | hecho · `119f776` · §9.2 |
 | ~~2~~ | ✅ Reemplazar `MAX(CASE...)` por cascada con `confianza` | `schemas/` + `pipeline_service.py` | hecho · `62d7454` · §9.2 |
 | ~~3~~ | ✅ Alimentar `declarado` y `declarado_cert` desde el repo | `pipeline_repo.py` | hecho · §9.3 · neto medido = 38 |
-| **4** | **Migración `sistema.resolucion_pedido_ccmn`** | Postgres | §5 · N:M · **el siguiente** |
-| 5 | Endpoints: ver bolsa · asociar · revocar | `routers/pipeline.py` | + `logs.auditoria` |
+| ~~4~~ | ✅ Migración `sistema.resolucion_pedido_ccmn` | Postgres | hecho · §9.4 · `b7c1d2e3f4a5` |
+| **5** | **Endpoints: ver bolsa · asociar · revocar** | `routers/pipeline.py` | + `logs.auditoria` · **el siguiente** |
 | 6 | 4 estados con color distinto | `features/pipeline/` | §8 · ámbar ≠ verde |
 | 7 | Vista de bolsa con orden y monto | `features/pipeline/` | §8.2 |
 | 8 | Panel de trazabilidad con cascada automática visible | `features/pipeline/` | §5 |
 | 9 | Job: detectar resoluciones obsoletas | sync | §5.1 |
 
-**Orden sugerido:** ~~1 → 2 → 3~~ → **4** → 5 → 6/7/8 → 9.
+**Orden sugerido:** ~~1 → 2 → 3 → 4~~ → **5** → 6/7/8 → 9.
 Los puntos 1 y 2 eran correcciones de bug; el 3 hizo rendir la cascada (ya distingue los
 7 niveles, no solo `unico`/`ambiguo`/`sin_ccmn`).
 
@@ -560,6 +560,60 @@ consumen en el service y **no salen al API**.
 10 tests nuevos en [`tests/repositories/test_declaraciones_ccmn.py`](../../backend/tests/repositories/test_declaraciones_ccmn.py)
 (formatos reales de §3.3 + reglas de elección). Los 13 de la cascada siguen verdes,
 testigo incluido. Suite: 70 passed, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
+
+### 9.4 Punto 4 · `sistema.resolucion_pedido_ccmn` · sesión 2026-07-22
+
+Migración **`b7c1d2e3f4a5`** (`alembic upgrade head` aplicado y revertido/reaplicado OK).
+Schema según §5, con dos añadidos sobre el borrado del doc:
+
+- `CHECK (tipo_bien IN ('B','S'))`.
+- `CHECK ((revocado_en IS NULL) = (revocado_por IS NULL))` — revocar exige fecha **y** autor:
+  una revocación sin autor no es auditable, y un autor sin fecha deja la fila en limbo.
+
+**Constraints verificadas contra PostgreSQL 16**, no asumidas — 10 casos, todos en
+transacciones revertidas (tabla queda en 0 filas):
+
+| Caso | Resultado |
+|---|---|
+| N:M — mismo pedido, dos CCMN | ✅ permitido |
+| N:M — mismo CCMN en dos pedidos (válido §5) | ✅ permitido |
+| Llave §6 — mismo `nro_pedido`, distinto `tipo_pedido` | ✅ permitido |
+| Duplicado **activo** del mismo par | ❌ rechazado por `uq_par_activo` |
+| Un activo + un revocado del mismo par | ✅ permitido |
+| Dos revocados del mismo par | ✅ permitido |
+| `tipo_bien='X'` · revocación a medias (2 casos) | ❌ rechazados por los CHECK |
+
+> El `NULLS NOT DISTINCT` es lo que hace que dos filas **activas** colisionen. Sin él
+> `NULL != NULL` y el `UNIQUE` no impediría duplicados activos — fallaría en silencio.
+
+**Repo:** [`app/repositories/resolucion_ccmn_repo.py`](../../backend/app/repositories/resolucion_ccmn_repo.py)
+— `resoluciones_activas` (mapping pedido→CCMN para el pipeline), `resoluciones_de_pedido`
+(con autoría e historial, para el panel del punto 8), `crear_resolucion`, `revocar_resolucion`.
+
+`crear_resolucion` es **idempotente** (`ON CONFLICT ON CONSTRAINT uq_par_activo DO NOTHING`
++ relectura): asociar dos veces lo mismo es inocuo, no un error que deba interrumpir al
+funcionario. `revocar_resolucion` devuelve `False` si ya estaba revocada — nunca borra.
+
+**Inyección en el pipeline:** `_aplicar_resoluciones_manuales` en el service, no en el repo
+del pipeline — el pedido vive en SIGA y la asociación en Postgres (regla 2). Si esa consulta
+falla, se **loguea y se continúa** con la cascada automática: la resolución manual es
+referencial (§5), no puede tumbar el pipeline.
+
+**Verificado end-to-end contra ambas BD** (transacción revertida, 0 filas persistidas):
+
+```
+pedido 926/B · 2 candidatos · ambiguo/grupo
+  → resolución manual  → resuelto_manual / manual · ccmn_atribuido=99001
+  → revocar            → ambiguo   (vuelve al estado previo)
+  crear idempotente: mismo id · revocar dos veces: False
+```
+
+9 tests nuevos en [`tests/repositories/test_resolucion_ccmn_repo.py`](../../backend/tests/repositories/test_resolucion_ccmn_repo.py),
+incluido el de degradación (si Postgres cae, el pipeline sigue con la cascada).
+Suite: **79 passed**, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
+
+❓ **Sigue abierto:** quién puede asociar (§13 ítem 6). El repo no impone rol — esa
+decisión va en los endpoints del punto 5.
 
 ---
 
