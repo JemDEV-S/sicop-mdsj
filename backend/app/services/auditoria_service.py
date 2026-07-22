@@ -60,6 +60,11 @@ class Accion:
     SUBIDA_DOCUMENTO_OBRA = "subida_documento_obra"
     OBSERVACION_PUBLICADA = "observacion_publicada"
     REVISION_ALERTA = "revision_alerta"
+    # Resolucion manual pedido<->CCMN (§5 del doc de refactorizacion del
+    # pipeline). Es juicio humano sobre un dato que SIGA no registra: debe
+    # quedar rastro de quien asocio que y quien lo deshizo.
+    RESOLUCION_CCMN_CREADA = "resolucion_ccmn_creada"
+    RESOLUCION_CCMN_REVOCADA = "resolucion_ccmn_revocada"
 
 
 def registrar(

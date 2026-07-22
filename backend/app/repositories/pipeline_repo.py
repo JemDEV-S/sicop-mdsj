@@ -681,6 +681,179 @@ def pipeline_pedidos_raw(
     return out
 
 
+# ─── Vista de bolsa (SEC_CUA_MOD_SAL) ────────────────────────────────────
+
+
+def contexto_pedido_bolsa(
+    ano: int, tipo_bien: str, tipo_pedido: str, nro_pedido: int
+) -> dict[str, Any] | None:
+    """Bolsa(s), CC y CCMN candidatos de un pedido — para validar al asociar.
+
+    Se usa antes de escribir una resolucion manual: comprueba que el pedido
+    existe, de que CC es (RN-04) y que el CCMN elegido esta de verdad entre
+    los candidatos de su bolsa. Sin esto se podria asociar cualquier numero.
+    """
+    params = {
+        "ano": ano,
+        "sec_ejec": settings.SEC_EJEC,
+        "tipo": tipo_bien,
+        "tipo_ped": tipo_pedido,
+        "nro": nro_pedido,
+    }
+    with get_connection() as conn:
+        cab = conn.execute(
+            text(
+                """
+                SELECT TOP 1 p.NRO_PEDIDO, p.TIPO_BIEN, p.TIPO_PEDIDO,
+                       LTRIM(RTRIM(p.CENTRO_COSTO)) AS CENTRO_COSTO,
+                       p.sec_func, p.ESTADO AS estado_pedido, p.FECHA_PEDIDO
+                FROM SIG_PEDIDOS p
+                WHERE p.ANO_EJE = :ano AND p.SEC_EJEC = :sec_ejec
+                  AND p.TIPO_BIEN = :tipo AND p.TIPO_PEDIDO = :tipo_ped
+                  AND p.NRO_PEDIDO = :nro
+                """
+            ),
+            params,
+        ).mappings().first()
+
+        if cab is None:
+            return None
+
+        filas = conn.execute(
+            text(
+                """
+                SELECT DISTINCT dp.SEC_CUA_MOD_SAL, cmn.NRO_CONSOLID
+                FROM SIG_DETALLE_PEDIDOS dp
+                LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
+                    ON cmn.SEC_EJEC = dp.SEC_EJEC
+                   AND cmn.ANNO_EJEC = dp.ANO_EJE
+                   AND cmn.SEC_CUA_MOD_SAL = dp.SEC_CUA_MOD_SAL
+                   AND cmn.TIPO_BIEN = dp.TIPO_BIEN
+                WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
+                  AND dp.TIPO_BIEN = :tipo AND dp.NRO_PEDIDO = :nro
+                  AND dp.SEC_CUA_MOD_SAL IS NOT NULL
+                """
+            ),
+            params,
+        ).all()
+
+    bolsas = sorted({int(b) for b, _ in filas if b is not None})
+    candidatos = sorted({int(c) for _, c in filas if c is not None})
+    return {
+        **dict(cab),
+        "centro_costo": (cab["CENTRO_COSTO"] or "").strip(),
+        "bolsas": bolsas,
+        "candidatos": candidatos,
+    }
+
+
+def obtener_bolsa(
+    ano: int, sec_cua_mod_sal: int, tipo_bien: str
+) -> dict[str, Any] | None:
+    """Pedidos y CCMN candidatos que comparten una bolsa `SEC_CUA_MOD_SAL`.
+
+    La bolsa es donde vive la ambiguedad (§2.1): el CCMN es una copia del
+    pedido, asi que comparten item, meta, clasificador y centro de costo
+    **por construccion** -- justo los campos que los agrupan aqui.
+
+    Orden **cronologico y neutro**, de mas reciente a mas antiguo, con
+    desempate por numero descendente para que sea estable entre recargas.
+    El monto se devuelve para mostrarlo, pero NO se ordena ni se sugiere por
+    el: ordenar por proximidad de monto seria una recomendacion disfrazada, y
+    ese metodo esta descartado en §2 -- pierde el CCMN correcto en 33 casos.
+
+    Ref: doc de refactorizacion §8.2
+    """
+    params = {
+        "ano": ano,
+        "sec_ejec": settings.SEC_EJEC,
+        "bolsa": sec_cua_mod_sal,
+        "tipo": tipo_bien,
+    }
+    with get_connection() as conn:
+        pedidos = conn.execute(
+            text(
+                """
+                SELECT DISTINCT
+                    p.NRO_PEDIDO, p.TIPO_BIEN, p.TIPO_PEDIDO,
+                    p.CENTRO_COSTO, p.sec_func, p.ESTADO AS estado_pedido,
+                    p.FECHA_PEDIDO,
+                    LTRIM(RTRIM(CAST(p.MOTIVO_PEDIDO AS VARCHAR(500)))) AS motivo,
+                    LTRIM(RTRIM(p.NOMBRE_EMPLEADO))                     AS solicitante,
+                    -- VALOR_TOTAL viene en 0.00 en los servicios (verificado
+                    -- en los 3 pedidos de la bolsa 11553): el monto real esta
+                    -- en CANT_SOLICITADA * PRECIO_UNIT. Tomar VALOR_TOTAL a
+                    -- secas mostraria toda la bolsa en S/ 0 -- fallo silencioso.
+                    CASE
+                        WHEN COALESCE(dp.VALOR_TOTAL, 0) > 0 THEN dp.VALOR_TOTAL
+                        ELSE COALESCE(dp.CANT_SOLICITADA, 0)
+                             * COALESCE(dp.PRECIO_UNIT, 0)
+                    END                                                 AS valor_soles,
+                    LTRIM(RTRIM(dp.GRUPO_BIEN)) + '-' + LTRIM(RTRIM(dp.CLASE_BIEN))
+                      + '-' + LTRIM(RTRIM(dp.FAMILIA_BIEN)) + '-'
+                      + LTRIM(RTRIM(dp.ITEM_BIEN))                      AS item
+                FROM SIG_DETALLE_PEDIDOS dp
+                INNER JOIN SIG_PEDIDOS p
+                    ON p.ANO_EJE = dp.ANO_EJE AND p.SEC_EJEC = dp.SEC_EJEC
+                   AND p.TIPO_BIEN = dp.TIPO_BIEN AND p.NRO_PEDIDO = dp.NRO_PEDIDO
+                WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
+                  AND dp.SEC_CUA_MOD_SAL = :bolsa
+                  AND dp.TIPO_BIEN = :tipo
+                  AND p.ESTADO IN ('0', '1', '7')
+                ORDER BY p.FECHA_PEDIDO DESC, p.NRO_PEDIDO DESC
+                """
+            ),
+            params,
+        ).mappings().all()
+
+        if not pedidos:
+            return None
+
+        candidatos = conn.execute(
+            text(
+                """
+                SELECT DISTINCT
+                    pc.NRO_CONSOLID, pc.TIPO_CONSOLID,
+                    pc.FECHA_CONS, pc.VALOR_PLAN,
+                    pc.NRO_EST_MDO, pc.NRO_CERTIFICA,
+                    c.NRO_CERTIFICA_SIAF,
+                    ca.SEC_CUADRO,
+                    o.NRO_ORDEN, o.FECHA_ORDEN
+                FROM SIG_CUADRO_MODIFICADO_CMN cmn
+                INNER JOIN SIG_PAAC_CONSOLIDADO pc
+                    ON pc.ANO_EJE = cmn.ANNO_EJEC
+                   AND pc.SEC_EJEC = cmn.SEC_EJEC
+                   AND pc.TIPO_CONSOLID = cmn.TIPO_CONSOLID
+                   AND pc.NRO_CONSOLID = cmn.NRO_CONSOLID
+                   AND pc.TIPO_BIEN = cmn.TIPO_BIEN
+                LEFT JOIN SIG_CERTIFICACION c
+                    ON c.ANO_EJE = pc.ANO_EJE AND c.SEC_EJEC = pc.SEC_EJEC
+                   AND c.NRO_CERTIFICA = pc.NRO_CERTIFICA
+                LEFT JOIN SIG_CUADRO_ADQUISICION ca
+                    ON ca.ANO_EJE = pc.ANO_EJE AND ca.SEC_EJEC = pc.SEC_EJEC
+                   AND ca.TIPO_BIEN = pc.TIPO_BIEN
+                   AND ca.NRO_CONS_PAAC = pc.NRO_CONSOLID
+                LEFT JOIN SIG_ORDEN_ADQUISICION o
+                    ON o.ANO_EJE = ca.ANO_EJE AND o.SEC_EJEC = ca.SEC_EJEC
+                   AND o.TIPO_BIEN = ca.TIPO_BIEN AND o.SEC_CUADRO = ca.SEC_CUADRO
+                WHERE cmn.ANNO_EJEC = :ano AND cmn.SEC_EJEC = :sec_ejec
+                  AND cmn.SEC_CUA_MOD_SAL = :bolsa
+                  AND cmn.TIPO_BIEN = :tipo
+                ORDER BY pc.FECHA_CONS DESC, pc.NRO_CONSOLID DESC
+                """
+            ),
+            params,
+        ).mappings().all()
+
+    return {
+        "sec_cua_mod_sal": sec_cua_mod_sal,
+        "ano_eje": ano,
+        "tipo_bien": tipo_bien,
+        "pedidos": [dict(p) for p in pedidos],
+        "candidatos": [dict(c) for c in candidatos],
+    }
+
+
 # ─── Detalle de un pedido con la cadena completa ─────────────────────────
 
 

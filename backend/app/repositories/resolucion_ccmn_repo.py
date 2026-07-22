@@ -110,6 +110,29 @@ def resoluciones_de_pedido(
     return [dict(r) for r in rows]
 
 
+def obtener_resolucion(
+    db: Session, *, resolucion_id: UUID
+) -> dict[str, Any] | None:
+    """Una resolucion por id, revocada o no.
+
+    Se usa antes de revocar: el alcance de CC (RN-04) se valida contra el
+    pedido al que pertenece, y para eso hay que leerla primero.
+    """
+    row = db.execute(
+        text(
+            """
+            SELECT id, ano_eje, sec_ejec, tipo_bien, tipo_pedido, nro_pedido,
+                   nro_consolid, sec_cua_mod_sal, nota, usuario_id,
+                   creado_en, revocado_en, revocado_por
+              FROM sistema.resolucion_pedido_ccmn
+             WHERE id = :id
+            """
+        ),
+        {"id": resolucion_id},
+    ).mappings().first()
+    return dict(row) if row else None
+
+
 def crear_resolucion(
     db: Session,
     *,

@@ -18,8 +18,8 @@ Lo que sigue es implementación, con el diseño ya acordado con el usuario.
 | | |
 |---|---|
 | ✅ Decidido | Cascada de confianza, 4 estados de UI, resolución manual N:M, orden por fecha |
-| ✅ Implementado | Puntos **1 a 4** de §9 (`119f776`, `62d7454`, + §9.3, §9.4) |
-| ⏳ Por implementar | Puntos **5 a 9** de §9 |
+| ✅ Implementado | Puntos **1 a 5** de §9 (`119f776`, `62d7454`, + §9.3, §9.4, §9.5) |
+| ⏳ Por implementar | Puntos **6 a 9** de §9 — **backend completo, falta la UI** |
 | ❌ Cerrado | `SIG_SEGUIMIENTO` (§3.2), `SEC_RESUMEN` (§3.1), y todo lo de §2 |
 
 ---
@@ -428,13 +428,13 @@ En el **timeline del pipeline** el orden se mantiene **ascendente** (etapa 1 arr
 | ~~2~~ | ✅ Reemplazar `MAX(CASE...)` por cascada con `confianza` | `schemas/` + `pipeline_service.py` | hecho · `62d7454` · §9.2 |
 | ~~3~~ | ✅ Alimentar `declarado` y `declarado_cert` desde el repo | `pipeline_repo.py` | hecho · §9.3 · neto medido = 38 |
 | ~~4~~ | ✅ Migración `sistema.resolucion_pedido_ccmn` | Postgres | hecho · §9.4 · `b7c1d2e3f4a5` |
-| **5** | **Endpoints: ver bolsa · asociar · revocar** | `routers/pipeline.py` | + `logs.auditoria` · **el siguiente** |
-| 6 | 4 estados con color distinto | `features/pipeline/` | §8 · ámbar ≠ verde |
+| ~~5~~ | ✅ Endpoints: ver bolsa · asociar · revocar | `routers/pipeline.py` | hecho · §9.5 · + `logs.auditoria` |
+| **6** | **4 estados con color distinto** | `features/pipeline/` | §8 · ámbar ≠ verde · **el siguiente** |
 | 7 | Vista de bolsa con orden y monto | `features/pipeline/` | §8.2 |
 | 8 | Panel de trazabilidad con cascada automática visible | `features/pipeline/` | §5 |
 | 9 | Job: detectar resoluciones obsoletas | sync | §5.1 |
 
-**Orden sugerido:** ~~1 → 2 → 3 → 4~~ → **5** → 6/7/8 → 9.
+**Orden sugerido:** ~~1 → 2 → 3 → 4 → 5~~ → **6/7/8** → 9.
 Los puntos 1 y 2 eran correcciones de bug; el 3 hizo rendir la cascada (ya distingue los
 7 niveles, no solo `unico`/`ambiguo`/`sin_ccmn`).
 
@@ -615,6 +615,61 @@ Suite: **79 passed**, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
 ❓ **Sigue abierto:** quién puede asociar (§13 ítem 6). El repo no impone rol — esa
 decisión va en los endpoints del punto 5.
 
+### 9.5 Punto 5 · endpoints de bolsa y resolución manual · sesión 2026-07-22
+
+| Método | Ruta | Quién |
+|---|---|---|
+| `GET` | `…/pedidos/{nro}/{tipo_bien}/{tipo_pedido}/bolsa` | cualquiera con alcance de CC |
+| `GET` | `…/pedidos/{nro}/{tipo_bien}/{tipo_pedido}/resoluciones` | ídem (`?incluir_revocadas`) |
+| `POST` | `…/pedidos/{nro}/{tipo_bien}/resoluciones` | Operativo · Decisor · Admin |
+| `DELETE` | `…/pedidos/resoluciones/{id}` | ídem |
+
+**✅ §13 ítem 6 CERRADO** (decidido con el usuario 2026-07-22): asocian **Operativo** sobre
+sus CC, **Decisor** sobre su jerarquía y **Admin** sin filtro — exactamente el alcance que
+RN-04 ya les da para *ver* el pedido. **Revocar sigue la misma regla y NO exige ser el autor:**
+una asociación equivocada no debe quedar congelada porque su autor rotó o está de licencia;
+la autoría queda en `revocado_por`. Ver ≠ asociar: la lectura no exige rol.
+
+**Validación que evita inventar datos:** el `POST` rechaza con **422** un `nro_consolid` que
+no esté entre los candidatos de la bolsa del pedido, y devuelve la lista de candidatos
+válidos en el mensaje. Asociar un CCMN de fuera no sería resolver, sería fabricar.
+
+La auditoría guarda `candidatos_al_momento` — es lo que permitirá al job del punto 9
+detectar la obsolescencia silenciosa de §5.1 (SIGA agrega un CCMN a la bolsa después de
+resolver) comparando contra los candidatos actuales.
+
+#### ⚠️ Trampa de datos encontrada al implementar la vista de bolsa
+
+`SIG_DETALLE_PEDIDOS.VALOR_TOTAL` viene en **0.00 en servicios**. Verificado en los 3 pedidos
+de la bolsa 11553:
+
+```
+NRO_PEDIDO  CANT_SOLICITADA  PRECIO_UNIT  VALOR_TOTAL
+000232          4800.00         1.00         0.00
+000278          1485.00         1.00         0.00
+001005          4500.00         1.00         0.00
+```
+
+El monto real es `CANT_SOLICITADA * PRECIO_UNIT` — coherente con §10, que registra el testigo
+como `CANT_SOLICITADA=4800 · PRECIO_UNIT=1`. Usar `VALOR_TOTAL` a secas habría mostrado
+**toda la bolsa en S/ 0**: otro fallo silencioso de los de §8. El repo hace fallback y la
+bolsa 11553 ya reproduce el mockup de §8.2 (4,500 / 1,485 / 4,800).
+
+> El monto se muestra pero **no ordena** (§8.2). El orden es `FECHA` desc con desempate por
+> número desc — cronológico y neutro.
+
+**Verificado contra BD**, bolsa 11553 del testigo:
+
+```
+pedidos:    1005 (4,500) · 278 (1,485) · 232 (4,800)   ← más reciente primero
+candidatos: 3532 (4,500) → OC 802 · 2281 (1,485) → OC 155 · 2266 (4,800) → OC 132
+```
+
+17 tests en [`tests/test_resolucion_ccmn_endpoints.py`](../../backend/tests/test_resolucion_ccmn_endpoints.py):
+roles autorizados/denegados, alcance de CC, candidato inválido, 404/409, auditoría de alta y
+revocación, y el marcado `asociado_manual` en la vista de bolsa.
+Suite: **96 passed**, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
+
 ---
 
 ## §10 · Caso testigo · pedido 232/S
@@ -697,7 +752,7 @@ WHERE c.object_id=OBJECT_ID('<TABLA>') ORDER BY c.column_id;
 | 3 | Los conflictos: ¿typo o desfase sistemático? (§3.3) | ◐ **parcial** · 2 pares son transposición; 5 sin patrón (§9.3). Descartado el desfase sistemático |
 | 4 | `SIG_SEGUIMIENTO` tipo 20 — qué evento es (§3.2) | ❓ menor |
 | 5 | Patrón `CCMN = 2000 + CVR` (§13.1) | ❓ **nunca verificado** |
-| 6 | Quién puede asociar manualmente (§5) | ❓ decisión de producto |
+| 6 | ~~Quién puede asociar manualmente~~ | ✅ **cerrado** · Operativo/Decisor/Admin por CC; revocar igual, sin exigir autoría · §9.5 |
 | 7 | Ruta del frontend `pedidos/:nroPedido/:tipoBien` no lleva `tipoPedido` | ❓ colisiona con §6 · 446 pedidos comparten URL |
 
 ### 13.1 La única pista estructural sin probar

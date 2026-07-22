@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -426,6 +427,78 @@ class PedidoDetalleResponse(BaseModel):
     conformidades: list[Conformidad]
     movimientos_almacen: list[MovimientoAlmacen] = []
     timeline: list[TimelineEvento] = []
+
+
+# ─── Vista de bolsa y resolucion manual (§5, §8.2) ───────────────────────
+
+class PedidoEnBolsa(BaseModel):
+    """Un pedido que comparte la bolsa `SEC_CUA_MOD_SAL`."""
+    nro_pedido: int
+    tipo_bien: str
+    tipo_pedido: str | None = None
+    centro_costo: str | None = None
+    sec_func: int | None = None
+    estado_pedido: str | None = None
+    fecha_pedido: date | None = None
+    motivo: str | None = None
+    solicitante: str | None = None
+    valor_soles: float | None = None
+    item: str | None = None
+    # Nivel que la cascada automatica le asigna. La UI lo muestra SIEMPRE,
+    # junto a la resolucion manual si la hay (§5).
+    confianza_ccmn: NivelConfianza | None = None
+
+
+class CandidatoCCMN(BaseModel):
+    """Un CCMN candidato de la bolsa, con su avance propio."""
+    nro_consolid: int
+    tipo_consolid: str | None = None
+    fecha_cons: date | None = None
+    valor_plan: float | None = None
+    nro_est_mdo: int | None = None
+    nro_certifica: int | None = None
+    nro_certifica_siaf: int | None = None
+    sec_cuadro: int | None = None
+    nro_orden: int | None = None
+    fecha_orden: date | None = None
+    # True si este CCMN esta asociado manualmente al pedido consultado.
+    asociado_manual: bool = False
+
+
+class BolsaResponse(BaseModel):
+    """Vista de bolsa: donde vive la ambiguedad (§2.1).
+
+    Ambas listas van de mas reciente a mas antiguo, con desempate por numero
+    descendente para que el orden sea estable entre recargas. El monto se
+    muestra pero NO ordena: ordenar por proximidad de monto seria una
+    recomendacion disfrazada, y ese metodo pierde el CCMN correcto (§2).
+    """
+    ano_eje: int
+    sec_cua_mod_sal: int
+    tipo_bien: str
+    pedidos: list[PedidoEnBolsa] = []
+    candidatos: list[CandidatoCCMN] = []
+
+
+class ResolucionCreate(BaseModel):
+    """Alta de una asociacion manual pedido -> CCMN."""
+    tipo_pedido: str
+    nro_consolid: int
+    nota: str | None = None
+    ano_eje: int | None = None
+
+
+class ResolucionResponse(BaseModel):
+    id: UUID
+    nro_consolid: int
+    sec_cua_mod_sal: int | None = None
+    nota: str | None = None
+    usuario_id: UUID | None = None
+    usuario_nombre: str | None = None
+    creado_en: datetime
+    revocado_en: datetime | None = None
+    revocado_por: UUID | None = None
+    revocado_por_nombre: str | None = None
 
 
 # ─── Anotaciones (sin cambios) ────────────────────────────────────────────
