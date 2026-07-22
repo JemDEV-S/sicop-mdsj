@@ -226,7 +226,7 @@ Smoke test manual: arrancar `npm run dev`, entrar como funcionario semilla, reco
 
 ### Etapa B — Núcleo operativo
 - [x] **T-45** · Pipeline kanban — [2026-07-16]
-- [ ] **T-46** · Detalle pedido
+- [x] **T-46** · Detalle pedido
 - [ ] **T-47** · Alertas estancados
 
 ### Etapa C — Saldos y alertas
