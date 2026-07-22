@@ -18,6 +18,8 @@ from sqlalchemy.orm import Session
 
 from app.repositories import pipeline_repo
 from app.schemas.pipeline import (
+    CONFIANZA_A_ESTADO,
+    ESTADOS_ALCANZADOS,
     ETAPA_A_LABEL,
     ETAPA_A_MACROFASE,
     ETAPA_A_NUMERO,
@@ -99,6 +101,52 @@ def _umbral_para(macrofase: str, dias_fallback: int,
     return dias_fallback
 
 
+# ─── Cascada de confianza del match pedido <-> CCMN ──────────────────────
+
+
+def confianza_match(fila: dict[str, Any]) -> str:
+    """Nivel de confianza del CCMN atribuido al pedido.
+
+    Resuelve en cascada y declara el nivel; nunca elige un ganador por
+    parecido. Las etapas 4-7 (programacion) dependen de esto: si el nivel
+    no esta en CONFIANZA_RESUELTA, el avance observado puede pertenecer al
+    CCMN de OTRO pedido de la misma bolsa.
+
+    Ref: doc de refactorizacion §4.
+    """
+    n_cand = fila.get("n_candidatos_ccmn") or 0
+
+    if fila.get("ccmn_manual"):
+        return "resuelto_manual"
+
+    if n_cand == 0:
+        return "sin_ccmn"
+
+    if n_cand == 1:
+        return "unico"
+
+    # Con N candidatos solo una fuente declarativa desambigua. Si declara un
+    # CCMN que no esta entre los candidatos es un typo o un desfase: se marca
+    # visible en vez de aceptarlo.
+    for nivel, declarado in (
+        ("declarado",      fila.get("ccmn_declarado_orden")),
+        ("declarado_cert", fila.get("ccmn_declarado_cert")),
+    ):
+        if not declarado:
+            continue
+        candidatos = fila.get("ccmn_candidatos") or ()
+        if not candidatos or declarado in candidatos:
+            return nivel
+        return "conflicto"
+
+    return "ambiguo"
+
+
+def estado_etapa_programacion(fila: dict[str, Any]) -> str:
+    """Estado de las etapas 4-7, que solo son observables a traves del CCMN."""
+    return CONFIANZA_A_ESTADO.get(confianza_match(fila), "sin_dato")
+
+
 # ─── Clasificacion pedido -> etapa maxima alcanzada ───────────────────────
 #
 # Se recorre en orden inverso (de la ultima hacia la primera) y se toma la
@@ -106,6 +154,10 @@ def _umbral_para(macrofase: str, dias_fallback: int,
 
 def _etapa_maxima(fila: dict[str, Any]) -> str:
     tipo_bien = fila.get("TIPO_BIEN") or fila.get("tipo_bien")
+    # Etapas 4-7: solo cuentan si el CCMN es atribuible a ESTE pedido. Con
+    # nivel `ambiguo`/`conflicto` el avance es del grupo (otros pedidos de la
+    # bolsa) y marcarlo aqui es el bug que pintaba verdes ajenos.
+    prog_atribuible = estado_etapa_programacion(fila) in ESTADOS_ALCANZADOS
 
     # [16] Cierre
     if fila.get("tiene_cierre"):
@@ -142,19 +194,19 @@ def _etapa_maxima(fila: dict[str, Any]) -> str:
         return ETAPA_CERTIFICACION
 
     # [7] Cuadro adquisicion
-    if fila.get("tiene_cuadro_adq"):
+    if fila.get("tiene_cuadro_adq") and prog_atribuible:
         return ETAPA_CUADRO_ADQUISICION
 
     # [6] Cotizacion
-    if fila.get("tiene_cotizacion"):
+    if fila.get("tiene_cotizacion") and prog_atribuible:
         return ETAPA_COTIZACION
 
     # [5] CCMN
-    if fila.get("tiene_ccmn"):
+    if fila.get("tiene_ccmn") and prog_atribuible:
         return ETAPA_CCMN
 
     # [4] Puente pedido<->PAAC
-    if fila.get("tiene_puente_paac"):
+    if fila.get("tiene_puente_paac") and prog_atribuible:
         return ETAPA_PUENTE_PAAC
 
     # [3] Cuadro necesidad

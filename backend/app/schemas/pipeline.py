@@ -120,6 +120,80 @@ MACROFASE_A_LABEL: dict[Macrofase, str] = {
 }
 
 
+# ─── Confianza del match pedido <-> CCMN ─────────────────────────────────
+#
+# SIGA no registra que CCMN corresponde a que pedido: logistica copia los datos
+# del pedido a un CCMN nuevo y no los vincula. Cuando la bolsa (SEC_CUA_MOD_SAL)
+# agrupa varios pedidos, hay N candidatos y ninguno es "el" del pedido.
+# En vez de elegir por parecido (metodos medidos que pierden el CCMN correcto,
+# ver §2 del doc), se resuelve en cascada y se declara el nivel.
+#
+# Ref: Docs/diagnostico-2026-07-20/refactorizacion-pipeline-pedido-ccmn.md §4
+
+NivelConfianza = Literal[
+    "unico",            # 1 solo candidato estructural en la bolsa
+    "declarado",        # CCMN del texto de la orden ∈ candidatos
+    "declarado_cert",   # CCMN de SIG_CERTIFICACION_DOC ∈ candidatos
+    "resuelto_manual",  # asociado por un funcionario (referencial, opcional)
+    "conflicto",        # una fuente declara un CCMN ∉ candidatos
+    "ambiguo",          # N candidatos, ninguna fuente resuelve
+    "sin_ccmn",         # 0 candidatos: el pedido aun no se programo
+]
+
+# Orden de prioridad de la cascada. `declarado` manda sobre `declarado_cert`
+# porque la orden es posterior en el proceso y estuvo bajo mas escrutinio.
+CONFIANZA_PRIORIDAD: tuple[str, ...] = (
+    "unico",
+    "declarado",
+    "declarado_cert",
+    "resuelto_manual",
+)
+
+# Niveles en los que el CCMN identificado es de ESTE pedido.
+CONFIANZA_RESUELTA: frozenset[str] = frozenset(CONFIANZA_PRIORIDAD)
+
+CONFIANZA_A_LABEL: dict[str, str] = {
+    "unico":           "Candidato unico",
+    "declarado":       "Declarado en la orden",
+    "declarado_cert":  "Declarado en la certificacion",
+    "resuelto_manual": "Asociado manualmente",
+    "conflicto":       "Conflicto entre fuentes",
+    "ambiguo":         "Ambiguo: varios candidatos",
+    "sin_ccmn":        "Sin CCMN todavia",
+}
+
+
+# ─── Estado de cada etapa en el timeline ─────────────────────────────────
+#
+# Reemplaza el booleano `alcanzada`. La distincion critica es directo vs grupo:
+# hoy el MAX(CASE...) del repo responde "¿algun candidato llego a esta etapa?",
+# y los otros candidatos son de OTROS pedidos -> pinta verdes ajenos.
+
+EstadoEtapa = Literal[
+    "directo",    # alcanzada por ESTE pedido — dato duro
+    "via_ccmn",   # via CCMN identificado por fuente declarativa — fecha aprox.
+    "grupo",      # algun candidato de la bolsa llego; no se sabe si por este
+    "manual",     # via CCMN asociado manualmente
+    "sin_dato",   # no alcanzada, o sin evidencia
+]
+
+# Estados que cuentan como "alcanzada" para clasificar la etapa maxima.
+# `grupo` NO cuenta: es justamente el caso que hoy falla en silencio.
+ESTADOS_ALCANZADOS: frozenset[str] = frozenset(
+    {"directo", "via_ccmn", "manual"}
+)
+
+CONFIANZA_A_ESTADO: dict[str, str] = {
+    "unico":           "directo",
+    "declarado":       "via_ccmn",
+    "declarado_cert":  "via_ccmn",
+    "resuelto_manual": "manual",
+    "conflicto":       "grupo",
+    "ambiguo":         "grupo",
+    "sin_ccmn":        "sin_dato",
+}
+
+
 # ─── Tarjeta del pedido (kanban) ──────────────────────────────────────────
 
 class PedidoCard(BaseModel):
