@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.repositories import pipeline_repo
 from app.schemas.pipeline import (
     CONFIANZA_A_ESTADO,
+    CONFIANZA_A_LABEL,
     ESTADOS_ALCANZADOS,
     ETAPA_A_LABEL,
     ETAPA_A_MACROFASE,
@@ -269,6 +270,20 @@ def _enriquecer(
     dias_fallback: int,
     dias_por_macrofase: dict[str, int | None],
 ) -> dict[str, Any]:
+    # Se resuelve ANTES de clasificar: las etapas 4-7 dependen del nivel.
+    confianza = confianza_match(fila)
+    fila["confianza_ccmn"] = confianza
+    fila["confianza_ccmn_label"] = CONFIANZA_A_LABEL.get(confianza, confianza)
+    fila["estado_programacion"] = CONFIANZA_A_ESTADO.get(confianza, "sin_dato")
+    # El CCMN atribuido solo se expone cuando la cascada lo resolvio; con
+    # `ambiguo`/`conflicto` no hay un CCMN de ESTE pedido que mostrar.
+    fila["ccmn_atribuido"] = (
+        fila.get("ccmn_manual")
+        or fila.get("ccmn_declarado_orden")
+        or fila.get("ccmn_declarado_cert")
+        or (fila.get("nro_consolid_muestra") if confianza == "unico" else None)
+    )
+
     etapa = _etapa_maxima(fila)
     macrofase = ETAPA_A_MACROFASE[etapa]
     fila["etapa"] = etapa
@@ -311,8 +326,15 @@ def _renombrar(fila: dict[str, Any]) -> dict[str, Any]:
         "FECHA_APROB": "fecha_aprob",
         "FECHA_ATENC": "fecha_atenc",
     }
+    # Campos de trabajo de la cascada: ya se consumieron en _enriquecer y no
+    # son serializables (frozenset). `confianza_ccmn` es lo que sale al API.
+    internos = {"ccmn_candidatos", "ccmn_declarado_orden",
+                "ccmn_declarado_cert", "ccmn_manual"}
+
     out: dict[str, Any] = {}
     for k, v in fila.items():
+        if k in internos:
+            continue
         nk = mapping.get(k, k)
         if isinstance(v, datetime):
             v = v.date()

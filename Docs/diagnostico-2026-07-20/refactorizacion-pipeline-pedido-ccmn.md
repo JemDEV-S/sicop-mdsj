@@ -18,8 +18,8 @@ Lo que sigue es implementación, con el diseño ya acordado con el usuario.
 | | |
 |---|---|
 | ✅ Decidido | Cascada de confianza, 4 estados de UI, resolución manual N:M, orden por fecha |
-| ✅ Implementado | Puntos **1 y 2** de §9 (commits `119f776`, `62d7454`) — ver §9.2 |
-| ⏳ Por implementar | Puntos **3 a 9** de §9 |
+| ✅ Implementado | Puntos **1, 2 y 3** de §9 (`119f776`, `62d7454`, + §9.3) |
+| ⏳ Por implementar | Puntos **4 a 9** de §9 |
 | ❌ Cerrado | `SIG_SEGUIMIENTO` (§3.2), `SEC_RESUMEN` (§3.1), y todo lo de §2 |
 
 ---
@@ -163,9 +163,10 @@ La tabla trae `NRO_CONSOLID` propio.
 **365 servicios** donde el pedido tenía varios candidatos y la certificación eligió uno.
 Coherente con que bienes ya estaba resuelto.
 
-> ⚠️ **Pendiente de validar:** esos 365 son la desambiguación que la certificación *afirma*.
-> No está probado que sea *correcta* (misma pregunta que hundió a `SEC_RESUMEN`).
-> **Prueba pendiente:** confrontar certificación × orden donde ambas hablen del mismo pedido.
+> ✅ **VALIDADO (punto 3, 2026-07-22).** La prueba se corrió: donde certificación y orden
+> hablan del mismo pedido, **coinciden en 865 de 874 (99.0%)**. La certificación no solo
+> *afirma* — queda *corroborada* por una fuente independiente. Es exactamente la evidencia
+> que `SEC_RESUMEN` no pudo dar (§3.1). Detalle de las 9 discrepancias en §9.3.
 
 Regex validado (tolera todos los formatos observados):
 
@@ -215,9 +216,11 @@ no verificación de dos fuentes. Mezclarlos perdería la auditabilidad del orige
 | `ambiguo` | 30 (4.5%) | 114 (11.5%) |
 | **Resuelto confiable** | **639 (95.2%)** | **872 (87.7%)** |
 
-❓ **No medido:** el aporte **neto** de `declarado_cert` sobre los 114 ambiguos.
-Los 365 desambiguados solapan con lo que ya resolvía `declarado` — el neto es **> 0**
-pero probablemente mucho menor que 365. **Medir al implementar la cascada.**
+✅ **MEDIDO (punto 3, 2026-07-22):** el aporte **neto** de `declarado_cert` es **38 pedidos**
+(24 S · 14 B) — no 365. De los 794 ambiguos estructurales, `declarado` (orden) resuelve 614;
+la certificación aporta 38 que la orden no cubre; quedan 142 ambiguos. En **403** ambas
+fuentes declaran (de ahí el solapamiento). La sospecha del doc era correcta: el neto es
+**>0 pero mucho menor** que la cifra bruta. Ver §9.3.
 
 ---
 
@@ -423,23 +426,23 @@ En el **timeline del pipeline** el orden se mantiene **ascendente** (etapa 1 arr
 |---|---|---|---|
 | ~~1~~ | ✅ Corregir llave a `TIPO_BIEN+TIPO_PEDIDO+NRO_PEDIDO` | `pipeline_repo.py` | hecho · `119f776` · §9.2 |
 | ~~2~~ | ✅ Reemplazar `MAX(CASE...)` por cascada con `confianza` | `schemas/` + `pipeline_service.py` | hecho · `62d7454` · §9.2 |
-| **3** | **Alimentar `declarado` y `declarado_cert` desde el repo** | `pipeline_repo.py` | §3.3 · **el siguiente** · **medir aporte neto** |
-| 4 | Migración `sistema.resolucion_pedido_ccmn` | Postgres | §5 · N:M |
+| ~~3~~ | ✅ Alimentar `declarado` y `declarado_cert` desde el repo | `pipeline_repo.py` | hecho · §9.3 · neto medido = 38 |
+| **4** | **Migración `sistema.resolucion_pedido_ccmn`** | Postgres | §5 · N:M · **el siguiente** |
 | 5 | Endpoints: ver bolsa · asociar · revocar | `routers/pipeline.py` | + `logs.auditoria` |
 | 6 | 4 estados con color distinto | `features/pipeline/` | §8 · ámbar ≠ verde |
 | 7 | Vista de bolsa con orden y monto | `features/pipeline/` | §8.2 |
 | 8 | Panel de trazabilidad con cascada automática visible | `features/pipeline/` | §5 |
 | 9 | Job: detectar resoluciones obsoletas | sync | §5.1 |
 
-**Orden sugerido:** ~~1 → 2~~ → **3** → 4 → 5 → 6/7/8 → 9.
-Los puntos 1 y 2 eran correcciones de bug — ya aplicados. El punto 3 es el que hace rendir
-la cascada: hoy solo distingue `unico`/`ambiguo`/`sin_ccmn`.
+**Orden sugerido:** ~~1 → 2 → 3~~ → **4** → 5 → 6/7/8 → 9.
+Los puntos 1 y 2 eran correcciones de bug; el 3 hizo rendir la cascada (ya distingue los
+7 niveles, no solo `unico`/`ambiguo`/`sin_ccmn`).
 
-> ⚠️ **El frontend depende del punto 3.** [`Timeline.tsx`](../../frontend/src/components/Timeline.tsx)
-> y [`features/pipeline/types.ts`](../../frontend/src/features/pipeline/types.ts) usan hoy
-> `alcanzada: boolean`, que no puede representar los 5 `EstadoEtapa`. Migrar la UI **antes**
-> de que el backend emita el estado real sería pintar datos inventados — en particular el
-> `◔ grupo`, que es indistinguible del `✅` sin el dato del backend.
+> ✅ **El frontend ya está desbloqueado.** El backend emite `estado_programacion` y
+> `confianza_ccmn` (§9.3). [`Timeline.tsx`](../../frontend/src/components/Timeline.tsx) y
+> [`features/pipeline/types.ts`](../../frontend/src/features/pipeline/types.ts) siguen con
+> `alcanzada: boolean` — migrarlos a los 5 `EstadoEtapa` es el punto 6, y **ahora sí** hay
+> dato real detrás del `◔ grupo` (158 ambiguos + 4 conflictos que hoy se pintan verdes).
 
 ### 9.1 Advertencia sobre las métricas — ⚠️ CORREGIDA tras medir
 
@@ -500,6 +503,63 @@ de lo que §7 suponía.
 **Fallo de test preexistente:** `tests/test_sync_invierte.py::test_leer_todo_consolida_por_codigo`
 falla desde antes de esta sesión (verificado con `git stash`). No relacionado. 8 skips en
 `test_permisos.py` por falta de CCs en `ref.centros_costo` — ruido de entorno.
+
+### 9.3 Punto 3 · `declarado` y `declarado_cert` · sesión 2026-07-22
+
+**Hallazgo que simplificó la implementación:** la orden llega al CCMN por **ruta estructural**,
+no por texto. `SIG_ORDEN_ADQUISICION.SEC_CUADRO → SIG_CUADRO_ADQUISICION.NRO_CONS_PAAC`
+está poblado en **las 1,473 órdenes de 2026 (100%)**, y coincide con la ruta alterna vía
+`NRO_CERTIFICA → SIG_CERTIFICACION_DOC.NRO_CONSOLID`. El texto solo aporta el **número de
+pedido**; el CCMN sale de la cadena dura. Verificado en el testigo: orden 132 → CCMN 2266.
+
+Ambas fuentes emiten `(tipo_bien, ccmn, texto)` y el parseo del pedido se hace en **Python**
+(`parsear_nro_pedido`, regex de §3.3), no en T-SQL: es testeable y legible.
+
+**Regla de elección** (`_elegir_declarado`): si varios CCMN declaran el mismo pedido y más de
+uno está entre los candidatos, se devuelve `None` — **no desambigua**. Elegir uno sería el
+"ganador por parecido" que §2 descarta. Un declarado único fuera de los candidatos **sí** se
+devuelve, para que la cascada lo marque `conflicto` en vez de silenciarlo.
+
+**Cascada medida contra BD (2026, universo 2,358):**
+
+| Nivel | Antes (punto 2) | **Ahora** |
+|---|---|---|
+| `unico` | 1,301 | 1,301 |
+| `declarado` | 0 | **590** |
+| `declarado_cert` | 0 | **42** |
+| `conflicto` | 0 | **4** |
+| `ambiguo` | 794 | **158** |
+| `sin_ccmn` | 263 | 263 |
+
+| Cobertura sobre los que tienen bolsa | Medido |
+|---|---|
+| Bienes | **1,051 / 1,101 (95.5%)** |
+| Servicios | **882 / 994 (88.7%)** |
+
+Consistente con lo que §4.1 anticipaba (95.2% / 87.7%) — la diferencia es que ahora los
+niveles se emiten de verdad. **Total de filas intacto: 2,358** (los joins nuevos no explotan).
+
+**Las 9 discrepancias certificación × orden — ❓ parcialmente explicadas.** Dos pares están
+**intercambiados** entre pedidos adyacentes:
+
+```
+ped 848/S: orden=3165 cert=3164   │  ped 901/S: orden=3373 cert=3374
+ped 849/S: orden=3164 cert=3165   │  ped 916/S: orden=3374 cert=3373
+```
+
+Es transposición al transcribir dos pedidos correlativos, **no un desfase sistemático**
+(descarta la teoría que §3.3 dejaba abierta para los 19 conflictos). Las otras 5 son saltos
+grandes (`2689` vs `2187`) sin patrón visible con n=5. La cascada las resuelve a favor de
+`declarado` por prioridad; solo 4 llegan a `conflicto`.
+
+**Contrato nuevo en `PedidoCard`** — lo que el frontend consumirá en el punto 6:
+`n_candidatos_ccmn`, `confianza_ccmn`, `confianza_ccmn_label`, `estado_programacion`,
+`ccmn_atribuido`. Los campos de trabajo (`ccmn_candidatos` y los tres declarados) se
+consumen en el service y **no salen al API**.
+
+10 tests nuevos en [`tests/repositories/test_declaraciones_ccmn.py`](../../backend/tests/repositories/test_declaraciones_ccmn.py)
+(formatos reales de §3.3 + reglas de elección). Los 13 de la cascada siguen verdes,
+testigo incluido. Suite: 70 passed, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
 
 ---
 
@@ -578,9 +638,9 @@ WHERE c.object_id=OBJECT_ID('<TABLA>') ORDER BY c.column_id;
 
 | # | Qué | Estado |
 |---|---|---|
-| 1 | Confrontar certificación × orden — validar los 365 (§3.3) | ❓ prueba diseñada, no corrida · **hacer en el punto 3** |
-| 2 | Aporte **neto** de `declarado_cert` sobre los 794 ambiguos (§4.1) | ❓ **medir al implementar el punto 3** |
-| 3 | Los 19 conflictos: ¿typo o desfase sistemático? (§3.3) | ❓ revisar caso por caso |
+| 1 | ~~Confrontar certificación × orden~~ | ✅ **cerrado** · 865/874 (99.0%) coinciden · §9.3 |
+| 2 | ~~Aporte **neto** de `declarado_cert`~~ | ✅ **cerrado** · **38 pedidos** (24 S · 14 B) · §9.3 |
+| 3 | Los conflictos: ¿typo o desfase sistemático? (§3.3) | ◐ **parcial** · 2 pares son transposición; 5 sin patrón (§9.3). Descartado el desfase sistemático |
 | 4 | `SIG_SEGUIMIENTO` tipo 20 — qué evento es (§3.2) | ❓ menor |
 | 5 | Patrón `CCMN = 2000 + CVR` (§13.1) | ❓ **nunca verificado** |
 | 6 | Quién puede asociar manualmente (§5) | ❓ decisión de producto |

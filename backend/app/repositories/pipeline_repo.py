@@ -32,6 +32,8 @@ Filtro por CC del usuario (RN-04) via SIG_PEDIDOS.CENTRO_COSTO IN (...).
 
 from __future__ import annotations
 
+import re
+from collections import defaultdict
 from typing import Any
 
 from sqlalchemy import text
@@ -44,6 +46,77 @@ def _bind_centros(centros: list[str]) -> tuple[str, dict[str, str]]:
     binds = [f":cc{i}" for i in range(len(centros))]
     params = {f"cc{i}": c for i, c in enumerate(centros)}
     return ", ".join(binds), params
+
+
+# ─── Parseo de las fuentes declarativas ──────────────────────────────────
+#
+# SIGA no vincula pedido y CCMN (§1): logistica copia los datos del pedido a
+# un CCMN nuevo sin relacionarlos. Lo unico que queda es el texto libre, donde
+# el usuario escribe de que pedido viene. Regex validado contra todos los
+# formatos observados en 2026 (§3.3):
+#
+#   PEDIDO 76 · PEDIDO 0225 · PEDIDO DE COMPRA N°000026-2026
+#   PEDIDO DE SERVICIO N°228-2026 ACTUALIZADO · PEDIOD 0041 (typo)
+#
+# `SEGUN CONTRATO` se descarta: no es un pedido.
+
+RE_PEDIDO = re.compile(
+    r"PEDIDO\s*(?:DE\s*(?:SERVICIO|COMPRA)\s*)?N?[^0-9A-Z]{0,4}(\d{1,6})", re.I
+)
+RE_CONTRATO = re.compile(r"SEGUN\s+CONTRATO", re.I)
+
+
+def parsear_nro_pedido(texto: str | None) -> int | None:
+    """Extrae el numero de pedido declarado en un texto libre de SIGA.
+
+    Devuelve None cuando el texto no nombra un pedido (p.ej. `INFORME
+    275-2026-MDSJ`, o `SEGUN CONTRATO`) — no adivina.
+    """
+    if not texto or RE_CONTRATO.search(texto):
+        return None
+    m = RE_PEDIDO.search(texto)
+    return int(m.group(1)) if m else None
+
+
+def _agrupar_declaraciones(rows: Any) -> dict[tuple[str, int], set[int]]:
+    """(tipo_bien, nro_pedido) -> conjunto de CCMN que lo declaran.
+
+    Se guarda el conjunto y no un ganador: si dos CCMN declaran el mismo
+    pedido, elegir uno seria exactamente el "ganador por parecido" que la
+    cascada existe para evitar.
+    """
+    out: dict[tuple[str, int], set[int]] = defaultdict(set)
+    for r in rows:
+        ped = parsear_nro_pedido(r["texto"])
+        if ped is None or r["ccmn"] is None:
+            continue
+        out[((r["TIPO_BIEN"] or "").strip(), ped)].add(int(r["ccmn"]))
+    return out
+
+
+def _elegir_declarado(
+    declaraciones: dict[tuple[str, int], set[int]],
+    tipo_bien: str,
+    nro_pedido: int,
+    candidatos: frozenset[int],
+) -> int | None:
+    """CCMN declarado para el pedido, si la declaracion es inequivoca.
+
+    Con varios CCMN declarando el mismo pedido se prefiere el que este entre
+    los candidatos de la bolsa. Si queda mas de uno, se devuelve None: la
+    fuente no desambigua y el pedido sigue `ambiguo`. Si el unico declarado
+    esta FUERA de los candidatos se devuelve igual, para que la cascada lo
+    marque `conflicto` en vez de silenciarlo.
+    """
+    decl = declaraciones.get((tipo_bien, nro_pedido))
+    if not decl:
+        return None
+    dentro = decl & candidatos
+    if len(dentro) == 1:
+        return next(iter(dentro))
+    if dentro:
+        return None  # varios candidatos declarados: no desambigua
+    return next(iter(decl)) if len(decl) == 1 else None
 
 
 # ─── Query principal del kanban ──────────────────────────────────────────
@@ -119,6 +192,28 @@ programacion AS (
        AND pc.TIPO_CONSOLID = cmn.TIPO_CONSOLID
        AND pc.NRO_CONSOLID = cmn.NRO_CONSOLID
        AND pc.TIPO_BIEN = cmn.TIPO_BIEN
+    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
+),
+-- Candidatos CCMN de la bolsa, como lista. La cascada necesita el conjunto
+-- (no solo el conteo) para verificar que un CCMN declarado este entre ellos:
+-- si declara uno de fuera es typo/desfase -> `conflicto`, no se acepta.
+candidatos AS (
+    SELECT
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
+        STUFF((
+            SELECT DISTINCT ',' + CAST(CAST(c2.NRO_CONSOLID AS INT) AS VARCHAR(12))
+            FROM det d2
+            JOIN SIG_CUADRO_MODIFICADO_CMN c2
+              ON c2.SEC_EJEC = d2.SEC_EJEC
+             AND c2.ANNO_EJEC = d2.ANO_EJE
+             AND c2.SEC_CUA_MOD_SAL = d2.SEC_CUA_MOD_SAL
+             AND c2.TIPO_BIEN = d2.TIPO_BIEN
+            WHERE d2.ANO_EJE = d.ANO_EJE AND d2.SEC_EJEC = d.SEC_EJEC
+              AND d2.NRO_PEDIDO = d.NRO_PEDIDO AND d2.TIPO_BIEN = d.TIPO_BIEN
+              AND d2.TIPO_PEDIDO = d.TIPO_PEDIDO
+            FOR XML PATH('')
+        ), 1, 1, '') AS ccmn_candidatos_csv
+    FROM det d
     GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
 ),
 -- [6] Cotizacion: hay solicitud para algun CCMN del pedido.
@@ -409,6 +504,7 @@ agrup AS (
         MIN(pg.nro_consolid_muestra)                          AS nro_consolid_muestra,
         MIN(pg.nro_est_mdo_muestra)                           AS nro_est_mdo_muestra,
         MAX(COALESCE(pg.n_candidatos_ccmn, 0))                AS n_candidatos_ccmn,
+        MAX(cnd.ccmn_candidatos_csv)                          AS ccmn_candidatos_csv,
         MAX(oe.nro_orden_final)                               AS nro_orden_muestra,
         MAX(oe.EXP_SIAF)                                      AS exp_siaf_muestra,
         MAX(oe.EXP_SIGA)                                      AS exp_siga_muestra,
@@ -431,6 +527,10 @@ agrup AS (
         ON pg.ANO_EJE = pb.ANO_EJE AND pg.SEC_EJEC = pb.SEC_EJEC
        AND pg.NRO_PEDIDO = pb.NRO_PEDIDO AND pg.TIPO_BIEN = pb.TIPO_BIEN
        AND pg.TIPO_PEDIDO = pb.TIPO_PEDIDO
+    LEFT JOIN candidatos cnd
+        ON cnd.ANO_EJE = pb.ANO_EJE AND cnd.SEC_EJEC = pb.SEC_EJEC
+       AND cnd.NRO_PEDIDO = pb.NRO_PEDIDO AND cnd.TIPO_BIEN = pb.TIPO_BIEN
+       AND cnd.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN cotizacion cot
         ON cot.ANO_EJE = pb.ANO_EJE AND cot.SEC_EJEC = pb.SEC_EJEC
        AND cot.NRO_PEDIDO = pb.NRO_PEDIDO AND cot.TIPO_BIEN = pb.TIPO_BIEN
@@ -479,6 +579,49 @@ ORDER BY FECHA_PEDIDO DESC
 """
 
 
+# ─── Fuentes declarativas (§3.3) ─────────────────────────────────────────
+#
+# Ambas emiten (tipo_bien, ccmn, texto). El texto nombra el PEDIDO; el parseo
+# se hace en Python con RE_PEDIDO, no en SQL: el regex esta validado contra
+# los formatos reales y en T-SQL seria ilegible e imposible de testear.
+
+# La orden nombra el pedido en el texto libre del item. Su CCMN sale de la
+# cadena propia de la orden (SEC_CUADRO -> NRO_CONS_PAAC), poblada en las
+# 1,473 ordenes de 2026. Es la fuente de mayor prioridad: la orden es
+# posterior en el proceso y estuvo bajo mas escrutinio.
+_SQL_DECL_ORDEN = """
+SELECT
+    o.TIPO_BIEN,
+    ca.NRO_CONS_PAAC                            AS ccmn,
+    CAST(oi.ESPECIFICACIONES AS VARCHAR(2000))  AS texto
+FROM SIG_ORDEN_ADQUISICION o
+JOIN SIG_CUADRO_ADQUISICION ca
+    ON ca.ANO_EJE = o.ANO_EJE
+   AND ca.SEC_EJEC = o.SEC_EJEC
+   AND ca.TIPO_BIEN = o.TIPO_BIEN
+   AND ca.SEC_CUADRO = o.SEC_CUADRO
+JOIN SIG_ORDEN_ITEM oi
+    ON oi.ANO_EJE = o.ANO_EJE
+   AND oi.SEC_EJEC = o.SEC_EJEC
+   AND oi.TIPO_BIEN = o.TIPO_BIEN
+   AND oi.NRO_ORDEN = o.NRO_ORDEN
+WHERE o.ANO_EJE = :ano AND o.SEC_EJEC = :sec_ejec
+  AND oi.ESPECIFICACIONES IS NOT NULL
+"""
+
+# SIG_CERTIFICACION_DOC trae NRO_CONSOLID propio al 100% (876 S / 659 B en
+# 2026) -- no hace falta pasar por SIG_CERTIFICACION_FASE.
+_SQL_DECL_CERT = """
+SELECT
+    cd.TIPO_BIEN,
+    cd.NRO_CONSOLID                         AS ccmn,
+    CAST(cd.REQUERIMIENTO AS VARCHAR(500))  AS texto
+FROM SIG_CERTIFICACION_DOC cd
+WHERE cd.ANO_EJE = :ano AND cd.SEC_EJEC = :sec_ejec
+  AND cd.REQUERIMIENTO IS NOT NULL
+"""
+
+
 def pipeline_pedidos_raw(
     ano: int,
     centros: list[str] | None = None,
@@ -501,11 +644,40 @@ def pipeline_pedidos_raw(
         filtro_cc = ""
 
     sql = _SQL_KANBAN.format(filtro_cc=filtro_cc)
+    p_decl = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
 
     with get_connection() as conn:
         rows = conn.execute(text(sql), params).mappings().all()
+        decl_orden = _agrupar_declaraciones(
+            conn.execute(text(_SQL_DECL_ORDEN), p_decl).mappings().all()
+        )
+        decl_cert = _agrupar_declaraciones(
+            conn.execute(text(_SQL_DECL_CERT), p_decl).mappings().all()
+        )
 
-    return [dict(r) for r in rows]
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        fila = dict(r)
+        tipo_bien = (fila.get("TIPO_BIEN") or "").strip()
+        nro_pedido = int(fila["NRO_PEDIDO"])
+
+        csv = fila.pop("ccmn_candidatos_csv", None)
+        candidatos = frozenset(
+            int(x) for x in csv.split(",") if x.strip()
+        ) if csv else frozenset()
+
+        fila["ccmn_candidatos"] = candidatos
+        fila["ccmn_declarado_orden"] = _elegir_declarado(
+            decl_orden, tipo_bien, nro_pedido, candidatos
+        )
+        fila["ccmn_declarado_cert"] = _elegir_declarado(
+            decl_cert, tipo_bien, nro_pedido, candidatos
+        )
+        # `ccmn_manual` se alimenta desde Postgres en el punto 4 del plan.
+        fila["ccmn_manual"] = None
+        out.append(fila)
+
+    return out
 
 
 # ─── Detalle de un pedido con la cadena completa ─────────────────────────

@@ -248,6 +248,15 @@ class PedidoCard(BaseModel):
     nro_certifica_siaf_muestra: int | None = None
     match_metodo: str | None = None
 
+    # Cascada de confianza del match pedido <-> CCMN (§4 del doc). El frontend
+    # debe pintar `estado_programacion` con color propio: `grupo` es avance de
+    # OTROS pedidos de la bolsa y hoy se ve como un verde falso.
+    n_candidatos_ccmn: int = 0
+    confianza_ccmn: NivelConfianza | None = None
+    confianza_ccmn_label: str | None = None
+    estado_programacion: EstadoEtapa | None = None
+    ccmn_atribuido: int | None = None
+
     dias_en_etapa: int | None = None
     estancado: bool = False
 
