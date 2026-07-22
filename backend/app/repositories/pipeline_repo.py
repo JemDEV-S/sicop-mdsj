@@ -96,14 +96,17 @@ det AS (
 -- Un mismo SEC_CUA_MOD_SAL puede tener N CCMN (§16.1) -- agrupamos por pedido.
 programacion AS (
     SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN,
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
         MAX(CASE WHEN d.SEC_CUA_MOD_SAL IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cuadro_neces,
         MAX(CASE WHEN cmn.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)  AS tiene_puente_paac,
         MAX(CASE WHEN pc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)   AS tiene_ccmn,
         MIN(pc.NRO_CONSOLID)                                            AS nro_consolid_muestra,
         MIN(pc.NRO_EST_MDO)                                             AS nro_est_mdo_muestra,
         MIN(pc.NRO_CERTIFICA)                                           AS nro_certifica_via_paac,
-        MAX(pc.FECHA_CONS)                                              AS fecha_ccmn
+        MAX(pc.FECHA_CONS)                                              AS fecha_ccmn,
+        -- Nº de CCMN candidatos de la bolsa. 1 => nivel `unico`; >1 => ambiguo
+        -- salvo que una fuente declarativa resuelva. Ver §4 del doc de refactorizacion.
+        COUNT(DISTINCT cmn.NRO_CONSOLID)                                AS n_candidatos_ccmn
     FROM det d
     LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
         ON cmn.SEC_EJEC = d.SEC_EJEC
@@ -116,12 +119,12 @@ programacion AS (
        AND pc.TIPO_CONSOLID = cmn.TIPO_CONSOLID
        AND pc.NRO_CONSOLID = cmn.NRO_CONSOLID
        AND pc.TIPO_BIEN = cmn.TIPO_BIEN
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN
+    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
 ),
 -- [6] Cotizacion: hay solicitud para algun CCMN del pedido.
 cotizacion AS (
     SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN,
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
         MAX(CASE WHEN sc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cotizacion
     FROM det d
     LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
@@ -134,12 +137,12 @@ cotizacion AS (
        AND sc.SEC_EJEC = cmn.SEC_EJEC
        AND sc.tipo_bien = cmn.TIPO_BIEN
        AND sc.NRO_CONSOLID = cmn.NRO_CONSOLID
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN
+    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
 ),
 -- [7] Cuadro de adquisicion: FK dura via NRO_CONS_PAAC.
 cuadro_adq AS (
     SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN,
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
         MAX(CASE WHEN ca.SEC_CUADRO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cuadro_adq,
         MIN(ca.SEC_CUADRO)                                          AS sec_cuadro_muestra,
         MAX(ca.FECHA_CUADRO)                                        AS fecha_cuadro_adq
@@ -154,12 +157,12 @@ cuadro_adq AS (
        AND ca.SEC_EJEC = cmn.SEC_EJEC
        AND ca.TIPO_BIEN = cmn.TIPO_BIEN
        AND ca.NRO_CONS_PAAC = cmn.NRO_CONSOLID
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN
+    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
 ),
 -- [8] Certificacion CCP (SIGA -> SIAF). Se llega desde la cabecera PAAC.
 certificacion AS (
     SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN,
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
         MAX(CASE WHEN c.NRO_CERTIFICA IS NOT NULL THEN 1 ELSE 0 END)         AS tiene_certificacion,
         MAX(CASE WHEN c.NRO_CERTIFICA_SIAF IS NOT NULL THEN 1 ELSE 0 END)    AS tiene_ccp_siaf,
         MIN(c.NRO_CERTIFICA)                                                  AS nro_certifica_muestra,
@@ -181,12 +184,12 @@ certificacion AS (
         ON c.ANO_EJE = pc.ANO_EJE
        AND c.SEC_EJEC = pc.SEC_EJEC
        AND c.NRO_CERTIFICA = pc.NRO_CERTIFICA
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN
+    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
 ),
 -- [9] Orden emitida: llave dura pecosa (bienes) o composite.
 match_pecosa AS (
     SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.SECUENCIA,
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA,
         MIN(ma.NRO_ORDEN) AS nro_orden
     FROM det d
     INNER JOIN SIG_MOVIM_ALMACEN ma
@@ -195,16 +198,17 @@ match_pecosa AS (
        AND ma.TIPO_BIEN = d.TIPO_BIEN
        AND ma.NRO_MOVIMTO = d.NRO_PECOSA
     WHERE d.TIPO_BIEN = 'B' AND d.NRO_PECOSA > 0
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.SECUENCIA
+    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA
 ),
 match_composite AS (
     SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.SECUENCIA,
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA,
         MIN(oi.NRO_ORDEN) AS nro_orden
     FROM det d
     LEFT JOIN match_pecosa mp
         ON mp.ANO_EJE = d.ANO_EJE AND mp.SEC_EJEC = d.SEC_EJEC
        AND mp.NRO_PEDIDO = d.NRO_PEDIDO AND mp.TIPO_BIEN = d.TIPO_BIEN
+       AND mp.TIPO_PEDIDO = d.TIPO_PEDIDO
        AND mp.SECUENCIA = d.SECUENCIA
     INNER JOIN SIG_ORDEN_ITEM oi
         ON oi.ANO_EJE = d.ANO_EJE
@@ -226,12 +230,12 @@ match_composite AS (
        AND LTRIM(RTRIM(op.CLASIFICADOR)) = d.clasificador
        AND (d.valor_soles = 0 OR ROUND(op.VALOR_SOLES, 2) = ROUND(d.valor_soles, 2))
     WHERE mp.nro_orden IS NULL
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.SECUENCIA
+    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA
 ),
 -- Orden final por item con marca de metodo.
 det_matched AS (
     SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.SECUENCIA,
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA,
         d.NRO_PECOSA, d.ESTADO_CONFOR, d.valor_soles,
         COALESCE(mp.nro_orden, mc.nro_orden, NULLIF(d.nro_orden_declarado, 0)) AS nro_orden_final,
         CASE
@@ -244,16 +248,18 @@ det_matched AS (
     LEFT JOIN match_pecosa mp
         ON mp.ANO_EJE = d.ANO_EJE AND mp.SEC_EJEC = d.SEC_EJEC
        AND mp.NRO_PEDIDO = d.NRO_PEDIDO AND mp.TIPO_BIEN = d.TIPO_BIEN
+       AND mp.TIPO_PEDIDO = d.TIPO_PEDIDO
        AND mp.SECUENCIA = d.SECUENCIA
     LEFT JOIN match_composite mc
         ON mc.ANO_EJE = d.ANO_EJE AND mc.SEC_EJEC = d.SEC_EJEC
        AND mc.NRO_PEDIDO = d.NRO_PEDIDO AND mc.TIPO_BIEN = d.TIPO_BIEN
+       AND mc.TIPO_PEDIDO = d.TIPO_PEDIDO
        AND mc.SECUENCIA = d.SECUENCIA
 ),
 -- [9][10][15-bienes] Datos de la orden + expediente + interfase SIAF.
 orden_enriquecida AS (
     SELECT
-        dm.ANO_EJE, dm.SEC_EJEC, dm.NRO_PEDIDO, dm.TIPO_BIEN, dm.SECUENCIA,
+        dm.ANO_EJE, dm.SEC_EJEC, dm.NRO_PEDIDO, dm.TIPO_BIEN, dm.TIPO_PEDIDO, dm.SECUENCIA,
         dm.NRO_PECOSA, dm.ESTADO_CONFOR, dm.valor_soles,
         dm.nro_orden_final, dm.match_metodo,
         o.EXP_SIAF, o.EXP_SIGA, o.TOTAL_FACT_SOLES,
@@ -261,7 +267,8 @@ orden_enriquecida AS (
         exd.FECHA_INTERFASE,
         MAX(CASE WHEN LTRIM(RTRIM(exd.TIPO_OPERACION)) = 'DV'
                  THEN 1 ELSE 0 END) OVER (
-            PARTITION BY dm.ANO_EJE, dm.SEC_EJEC, dm.NRO_PEDIDO, dm.TIPO_BIEN
+            PARTITION BY dm.ANO_EJE, dm.SEC_EJEC, dm.NRO_PEDIDO, dm.TIPO_BIEN,
+                         dm.TIPO_PEDIDO
         ) AS tiene_devengado_exp
     FROM det_matched dm
     LEFT JOIN SIG_ORDEN_ADQUISICION o
@@ -278,7 +285,7 @@ orden_enriquecida AS (
 --       Bienes: entrada al almacen (I,1) por orden (excluye kardex R).
 ejecucion AS (
     SELECT
-        oe.ANO_EJE, oe.SEC_EJEC, oe.NRO_PEDIDO, oe.TIPO_BIEN,
+        oe.ANO_EJE, oe.SEC_EJEC, oe.NRO_PEDIDO, oe.TIPO_BIEN, oe.TIPO_PEDIDO,
         MAX(CASE
             WHEN oe.TIPO_BIEN = 'S' AND cf.NRO_ORDEN IS NOT NULL      THEN 1
             WHEN oe.TIPO_BIEN = 'B' AND ma_i.NRO_MOVIMTO IS NOT NULL  THEN 1
@@ -312,13 +319,13 @@ ejecucion AS (
        AND ma_r.TIPO_BIEN = oe.TIPO_BIEN
        AND ma_r.NRO_ORDEN = oe.nro_orden_final
        AND ma_r.TIPO_MOVIMTO = 'R' AND ma_r.TIPO_TRANSAC = 1
-    GROUP BY oe.ANO_EJE, oe.SEC_EJEC, oe.NRO_PEDIDO, oe.TIPO_BIEN
+    GROUP BY oe.ANO_EJE, oe.SEC_EJEC, oe.NRO_PEDIDO, oe.TIPO_BIEN, oe.TIPO_PEDIDO
 ),
 -- [13] Pedido interno (TIPO_PEDIDO=1) que consume lo comprado.
 --      Se detecta si existe otro pedido con misma meta+CC y fecha posterior.
 pedido_interno AS (
     SELECT
-        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN,
+        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO,
         MAX(CASE WHEN pi2.NRO_PEDIDO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_pedido_interno
     FROM pedidos_base pb
     LEFT JOIN SIG_PEDIDOS pi2
@@ -331,12 +338,12 @@ pedido_interno AS (
        AND pi2.FECHA_PEDIDO >= pb.FECHA_PEDIDO
        AND pi2.NRO_PEDIDO <> pb.NRO_PEDIDO
     WHERE pb.TIPO_BIEN = 'B' AND pb.TIPO_PEDIDO = '2'
-    GROUP BY pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN
+    GROUP BY pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO
 ),
 -- [14] Despacho / pecosa: SIG_MOVIM_ALMACEN (S,1) con NRO_PECOSA del detalle.
 pecosa AS (
     SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN,
+        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
         MAX(CASE WHEN ma.NRO_MOVIMTO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_pecosa,
         MAX(ma.FECHA_MOVIMTO)                                        AS fecha_pecosa
     FROM det d
@@ -347,12 +354,12 @@ pecosa AS (
        AND ma.NRO_MOVIMTO = d.NRO_PECOSA
        AND ma.TIPO_MOVIMTO = 'S' AND ma.TIPO_TRANSAC = 1
     WHERE d.TIPO_BIEN = 'B' AND d.NRO_PECOSA > 0
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN
+    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
 ),
 -- [16] Cierre: ESTADO='7' o rastro en SIG_SEGUIMIENTO t=19.
 cierre AS (
     SELECT
-        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN,
+        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO,
         MAX(CASE WHEN pb.estado_pedido = '7' THEN 1
                  WHEN sg.NRO_PEDIDO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cierre,
         MAX(sg.FECHA_TRANSACCION)                                   AS fecha_cierre_seg
@@ -363,7 +370,7 @@ cierre AS (
        AND sg.TIPO_BIEN = pb.TIPO_BIEN
        AND sg.TIPO_TRANSACCION = 19
        AND TRY_CAST(sg.NRO_PEDIDO AS INT) = pb.NRO_PEDIDO
-    GROUP BY pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN
+    GROUP BY pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO
 ),
 -- Agregacion por pedido de todas las evidencias + valor total.
 agrup AS (
@@ -401,6 +408,7 @@ agrup AS (
         COUNT(oe.SECUENCIA)                                   AS items,
         MIN(pg.nro_consolid_muestra)                          AS nro_consolid_muestra,
         MIN(pg.nro_est_mdo_muestra)                           AS nro_est_mdo_muestra,
+        MAX(COALESCE(pg.n_candidatos_ccmn, 0))                AS n_candidatos_ccmn,
         MAX(oe.nro_orden_final)                               AS nro_orden_muestra,
         MAX(oe.EXP_SIAF)                                      AS exp_siaf_muestra,
         MAX(oe.EXP_SIGA)                                      AS exp_siga_muestra,
@@ -422,30 +430,39 @@ agrup AS (
     LEFT JOIN programacion pg
         ON pg.ANO_EJE = pb.ANO_EJE AND pg.SEC_EJEC = pb.SEC_EJEC
        AND pg.NRO_PEDIDO = pb.NRO_PEDIDO AND pg.TIPO_BIEN = pb.TIPO_BIEN
+       AND pg.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN cotizacion cot
         ON cot.ANO_EJE = pb.ANO_EJE AND cot.SEC_EJEC = pb.SEC_EJEC
        AND cot.NRO_PEDIDO = pb.NRO_PEDIDO AND cot.TIPO_BIEN = pb.TIPO_BIEN
+       AND cot.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN cuadro_adq cad
         ON cad.ANO_EJE = pb.ANO_EJE AND cad.SEC_EJEC = pb.SEC_EJEC
        AND cad.NRO_PEDIDO = pb.NRO_PEDIDO AND cad.TIPO_BIEN = pb.TIPO_BIEN
+       AND cad.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN certificacion cer
         ON cer.ANO_EJE = pb.ANO_EJE AND cer.SEC_EJEC = pb.SEC_EJEC
        AND cer.NRO_PEDIDO = pb.NRO_PEDIDO AND cer.TIPO_BIEN = pb.TIPO_BIEN
+       AND cer.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN orden_enriquecida oe
         ON oe.ANO_EJE = pb.ANO_EJE AND oe.SEC_EJEC = pb.SEC_EJEC
        AND oe.NRO_PEDIDO = pb.NRO_PEDIDO AND oe.TIPO_BIEN = pb.TIPO_BIEN
+       AND oe.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN ejecucion ej
         ON ej.ANO_EJE = pb.ANO_EJE AND ej.SEC_EJEC = pb.SEC_EJEC
        AND ej.NRO_PEDIDO = pb.NRO_PEDIDO AND ej.TIPO_BIEN = pb.TIPO_BIEN
+       AND ej.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN pedido_interno pin
         ON pin.ANO_EJE = pb.ANO_EJE AND pin.SEC_EJEC = pb.SEC_EJEC
        AND pin.NRO_PEDIDO = pb.NRO_PEDIDO AND pin.TIPO_BIEN = pb.TIPO_BIEN
+       AND pin.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN pecosa pec
         ON pec.ANO_EJE = pb.ANO_EJE AND pec.SEC_EJEC = pb.SEC_EJEC
        AND pec.NRO_PEDIDO = pb.NRO_PEDIDO AND pec.TIPO_BIEN = pb.TIPO_BIEN
+       AND pec.TIPO_PEDIDO = pb.TIPO_PEDIDO
     LEFT JOIN cierre cie
         ON cie.ANO_EJE = pb.ANO_EJE AND cie.SEC_EJEC = pb.SEC_EJEC
        AND cie.NRO_PEDIDO = pb.NRO_PEDIDO AND cie.TIPO_BIEN = pb.TIPO_BIEN
+       AND cie.TIPO_PEDIDO = pb.TIPO_PEDIDO
     GROUP BY
         pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO,
         pb.estado_pedido, pb.CENTRO_COSTO, pb.sec_func,
