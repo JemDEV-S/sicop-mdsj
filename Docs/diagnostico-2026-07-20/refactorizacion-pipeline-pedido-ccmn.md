@@ -18,7 +18,8 @@ Lo que sigue es implementación, con el diseño ya acordado con el usuario.
 | | |
 |---|---|
 | ✅ Decidido | Cascada de confianza, 4 estados de UI, resolución manual N:M, orden por fecha |
-| ⏳ Por implementar | Los 9 puntos de §7 |
+| ✅ Implementado | Puntos **1 y 2** de §9 (commits `119f776`, `62d7454`) — ver §9.2 |
+| ⏳ Por implementar | Puntos **3 a 9** de §9 |
 | ❌ Cerrado | `SIG_SEGUIMIENTO` (§3.2), `SEC_RESUMEN` (§3.1), y todo lo de §2 |
 
 ---
@@ -420,9 +421,9 @@ En el **timeline del pipeline** el orden se mantiene **ascendente** (etapa 1 arr
 
 | # | Qué | Dónde | Notas |
 |---|---|---|---|
-| 1 | Corregir llave a `TIPO_BIEN+TIPO_PEDIDO+NRO_PEDIDO` | `pipeline_repo.py` 11 `GROUP BY` | §6 · el dato ya está en el query |
-| 2 | Reemplazar `MAX(CASE...)` por cascada con `confianza` | `pipeline_repo.py:97-119` + CTE de etapa | §7 · patrón repetido |
-| 3 | Integrar `declarado_cert` a la cascada | `pipeline_service.py` | §3.3 · **medir aporte neto** |
+| ~~1~~ | ✅ Corregir llave a `TIPO_BIEN+TIPO_PEDIDO+NRO_PEDIDO` | `pipeline_repo.py` | hecho · `119f776` · §9.2 |
+| ~~2~~ | ✅ Reemplazar `MAX(CASE...)` por cascada con `confianza` | `schemas/` + `pipeline_service.py` | hecho · `62d7454` · §9.2 |
+| **3** | **Alimentar `declarado` y `declarado_cert` desde el repo** | `pipeline_repo.py` | §3.3 · **el siguiente** · **medir aporte neto** |
 | 4 | Migración `sistema.resolucion_pedido_ccmn` | Postgres | §5 · N:M |
 | 5 | Endpoints: ver bolsa · asociar · revocar | `routers/pipeline.py` | + `logs.auditoria` |
 | 6 | 4 estados con color distinto | `features/pipeline/` | §8 · ámbar ≠ verde |
@@ -430,14 +431,75 @@ En el **timeline del pipeline** el orden se mantiene **ascendente** (etapa 1 arr
 | 8 | Panel de trazabilidad con cascada automática visible | `features/pipeline/` | §5 |
 | 9 | Job: detectar resoluciones obsoletas | sync | §5.1 |
 
-**Orden sugerido:** 1 → 2 → 3 → 4 → 5 → 6/7/8 → 9.
-Los puntos 1 y 2 son correcciones de bug: sin ellos, lo demás se construye sobre datos falsos.
+**Orden sugerido:** ~~1 → 2~~ → **3** → 4 → 5 → 6/7/8 → 9.
+Los puntos 1 y 2 eran correcciones de bug — ya aplicados. El punto 3 es el que hace rendir
+la cascada: hoy solo distingue `unico`/`ambiguo`/`sin_ccmn`.
 
-### 9.1 Advertencia sobre las métricas
+> ⚠️ **El frontend depende del punto 3.** [`Timeline.tsx`](../../frontend/src/components/Timeline.tsx)
+> y [`features/pipeline/types.ts`](../../frontend/src/features/pipeline/types.ts) usan hoy
+> `alcanzada: boolean`, que no puede representar los 5 `EstadoEtapa`. Migrar la UI **antes**
+> de que el backend emita el estado real sería pintar datos inventados — en particular el
+> `◔ grupo`, que es indistinguible del `✅` sin el dato del backend.
 
-**Corregir el `MAX(CASE...)` va a hacer BAJAR los números visibles.** Hoy el pipeline reporta
-cobertura que no tiene. Es una corrección, no una regresión — pero el dashboard se verá peor
-antes de que `declarado_cert` lo levante. **Avisar antes de desplegar.**
+### 9.1 Advertencia sobre las métricas — ⚠️ CORREGIDA tras medir
+
+Este documento anticipaba que corregir el `MAX(CASE...)` haría **bajar** los números
+visibles de forma notoria. **Medido: no ocurre.** Solo **20 pedidos de 2,358** cambian de
+etapa. Ver §9.2 para el porqué. La caída es marginal, no visible en el dashboard.
+
+### 9.2 Lo implementado · sesión 2026-07-22
+
+**Punto 1 — llave de pedido** · commit `119f776`
+
+Corregidos los 11 `GROUP BY`, 1 `PARTITION BY` (en `orden_enriquecida`) y los **9 joins de
+`agrup`** — este último era el crítico: sin él la corrección no surtía efecto.
+Verificado contra BD: **2,358 filas → 2,358 llaves únicas** (antes 1,912). Las 446
+colisiones de §6 quedan resueltas.
+
+Se agregó `n_candidatos_ccmn` (`COUNT(DISTINCT cmn.NRO_CONSOLID)` por bolsa) al CTE
+`programacion`, que es lo que alimenta la cascada.
+
+**Punto 2 — cascada de confianza** · commit `62d7454`
+
+Contrato en [`app/schemas/pipeline.py`](../../backend/app/schemas/pipeline.py) — es lo que
+el frontend debe consumir:
+
+```python
+NivelConfianza = Literal["unico","declarado","declarado_cert",
+                         "resuelto_manual","conflicto","ambiguo","sin_ccmn"]
+EstadoEtapa    = Literal["directo","via_ccmn","grupo","manual","sin_dato"]
+CONFIANZA_A_ESTADO: dict[str,str]     # nivel -> estado de UI
+ESTADOS_ALCANZADOS: frozenset[str]    # {directo, via_ccmn, manual} — `grupo` NO
+```
+
+Lógica en [`app/services/pipeline_service.py`](../../backend/app/services/pipeline_service.py):
+`confianza_match(fila)` y `estado_etapa_programacion(fila)`. Las etapas 4–7 en
+`_etapa_maxima()` ahora requieren `prog_atribuible`.
+
+13 tests en [`tests/services/test_pipeline_confianza.py`](../../backend/tests/services/test_pipeline_confianza.py),
+incluido el testigo 232/S. Verde.
+
+**Medición de la cascada (2026, universo 2,358):**
+
+| Nivel | Pedidos |
+|---|---|
+| `unico` | 1,301 |
+| `ambiguo` | 794 |
+| `sin_ccmn` | 263 |
+
+`declarado` / `declarado_cert` salen en 0 porque **el repo aún no les pasa los datos**
+(punto 3). Los campos que la cascada espera y nadie llena todavía:
+`ccmn_declarado_orden`, `ccmn_declarado_cert`, `ccmn_candidatos`, `ccmn_manual`.
+
+**Por qué solo 20 pedidos cambian de etapa** — de los 794 ambiguos, **774 ya están en
+etapas 8+**, que se resuelven por vías que **no pasan por el CCMN** (orden vía
+pecosa/composite, certificación por su propia tabla). El `MAX(CASE...)` solo hacía daño en
+los pedidos detenidos *dentro* de programación. El bug era real; su alcance, más estrecho
+de lo que §7 suponía.
+
+**Fallo de test preexistente:** `tests/test_sync_invierte.py::test_leer_todo_consolida_por_codigo`
+falla desde antes de esta sesión (verificado con `git stash`). No relacionado. 8 skips en
+`test_permisos.py` por falta de CCs en `ref.centros_costo` — ruido de entorno.
 
 ---
 
@@ -516,12 +578,13 @@ WHERE c.object_id=OBJECT_ID('<TABLA>') ORDER BY c.column_id;
 
 | # | Qué | Estado |
 |---|---|---|
-| 1 | Confrontar certificación × orden — validar los 365 (§3.3) | ❓ prueba diseñada, no corrida |
-| 2 | Aporte **neto** de `declarado_cert` sobre los 114 ambiguos (§4.1) | ❓ medir al implementar |
+| 1 | Confrontar certificación × orden — validar los 365 (§3.3) | ❓ prueba diseñada, no corrida · **hacer en el punto 3** |
+| 2 | Aporte **neto** de `declarado_cert` sobre los 794 ambiguos (§4.1) | ❓ **medir al implementar el punto 3** |
 | 3 | Los 19 conflictos: ¿typo o desfase sistemático? (§3.3) | ❓ revisar caso por caso |
 | 4 | `SIG_SEGUIMIENTO` tipo 20 — qué evento es (§3.2) | ❓ menor |
 | 5 | Patrón `CCMN = 2000 + CVR` (§13.1) | ❓ **nunca verificado** |
 | 6 | Quién puede asociar manualmente (§5) | ❓ decisión de producto |
+| 7 | Ruta del frontend `pedidos/:nroPedido/:tipoBien` no lleva `tipoPedido` | ❓ colisiona con §6 · 446 pedidos comparten URL |
 
 ### 13.1 La única pista estructural sin probar
 
