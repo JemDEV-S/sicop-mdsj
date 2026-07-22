@@ -391,6 +391,10 @@ class TimelineEvento(BaseModel):
     macrofase: Macrofase
     fecha: datetime | None = None
     detalle: str | None = None
+    # Estado real de la etapa (§8). `grupo` es el caso critico: avance de
+    # OTROS pedidos de la bolsa, que antes se pintaba como un verde creible.
+    estado: EstadoEtapa = "sin_dato"
+    # Compatibilidad: excluye `grupo` — un avance ajeno no es de este pedido.
     alcanzada: bool = False
 
 
@@ -418,6 +422,15 @@ class PedidoDetalleResponse(BaseModel):
     etapa_actual_label: str
     macrofase_actual: Macrofase
     macrofase_actual_label: str
+
+    # Cascada de confianza (§4). La UI muestra SIEMPRE lo que dice la cascada
+    # automatica, tambien cuando hay resolucion manual (§5).
+    confianza_ccmn: NivelConfianza | None = None
+    confianza_ccmn_label: str | None = None
+    estado_programacion: EstadoEtapa | None = None
+    ccmn_atribuido: int | None = None
+    ccmn_candidatos: list[int] = []
+    sec_cua_mod_sal: int | None = None
 
     items: list[ItemPedido]
     ordenes: list[OrdenAsociada]

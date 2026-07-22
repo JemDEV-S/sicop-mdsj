@@ -14,6 +14,8 @@ from app.database import get_db
 from app.models.enums import CodigoRol
 from app.repositories import pipeline_repo, resolucion_ccmn_repo
 from app.schemas.pipeline import (
+    CONFIANZA_A_ESTADO,
+    CONFIANZA_A_LABEL,
     ETAPA_A_LABEL,
     ETAPA_A_MACROFASE,
     ETAPA_A_NUMERO,
@@ -160,6 +162,16 @@ def detalle_pedido(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="pedido fuera del alcance del usuario",
             )
+    # Resolucion manual (Postgres): si existe, la cascada la prioriza y el
+    # timeline marca las etapas 4-7 como `manual` en vez de `grupo`.
+    tipo_pedido = str(ficha.get("TIPO_PEDIDO") or "").strip()
+    manuales = resolucion_ccmn_repo.resoluciones_de_pedido(
+        db, ano=ano or settings.ANO_VIGENTE, sec_ejec=int(settings.SEC_EJEC),
+        tipo_bien=tipo_bien, tipo_pedido=tipo_pedido, nro_pedido=nro_pedido,
+    )
+    if manuales:
+        ficha["ccmn_manual"] = manuales[0]["nro_consolid"]
+
     mapping = {
         "ANO_EJE": "ano_eje", "SEC_EJEC": "sec_ejec",
         "NRO_PEDIDO": "nro_pedido", "TIPO_BIEN": "tipo_bien",
@@ -168,6 +180,9 @@ def detalle_pedido(
         "FECHA_ATENC": "fecha_atenc",
     }
     renombrado = _mapear(ficha, mapping)
+    # `ccmn_candidatos` es un frozenset (no serializable) y solo sirve dentro
+    # de la cascada; se convierte a lista ordenada para la UI.
+    renombrado["ccmn_candidatos"] = sorted(ficha.get("ccmn_candidatos") or ())
     if renombrado.get("sec_ejec") is not None:
         renombrado["sec_ejec"] = str(renombrado["sec_ejec"])
     for key in ("items", "ordenes", "conformidades", "cuadros",
@@ -192,6 +207,21 @@ def detalle_pedido(
     renombrado["etapa_actual_label"] = ETAPA_A_LABEL[etapa_actual]
     renombrado["macrofase_actual"] = ETAPA_A_MACROFASE[etapa_actual]
     renombrado["macrofase_actual_label"] = MACROFASE_A_LABEL[ETAPA_A_MACROFASE[etapa_actual]]
+
+    # Confianza del match pedido<->CCMN, para que la UI explique POR QUE una
+    # etapa esta en ambar (§8): el usuario debe poder ver que el avance es del
+    # grupo y cuantos candidatos hay.
+    confianza = pipeline_service.confianza_match(ficha)
+    renombrado["confianza_ccmn"] = confianza
+    renombrado["confianza_ccmn_label"] = CONFIANZA_A_LABEL.get(confianza, confianza)
+    renombrado["estado_programacion"] = CONFIANZA_A_ESTADO.get(confianza, "sin_dato")
+    renombrado["ccmn_atribuido"] = (
+        ficha.get("ccmn_manual")
+        or ficha.get("ccmn_declarado_orden")
+        or ficha.get("ccmn_declarado_cert")
+        or (sorted(ficha.get("ccmn_candidatos") or ())[0]
+            if confianza == "unico" else None)
+    )
 
     return PedidoDetalleResponse.model_validate(renombrado)
 

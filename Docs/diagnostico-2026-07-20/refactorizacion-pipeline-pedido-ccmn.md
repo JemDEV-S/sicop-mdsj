@@ -18,8 +18,8 @@ Lo que sigue es implementación, con el diseño ya acordado con el usuario.
 | | |
 |---|---|
 | ✅ Decidido | Cascada de confianza, 4 estados de UI, resolución manual N:M, orden por fecha |
-| ✅ Implementado | Puntos **1 a 5** de §9 (`119f776`, `62d7454`, + §9.3, §9.4, §9.5) |
-| ⏳ Por implementar | Puntos **6 a 9** de §9 — **backend completo, falta la UI** |
+| ✅ Implementado | Puntos **1 a 6** de §9 (`119f776`, `62d7454`, + §9.3 – §9.6) |
+| ⏳ Por implementar | Puntos **7, 8 y 9** de §9 |
 | ❌ Cerrado | `SIG_SEGUIMIENTO` (§3.2), `SEC_RESUMEN` (§3.1), y todo lo de §2 |
 
 ---
@@ -429,20 +429,19 @@ En el **timeline del pipeline** el orden se mantiene **ascendente** (etapa 1 arr
 | ~~3~~ | ✅ Alimentar `declarado` y `declarado_cert` desde el repo | `pipeline_repo.py` | hecho · §9.3 · neto medido = 38 |
 | ~~4~~ | ✅ Migración `sistema.resolucion_pedido_ccmn` | Postgres | hecho · §9.4 · `b7c1d2e3f4a5` |
 | ~~5~~ | ✅ Endpoints: ver bolsa · asociar · revocar | `routers/pipeline.py` | hecho · §9.5 · + `logs.auditoria` |
-| **6** | **4 estados con color distinto** | `features/pipeline/` | §8 · ámbar ≠ verde · **el siguiente** |
-| 7 | Vista de bolsa con orden y monto | `features/pipeline/` | §8.2 |
+| ~~6~~ | ✅ 5 estados con color distinto | `features/pipeline/` | hecho · §9.6 · ámbar ≠ verde |
+| **7** | **Vista de bolsa con orden y monto** | `features/pipeline/` | §8.2 · backend listo (§9.5) · **el siguiente** |
 | 8 | Panel de trazabilidad con cascada automática visible | `features/pipeline/` | §5 |
 | 9 | Job: detectar resoluciones obsoletas | sync | §5.1 |
 
-**Orden sugerido:** ~~1 → 2 → 3 → 4 → 5~~ → **6/7/8** → 9.
+**Orden sugerido:** ~~1 → 2 → 3 → 4 → 5 → 6~~ → **7/8** → 9.
 Los puntos 1 y 2 eran correcciones de bug; el 3 hizo rendir la cascada (ya distingue los
 7 niveles, no solo `unico`/`ambiguo`/`sin_ccmn`).
 
-> ✅ **El frontend ya está desbloqueado.** El backend emite `estado_programacion` y
-> `confianza_ccmn` (§9.3). [`Timeline.tsx`](../../frontend/src/components/Timeline.tsx) y
-> [`features/pipeline/types.ts`](../../frontend/src/features/pipeline/types.ts) siguen con
-> `alcanzada: boolean` — migrarlos a los 5 `EstadoEtapa` es el punto 6, y **ahora sí** hay
-> dato real detrás del `◔ grupo` (158 ambiguos + 4 conflictos que hoy se pintan verdes).
+> ✅ **Frontend migrado (punto 6, §9.6).** [`Timeline.tsx`](../../frontend/src/components/Timeline.tsx)
+> y [`features/pipeline/types.ts`](../../frontend/src/features/pipeline/types.ts) ya usan los
+> 5 `EstadoEtapa`. El `◔ grupo` se pinta en ámbar con etiqueta «avance del grupo» y un aviso
+> visible que lista los CCMN candidatos.
 
 ### 9.1 Advertencia sobre las métricas — ⚠️ CORREGIDA tras medir
 
@@ -669,6 +668,66 @@ candidatos: 3532 (4,500) → OC 802 · 2281 (1,485) → OC 155 · 2266 (4,800) �
 roles autorizados/denegados, alcance de CC, candidato inválido, 404/409, auditoría de alta y
 revocación, y el marcado `asociado_manual` en la vista de bolsa.
 Suite: **96 passed**, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
+
+### 9.6 Punto 6 · los 5 estados en la UI · sesión 2026-07-22
+
+**Hallazgo al empezar:** el timeline del *detalle* nunca se había migrado. `construir_timeline`
+emitía `alcanzada: boolean` calculado aparte de la cascada — el bug de §7 seguía vivo ahí
+aunque el kanban ya estuviera corregido. Migrar solo el frontend habría pintado colores sobre
+un dato que el backend no emitía.
+
+**Backend primero.** `construir_timeline` ahora marca las etapas 4–7 con `via_ccmn=True` y les
+asigna el estado desde la cascada; el resto son `directo` (evidencia propia del pedido).
+`obtener_pedido` devuelve los campos de la cascada (`n_candidatos_ccmn`, `ccmn_candidatos`,
+declarados) y el router inyecta la resolución manual desde Postgres.
+
+`alcanzada` se mantiene por compatibilidad pero ahora **excluye `grupo`** — así los consumidores
+que no migraron (el contador del recorrido, la fecha de etapa actual) heredan la corrección.
+
+**Verificado sobre HTTP** (pedido 926/B, 2 candidatos):
+
+```
+confianza: ambiguo · estado_programacion: grupo · candidatos: [2179, 2681]
+  [3] Cuadro necesidad      directo   alcanzada=True
+  [4] Puente pedido<->PAAC  grupo     alcanzada=False
+  [7] Cuadro adquisicion    grupo     alcanzada=False
+  [8] Certificacion (CCP)   directo   alcanzada=True    ← tabla propia, no pasa por CCMN
+```
+
+Testigo 232/S: `declarado` → etapas 4–7 en `via_ccmn` con fecha marcada «aprox.», no `directo`.
+**131 pedidos** tienen avance de programación con nivel `ambiguo`: son los que hasta hoy se
+veían con el verde falso.
+
+#### Presentación — el estado nunca se comunica solo por color
+
+El sistema de diseño exige que el color no sea el único portador de estado, y eso coincide con
+lo que §8 pedía. Cada estado lleva **ícono propio + etiqueta en palabras**:
+
+| Estado | Ícono | Etiqueta visible | Color |
+|---|---|---|---|
+| `directo` | `CheckCircle2` relleno | *(sin etiqueta: no hay salvedad)* | verde `secondary` |
+| `via_ccmn` | `CircleDot` | «fecha aproximada» + `aprox.` en la fecha | azul `primary` |
+| `manual` | `CircleDot` | «asociado manualmente» | azul `primary` |
+| `grupo` | `CircleDashed` | **«avance del grupo»** | **ámbar `semaforo-alerta`** |
+| `sin_dato` | `Circle` | «pendiente» | gris `muted` |
+
+El ámbar es el amarillo institucional (`--semaforo-alerta`, el token de *aviso*), nunca el verde.
+Verificado que las clases se generan en el CSS compilado.
+
+**El aviso va visible, no en un tooltip.** Cuando hay etapas en `grupo`, el recorrido muestra un
+bloque ámbar que explica en lenguaje llano por qué, y lista los CCMN candidatos. El sistema de
+diseño advierte que el usuario objetivo no descubre tooltips — y §8 avisa que si el ícono no se
+distingue con claridad «solo movimos la mentira a un símbolo más bonito».
+
+Se agregó al bloque «Pedido» la fila **Cuadro de necesidades**, que muestra el CCMN atribuido y
+su nivel de confianza — siempre lo que dice la cascada automática, también cuando hay resolución
+manual (§5).
+
+6 tests nuevos de estados del timeline (`grupo` no cuenta como alcanzada, `directo` en etapas de
+evidencia propia, `via_ccmn`/`manual`, y que una etapa sin avance nunca hereda el estado de la
+cascada). Suite: **102 passed**, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
+`tsc` limpio en los archivos tocados; los errores de `BarraEjecucion.tsx` son **preexistentes**
+(verificado con `git stash`).
 
 ---
 

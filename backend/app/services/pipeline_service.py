@@ -586,9 +586,35 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
     tiene_ejecucion = bool(conformidades) if not es_bien else bool(fecha_ingreso)
     tiene_cierre = estado_pedido == "7"
 
+    # Estado de las etapas 4-7, que solo son observables a traves del CCMN.
+    # Si el nivel no resuelve, el avance observado puede ser de OTRO pedido de
+    # la bolsa: se marca `grupo` (ambar) y NO cuenta como alcanzada (§8).
+    confianza = confianza_match(ficha)
+    estado_prog = CONFIANZA_A_ESTADO.get(confianza, "sin_dato")
+
     hitos: list[dict[str, Any]] = []
 
-    def _add(etapa: str, fecha: datetime | None, alcanzada: bool, detalle: str | None = None):
+    def _add(
+        etapa: str,
+        fecha: datetime | None,
+        alcanzada: bool,
+        detalle: str | None = None,
+        *,
+        via_ccmn: bool = False,
+    ):
+        """Agrega un hito con su estado de UI.
+
+        `via_ccmn=True` marca las etapas que solo se ven a traves del CCMN
+        (4-7): ahi el estado sale de la cascada de confianza, no del booleano.
+        El resto son evidencia directa del pedido.
+        """
+        if not alcanzada:
+            estado = "sin_dato"
+        elif via_ccmn:
+            estado = estado_prog
+        else:
+            estado = "directo"
+
         hitos.append({
             "etapa": etapa,
             "etapa_numero": ETAPA_A_NUMERO[etapa],
@@ -596,7 +622,10 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
             "macrofase": ETAPA_A_MACROFASE[etapa],
             "fecha": fecha,
             "detalle": detalle,
-            "alcanzada": alcanzada,
+            "estado": estado,
+            # `alcanzada` se mantiene por compatibilidad, pero ahora excluye
+            # `grupo`: un avance ajeno no es avance de este pedido.
+            "alcanzada": estado in ESTADOS_ALCANZADOS,
         })
 
     _add(ETAPA_PEDIDO_REGISTRADO, fecha_pedido, fecha_pedido is not None,
@@ -606,14 +635,15 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
          "SIG_PEDIDOS.ESTADO='1' + FECHA_APROB")
     _add(ETAPA_CUADRO_NECESIDAD, None, tiene_cuadro_neces,
          "SIG_DETALLE_PEDIDOS.SEC_CUA_MOD_SAL presente")
+    # Etapas 4-7: solo observables a traves del CCMN -> estado por cascada.
     _add(ETAPA_PUENTE_PAAC, None, tiene_cuadro_adq or tiene_certif,
-         "SIG_CUADRO_MODIFICADO_CMN")
+         "SIG_CUADRO_MODIFICADO_CMN", via_ccmn=True)
     _add(ETAPA_CCMN, None, tiene_cuadro_adq or tiene_certif,
-         "SIG_PAAC_CONSOLIDADO")
+         "SIG_PAAC_CONSOLIDADO", via_ccmn=True)
     _add(ETAPA_COTIZACION, None, tiene_cuadro_adq,
-         "SIG_SOLICITUD_COTIZACION")
+         "SIG_SOLICITUD_COTIZACION", via_ccmn=True)
     _add(ETAPA_CUADRO_ADQUISICION, fecha_cuadro, tiene_cuadro_adq,
-         "SIG_CUADRO_ADQUISICION")
+         "SIG_CUADRO_ADQUISICION", via_ccmn=True)
     _add(ETAPA_CERTIFICACION, fecha_certif, tiene_certif,
          "SIG_CERTIFICACION (CCP SIAF)")
     _add(ETAPA_ORDEN_EMITIDA, fecha_orden, tiene_orden,

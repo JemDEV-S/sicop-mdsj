@@ -7,6 +7,8 @@ tomar cualquiera como "el del pedido" pinta avance ajeno.
 Ref: Docs/diagnostico-2026-07-20/refactorizacion-pipeline-pedido-ccmn.md §4
 """
 
+from datetime import datetime
+
 from app.schemas.pipeline import (
     ETAPA_CUADRO_ADQUISICION,
     ETAPA_CUADRO_NECESIDAD,
@@ -154,3 +156,80 @@ def test_testigo_232S():
     con_orden = dict(sin_declaracion, ccmn_declarado_orden=2266)
     assert confianza_match(con_orden) == "declarado"
     assert estado_etapa_programacion(con_orden) == "via_ccmn"
+
+
+# ─── Estados del timeline del detalle (punto 6) ──────────────────────────
+
+
+def _ficha(**kw):
+    """Ficha del detalle (obtener_pedido) con avance de programacion."""
+    base = {
+        "TIPO_BIEN": "S",
+        "estado_pedido": "1",
+        "FECHA_PEDIDO": datetime(2026, 2, 5),
+        "items": [{"SEC_CUA_MOD_SAL": 11553}],
+        "cuadros": [{"FECHA_CUADRO": None}],
+        "certificaciones": [{"FECHA": None}],
+        "ordenes": [],
+        "expedientes": [],
+        "conformidades": [],
+        "movimientos_almacen": [],
+        "n_candidatos_ccmn": 1,
+    }
+    base.update(kw)
+    return base
+
+
+def _por_etapa(ficha):
+    from app.services.pipeline_service import construir_timeline
+    return {h["etapa_numero"]: h for h in construir_timeline(ficha)}
+
+
+def test_timeline_marca_grupo_en_etapas_4_a_7_si_es_ambiguo():
+    """El caso que motivo la refactorizacion: avance de OTRO pedido de la
+    bolsa se pintaba como un verde indistinguible del real (§7)."""
+    hitos = _por_etapa(_ficha(n_candidatos_ccmn=3))
+    for n in (4, 5, 6, 7):
+        assert hitos[n]["estado"] == "grupo", n
+        # No cuenta como alcanzada: un avance ajeno no es de este pedido.
+        assert hitos[n]["alcanzada"] is False, n
+
+
+def test_timeline_marca_directo_en_etapas_de_evidencia_propia():
+    """Las etapas 1-3 y 8 no pasan por el CCMN: son dato duro del pedido."""
+    hitos = _por_etapa(_ficha(n_candidatos_ccmn=3))
+    assert hitos[1]["estado"] == "directo"
+    assert hitos[3]["estado"] == "directo"
+    assert hitos[8]["estado"] == "directo"  # certificacion, tabla propia
+
+
+def test_timeline_marca_via_ccmn_cuando_una_fuente_declara():
+    hitos = _por_etapa(_ficha(
+        n_candidatos_ccmn=3,
+        ccmn_candidatos=(2266, 2281, 3532),
+        ccmn_declarado_orden=2266,
+    ))
+    for n in (4, 5, 6, 7):
+        assert hitos[n]["estado"] == "via_ccmn", n
+        assert hitos[n]["alcanzada"] is True, n
+
+
+def test_timeline_marca_manual_con_resolucion_del_funcionario():
+    hitos = _por_etapa(_ficha(n_candidatos_ccmn=3, ccmn_manual=2266))
+    assert hitos[4]["estado"] == "manual"
+    assert hitos[4]["alcanzada"] is True
+
+
+def test_timeline_candidato_unico_es_directo():
+    hitos = _por_etapa(_ficha(n_candidatos_ccmn=1))
+    for n in (4, 5, 6, 7):
+        assert hitos[n]["estado"] == "directo", n
+
+
+def test_timeline_sin_avance_es_sin_dato():
+    """Una etapa no alcanzada nunca hereda el estado de la cascada."""
+    hitos = _por_etapa(_ficha(
+        n_candidatos_ccmn=3, cuadros=[], certificaciones=[],
+    ))
+    for n in (4, 5, 6, 7):
+        assert hitos[n]["estado"] == "sin_dato", n

@@ -914,6 +914,7 @@ def obtener_pedido(
                     LTRIM(RTRIM(dp.CLASIFICADOR))   AS clasificador,
                     dp.NRO_ORDEN                    AS nro_orden_declarado,
                     dp.NRO_PECOSA,
+                    dp.SEC_CUA_MOD_SAL,
                     dp.ESTADO_PED, dp.ESTADO_ATEND,
                     dp.ESTADO_CONFOR, dp.ESTADO_COMPRA,
                     dp.FECHA_CONFOR
@@ -1141,8 +1142,34 @@ def obtener_pedido(
                 ).mappings().all()
             ]
 
+    # Campos de la cascada de confianza: el timeline los necesita para saber
+    # si las etapas 4-7 son de ESTE pedido o avance del grupo (§4). Sin esto
+    # el detalle pintaria verdes ajenos, que es el bug que §7 describe.
+    tipo_pedido = str(cab["TIPO_PEDIDO"] or "").strip()
+    ctx = contexto_pedido_bolsa(ano, tipo_bien, tipo_pedido, nro_pedido) or {}
+    candidatos = frozenset(ctx.get("candidatos") or ())
+
+    p_decl = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
+    with get_connection() as conn:
+        decl_orden = _agrupar_declaraciones(
+            conn.execute(text(_SQL_DECL_ORDEN), p_decl).mappings().all()
+        )
+        decl_cert = _agrupar_declaraciones(
+            conn.execute(text(_SQL_DECL_CERT), p_decl).mappings().all()
+        )
+
     return {
         **dict(cab),
+        "n_candidatos_ccmn": len(candidatos),
+        "ccmn_candidatos": candidatos,
+        "ccmn_declarado_orden": _elegir_declarado(
+            decl_orden, tipo_bien, nro_pedido, candidatos
+        ),
+        "ccmn_declarado_cert": _elegir_declarado(
+            decl_cert, tipo_bien, nro_pedido, candidatos
+        ),
+        "ccmn_manual": None,  # lo inyecta el router desde Postgres
+        "sec_cua_mod_sal": (ctx.get("bolsas") or [None])[0],
         "items": [dict(i) for i in items],
         "ordenes": ordenes_list,
         "cuadros": cuadros,

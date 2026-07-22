@@ -91,6 +91,32 @@ export interface MovimientoAlmacen {
   nro_guia: string | null;
 }
 
+// ─── Confianza del match pedido <-> CCMN ─────────────────────────────────
+//
+// SIGA no registra qué CCMN corresponde a qué pedido: logística copia los
+// datos del pedido a un CCMN nuevo y no los vincula. Cuando la bolsa agrupa
+// varios pedidos hay N candidatos y ninguno es "el" del pedido.
+//
+// Ref: Docs/diagnostico-2026-07-20/refactorizacion-pipeline-pedido-ccmn.md §4
+
+export type NivelConfianza =
+  | 'unico'            // 1 solo candidato en la bolsa
+  | 'declarado'        // el texto de la orden lo identifica
+  | 'declarado_cert'   // la certificación lo identifica
+  | 'resuelto_manual'  // un funcionario lo asoció
+  | 'conflicto'        // una fuente declara un CCMN que no es candidato
+  | 'ambiguo'          // varios candidatos, ninguna fuente resuelve
+  | 'sin_ccmn';        // el pedido aún no se programó
+
+// Estado de cada etapa. Reemplaza al booleano `alcanzada`, que no podía
+// distinguir "avanzó este pedido" de "avanzó algún otro pedido de la bolsa".
+export type EstadoEtapa =
+  | 'directo'    // alcanzada por ESTE pedido — dato duro
+  | 'via_ccmn'   // vía CCMN identificado por una fuente declarativa
+  | 'grupo'      // avance del grupo: no se sabe si es de este pedido
+  | 'manual'     // vía CCMN asociado manualmente
+  | 'sin_dato';  // no alcanzada, o sin evidencia
+
 export interface TimelineEvento {
   etapa: EtapaCodigo;
   etapa_numero: number;
@@ -98,6 +124,8 @@ export interface TimelineEvento {
   macrofase: Macrofase;
   fecha: string | null;
   detalle: string | null;
+  estado: EstadoEtapa;
+  /** Excluye `grupo`: un avance ajeno no es avance de este pedido. */
   alcanzada: boolean;
 }
 
@@ -125,6 +153,13 @@ export interface PedidoDetalle {
   etapa_actual_label: string;
   macrofase_actual: Macrofase;
   macrofase_actual_label: string;
+
+  confianza_ccmn: NivelConfianza | null;
+  confianza_ccmn_label: string | null;
+  estado_programacion: EstadoEtapa | null;
+  ccmn_atribuido: number | null;
+  ccmn_candidatos: number[];
+  sec_cua_mod_sal: number | null;
 
   items: ItemPedido[];
   ordenes: OrdenAsociada[];

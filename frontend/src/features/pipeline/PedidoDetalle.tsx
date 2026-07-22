@@ -101,7 +101,7 @@ export function PedidoDetalle({ nroPedido, tipoBien }: PedidoDetalleProps) {
 
       {data.items.length > 0 ? <BloqueItems items={data.items} /> : null}
 
-      <BloqueTimeline eventos={data.timeline} />
+      <BloqueTimeline eventos={data.timeline} pedido={data} />
 
       <Anotaciones nroPedido={nroPedido} tipoBien={tipoBien} />
     </div>
@@ -230,8 +230,52 @@ function BloquePedido({ pedido }: { pedido: PedidoDetalleType }) {
             valor={<span className="whitespace-pre-wrap">{pedido.motivo}</span>}
           />
         ) : null}
+        <FilaDato
+          label="Cuadro necesidades"
+          valor={<ValorCuadroNecesidades pedido={pedido} />}
+        />
       </dl>
     </SectionCard>
+  );
+}
+
+/**
+ * Qué cuadro de necesidades (CCMN) se le atribuye al pedido y con qué certeza.
+ *
+ * Se muestra SIEMPRE lo que dice la cascada automática, también cuando hay
+ * resolución manual (§5): el origen del dato debe quedar auditable.
+ */
+function ValorCuadroNecesidades({ pedido }: { pedido: PedidoDetalleType }) {
+  const nivel = pedido.confianza_ccmn;
+
+  if (!nivel || nivel === 'sin_ccmn') {
+    return (
+      <span className="text-muted-foreground">
+        Todavía no programado
+      </span>
+    );
+  }
+
+  const noResuelto = nivel === 'ambiguo' || nivel === 'conflicto';
+  const n = pedido.ccmn_candidatos?.length ?? 0;
+
+  return (
+    <span className="flex flex-wrap items-baseline gap-x-2">
+      {pedido.ccmn_atribuido ? (
+        <span className="font-mono">{pedido.ccmn_atribuido}</span>
+      ) : (
+        <span className="text-muted-foreground">Sin determinar</span>
+      )}
+      <span
+        className={cn(
+          'text-xs font-medium',
+          noResuelto ? 'text-semaforo-alerta' : 'text-muted-foreground',
+        )}
+      >
+        {pedido.confianza_ccmn_label ?? nivel}
+        {noResuelto && n > 0 ? ` · ${n} candidatos` : ''}
+      </span>
+    </span>
   );
 }
 
@@ -432,25 +476,76 @@ function formatCantidad(v: number | null): string {
 
 // ─── Bloque timeline ─────────────────────────────────────────────────────
 
-function BloqueTimeline({ eventos }: { eventos: TimelineEvento[] }) {
+function BloqueTimeline({
+  eventos,
+  pedido,
+}: {
+  eventos: TimelineEvento[];
+  pedido: PedidoDetalleType;
+}) {
   const hitos: HitoTimeline[] = eventos.map((e) => ({
     key: e.etapa,
     titulo: e.etapa_label,
     detalle: e.detalle,
     fecha: e.fecha,
-    alcanzada: e.alcanzada,
+    estado: e.estado,
     numero: e.etapa_numero,
   }));
 
   const alcanzadas = eventos.filter((e) => e.alcanzada).length;
+  const enGrupo = eventos.filter((e) => e.estado === 'grupo').length;
 
   return (
     <SectionCard
       titulo={`Recorrido del pedido (${alcanzadas}/${eventos.length})`}
       padding="md"
     >
+      {enGrupo > 0 ? <AvisoAvanceDelGrupo pedido={pedido} /> : null}
       <Timeline hitos={hitos} />
     </SectionCard>
+  );
+}
+
+/**
+ * Aviso de que parte del recorrido no es atribuible a este pedido.
+ *
+ * Es la pieza donde se juega la honestidad del sistema (§8): si el usuario no
+ * entiende por qué hay etapas en amarillo, sólo movimos la imprecisión a un
+ * símbolo más bonito. Por eso el aviso es un bloque visible y en palabras
+ * llanas, no un tooltip.
+ */
+function AvisoAvanceDelGrupo({ pedido }: { pedido: PedidoDetalleType }) {
+  const n = pedido.ccmn_candidatos?.length ?? 0;
+
+  return (
+    <div className="mb-4 rounded-md border border-semaforo-alerta/40 bg-semaforo-alerta/10 p-3">
+      <div className="flex gap-2">
+        <AlertTriangle
+          className="w-4 h-4 shrink-0 mt-0.5 text-semaforo-alerta"
+          aria-hidden="true"
+        />
+        <div className="min-w-0 text-sm">
+          <p className="font-medium text-foreground">
+            Parte de este recorrido no se puede atribuir a este pedido
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            Este pedido comparte cuadro de necesidades con otros
+            {n > 0 ? (
+              <>
+                {' '}y hay <strong className="text-foreground">{n} cuadros
+                candidatos</strong> ({pedido.ccmn_candidatos.join(', ')})
+              </>
+            ) : null}
+            . SIGA no registra cuál corresponde a este pedido, así que las
+            etapas marcadas <strong className="text-foreground">avance del
+            grupo</strong> pudieron completarse por otro pedido.
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            Las demás etapas sí son datos verificados de este pedido.
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
