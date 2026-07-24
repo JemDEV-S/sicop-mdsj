@@ -18,8 +18,8 @@ Lo que sigue es implementación, con el diseño ya acordado con el usuario.
 | | |
 |---|---|
 | ✅ Decidido | Cascada de confianza, 4 estados de UI, resolución manual N:M, orden por fecha |
-| ✅ Implementado | Puntos **1 a 6** de §9 (`119f776`, `62d7454`, + §9.3 – §9.6) |
-| ⏳ Por implementar | Puntos **7, 8 y 9** de §9 |
+| ✅ Implementado | Puntos **1 a 8** de §9 (`119f776`, `62d7454`, + §9.3 – §9.7) |
+| ⏳ Por implementar | Punto **9** (job de resoluciones obsoletas, §5.1) |
 | ❌ Cerrado | `SIG_SEGUIMIENTO` (§3.2), `SEC_RESUMEN` (§3.1), y todo lo de §2 |
 
 ---
@@ -430,11 +430,11 @@ En el **timeline del pipeline** el orden se mantiene **ascendente** (etapa 1 arr
 | ~~4~~ | ✅ Migración `sistema.resolucion_pedido_ccmn` | Postgres | hecho · §9.4 · `b7c1d2e3f4a5` |
 | ~~5~~ | ✅ Endpoints: ver bolsa · asociar · revocar | `routers/pipeline.py` | hecho · §9.5 · + `logs.auditoria` |
 | ~~6~~ | ✅ 5 estados con color distinto | `features/pipeline/` | hecho · §9.6 · ámbar ≠ verde |
-| **7** | **Vista de bolsa con orden y monto** | `features/pipeline/` | §8.2 · backend listo (§9.5) · **el siguiente** |
-| 8 | Panel de trazabilidad con cascada automática visible | `features/pipeline/` | §5 |
+| ~~7~~ | ✅ Vista de bolsa con orden y monto | `features/pipeline/` | hecho · §9.7 |
+| ~~8~~ | ✅ Panel de trazabilidad con cascada automática visible | `features/pipeline/` | hecho · §9.7 |
 | 9 | Job: detectar resoluciones obsoletas | sync | §5.1 |
 
-**Orden sugerido:** ~~1 → 2 → 3 → 4 → 5 → 6~~ → **7/8** → 9.
+**Orden sugerido:** ~~1 → 2 → 3 → 4 → 5 → 6 → 7/8~~ → **9**.
 Los puntos 1 y 2 eran correcciones de bug; el 3 hizo rendir la cascada (ya distingue los
 7 niveles, no solo `unico`/`ambiguo`/`sin_ccmn`).
 
@@ -728,6 +728,65 @@ evidencia propia, `via_ccmn`/`manual`, y que una etapa sin avance nunca hereda e
 cascada). Suite: **102 passed**, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
 `tsc` limpio en los archivos tocados; los errores de `BarraEjecucion.tsx` son **preexistentes**
 (verificado con `git stash`).
+
+### 9.7 Puntos 7 y 8 · rediseño del detalle · sesión 2026-07-22
+
+Vista de bolsa integrada en el detalle del pedido (no página aparte), asociación por
+**selección en ambos extremos**, y el recorrido con los identificadores de cada etapa.
+
+**Decisiones tomadas con el usuario:**
+- Asociar = seleccionar un pedido y un CCMN, luego confirmar. Se descartó drag-and-drop: sin
+  descubrimiento, sin teclado, y choca con el sistema de diseño del proyecto.
+- La bolsa vive **dentro** del detalle, plegada bajo el recorrido — es el contexto que explica
+  las etapas en ámbar.
+- Cada etapa muestra **su documento y número, copiable** (CCP 182, OC 132…). El número se copia
+  solo, sin la etiqueta, porque es lo que se pega en el buscador de SIGA.
+
+Cada CCMN candidato muestra además **su propio recorrido** (`flujo`): cuadro → estudio de
+mercado → cuadro de adquisición → certificación → orden, con los números de cada paso. Es lo
+que permite comparar candidatos entre sí sin que el sistema sugiera un ganador.
+
+#### ⚠️ Bug encontrado al ver la pantalla renderizada
+
+La captura delató que «Orden emitida» mostraba **las 3 órdenes de la bolsa** (132, 155, 802) en
+el pedido 232, y que los ítems decían **S/ 0.00**. Ambos síntomas tenían la misma causa:
+
+`SIG_DETALLE_PEDIDOS.VALOR_TOTAL` está en 0 en el **100% de los servicios (1,056/1,056)** y el
+**55% de los bienes (4,066/7,345)**. El match composite tiene un escape
+`(d.valor_soles = 0 OR ROUND(op.VALOR_SOLES,2) = ROUND(d.valor_soles,2))` que, con el valor en
+0, **acepta cualquier monto** — así cada pedido absorbía las órdenes de sus hermanos de bolsa.
+
+Es el mismo fallo silencioso de §7 escondido en otro lugar: no había error, solo un pedido que
+parecía tener tres órdenes.
+
+**Corregido** con el fallback `CANT_SOLICITADA * PRECIO_UNIT` en los 4 lugares donde se lee el
+monto. Impacto medido en el universo 2026:
+
+| | Antes | Después |
+|---|---|---|
+| Pedidos con orden matcheada | 2,128 | **1,852** |
+| `match_metodo = composite` | 1,122 | **846** |
+| Etapa `ejecucion` | 782 | **634** |
+
+**Los 276 matches perdidos eran falsos.** Verificado en la bolsa 11553, donde §10 da la
+respuesta correcta:
+
+```
+pedido  232/S (S/ 4,800) -> OC 132     ← la respuesta del doc §10
+pedido  278/S (S/ 1,485) -> OC 155
+pedido 1005/S (S/ 4,500) -> OC 802
+```
+
+Antes los tres matcheaban las tres órdenes. Ahora cada uno matchea la suya, y el monto del
+pedido, el del ítem, el de la orden y el del CCMN por fin coinciden en pantalla.
+
+> El número de «pedidos con orden» **baja** porque antes estaba inflado. Es la tercera vez que
+> una métrica agregada engañaba (§10) — y la primera que se detecta *mirando la pantalla*, no
+> los datos.
+
+Test de regresión en `test_declaraciones_ccmn.py` que fija el fallback en el SQL.
+Suite: **103 passed**, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
+Verificado renderizado con Playwright sobre datos reales (login, detalle y flujo de asociación).
 
 ---
 

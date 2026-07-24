@@ -189,6 +189,18 @@ def detalle_pedido(
                 "certificaciones", "expedientes", "movimientos_almacen"):
         renombrado[key] = [_mapear(row, mapping) for row in ficha.get(key, [])]
 
+    # La confianza se resuelve ANTES del timeline: las etapas 4-7 toman su
+    # estado de ahi, y `ccmn_atribuido` es el numero que el timeline muestra
+    # como identificador de esas etapas.
+    confianza = pipeline_service.confianza_match(ficha)
+    ficha["ccmn_atribuido"] = (
+        ficha.get("ccmn_manual")
+        or ficha.get("ccmn_declarado_orden")
+        or ficha.get("ccmn_declarado_cert")
+        or (sorted(ficha.get("ccmn_candidatos") or ())[0]
+            if confianza == "unico" else None)
+    )
+
     # Timeline con las 13/16 etapas + etapa actual del pedido.
     timeline = pipeline_service.construir_timeline(ficha)
     renombrado["timeline"] = timeline
@@ -211,17 +223,10 @@ def detalle_pedido(
     # Confianza del match pedido<->CCMN, para que la UI explique POR QUE una
     # etapa esta en ambar (§8): el usuario debe poder ver que el avance es del
     # grupo y cuantos candidatos hay.
-    confianza = pipeline_service.confianza_match(ficha)
     renombrado["confianza_ccmn"] = confianza
     renombrado["confianza_ccmn_label"] = CONFIANZA_A_LABEL.get(confianza, confianza)
     renombrado["estado_programacion"] = CONFIANZA_A_ESTADO.get(confianza, "sin_dato")
-    renombrado["ccmn_atribuido"] = (
-        ficha.get("ccmn_manual")
-        or ficha.get("ccmn_declarado_orden")
-        or ficha.get("ccmn_declarado_cert")
-        or (sorted(ficha.get("ccmn_candidatos") or ())[0]
-            if confianza == "unico" else None)
-    )
+    renombrado["ccmn_atribuido"] = ficha.get("ccmn_atribuido")
 
     return PedidoDetalleResponse.model_validate(renombrado)
 
@@ -253,6 +258,42 @@ def _verificar_puede_asociar(user: CurrentUser) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="su rol no permite asociar CCMN a pedidos",
         )
+
+
+def _flujo_ccmn(c: dict[str, Any]) -> list[dict[str, Any]]:
+    """Recorrido propio de un CCMN, con los numeros de cada paso.
+
+    Es lo que permite comparar candidatos entre si: dos CCMN de la misma bolsa
+    pueden estar en etapas distintas, y ver cual llego mas lejos (y con que
+    orden de compra) es la informacion que el funcionario usa para decidir.
+
+    No dice nada sobre a que pedido pertenece cada uno — eso SIGA no lo
+    registra (§1) y es justamente lo que se resuelve manualmente.
+    """
+    def _n(v: Any) -> str | None:
+        return None if v in (None, "", 0) else str(int(v)) if isinstance(
+            v, (int, float)
+        ) else str(v).strip()
+
+    ccmn = _n(c.get("NRO_CONSOLID"))
+    cvr = _n(c.get("NRO_EST_MDO"))
+    cuadro = _n(c.get("SEC_CUADRO"))
+    ccp = _n(c.get("NRO_CERTIFICA"))
+    ccp_siaf = _n(c.get("NRO_CERTIFICA_SIAF"))
+    orden = _n(c.get("NRO_ORDEN"))
+
+    return [
+        {"codigo": "ccmn", "label": "Cuadro consolidado",
+         "numero": ccmn, "alcanzado": ccmn is not None},
+        {"codigo": "cvr", "label": "Estudio de mercado",
+         "numero": cvr, "alcanzado": cvr is not None},
+        {"codigo": "cuadro", "label": "Cuadro de adquisición",
+         "numero": cuadro, "alcanzado": cuadro is not None},
+        {"codigo": "ccp", "label": "Certificación",
+         "numero": ccp_siaf or ccp, "alcanzado": ccp is not None},
+        {"codigo": "orden", "label": "Orden de compra",
+         "numero": orden, "alcanzado": orden is not None},
+    ]
 
 
 def _verificar_cc_permitido(user: CurrentUser, centro_costo: str | None) -> None:
@@ -327,14 +368,38 @@ def ver_bolsa(
         )
     }
 
-    pedidos = [
-        PedidoEnBolsa.model_validate(_mapear(p, _BOLSA_MAP))
-        for p in bolsa["pedidos"]
-    ]
+    # Confianza de CADA pedido de la bolsa: la UI la muestra al lado de cada
+    # uno (§8.2). Todos comparten los mismos candidatos (es la misma bolsa),
+    # asi que lo que los diferencia es si alguna fuente los declara.
+    n_cand = len(bolsa["candidatos"])
+    cands_bolsa = frozenset(
+        int(c["NRO_CONSOLID"]) for c in bolsa["candidatos"]
+    )
+    pedidos = []
+    for p in bolsa["pedidos"]:
+        nro_p = int(p["NRO_PEDIDO"])
+        tp = str(p.get("TIPO_PEDIDO") or "").strip()
+        ctx_p = pipeline_repo.contexto_pedido_bolsa(
+            ano_eje, tipo_bien, tp, nro_p
+        ) or {}
+        fila = {
+            "n_candidatos_ccmn": n_cand,
+            "ccmn_candidatos": cands_bolsa,
+            "ccmn_declarado_orden": ctx_p.get("ccmn_declarado_orden"),
+            "ccmn_declarado_cert": ctx_p.get("ccmn_declarado_cert"),
+            "ccmn_manual": None,
+        }
+        pedidos.append(
+            PedidoEnBolsa.model_validate({
+                **_mapear(p, _BOLSA_MAP),
+                "confianza_ccmn": pipeline_service.confianza_match(fila),
+            })
+        )
     candidatos = [
         CandidatoCCMN.model_validate({
             **_mapear(c, _BOLSA_MAP),
             "asociado_manual": int(c["NRO_CONSOLID"]) in manuales,
+            "flujo": _flujo_ccmn(c),
         })
         for c in bolsa["candidatos"]
     ]

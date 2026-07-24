@@ -91,3 +91,26 @@ def test_agrupar_ignora_filas_sin_pedido_o_sin_ccmn():
         {"TIPO_BIEN": "S", "ccmn": 2266, "texto": "INFORME 275-2026"},
     ]
     assert _agrupar_declaraciones(filas) == {}
+
+
+# ─── VALOR_TOTAL en 0: la trampa que inflaba el match composite ──────────
+
+
+def test_sql_usa_fallback_de_monto_en_el_composite():
+    """`VALOR_TOTAL` viene en 0.00 en el 100% de los servicios y el 55% de los
+    bienes (medido en 2026). El composite tiene un escape `valor_soles = 0` que
+    acepta CUALQUIER monto: con el valor en 0 un pedido matchea las ordenes de
+    los otros pedidos de su bolsa.
+
+    Verificado contra BD: con el fallback, los 3 pedidos de la bolsa 11553
+    matchean una orden cada uno (232->132, 278->155, 1005->802) en vez de las
+    tres cada uno. El testigo 232/S->OC 132 es la respuesta del doc §10.
+
+    Este test fija el fallback en el SQL para que no se revierta por descuido.
+    """
+    from app.repositories.pipeline_repo import _SQL_KANBAN
+
+    assert "CANT_SOLICITADA" in _SQL_KANBAN and "PRECIO_UNIT" in _SQL_KANBAN, (
+        "el CTE `det` debe calcular el monto como CANT_SOLICITADA * PRECIO_UNIT "
+        "cuando VALOR_TOTAL es 0"
+    )

@@ -117,6 +117,12 @@ export type EstadoEtapa =
   | 'manual'     // vía CCMN asociado manualmente
   | 'sin_dato';  // no alcanzada, o sin evidencia
 
+/** Identificador con el que se encuentra el documento en SIGA. */
+export interface DocumentoEtapa {
+  etiqueta: string;
+  valor: string;
+}
+
 export interface TimelineEvento {
   etapa: EtapaCodigo;
   etapa_numero: number;
@@ -125,8 +131,70 @@ export interface TimelineEvento {
   fecha: string | null;
   detalle: string | null;
   estado: EstadoEtapa;
+  documentos: DocumentoEtapa[];
   /** Excluye `grupo`: un avance ajeno no es avance de este pedido. */
   alcanzada: boolean;
+}
+
+// ─── Bolsa (SEC_CUA_MOD_SAL) ─────────────────────────────────────────────
+
+export interface PedidoEnBolsa {
+  nro_pedido: number;
+  tipo_bien: string;
+  tipo_pedido: string | null;
+  centro_costo: string | null;
+  sec_func: number | null;
+  estado_pedido: string | null;
+  fecha_pedido: string | null;
+  motivo: string | null;
+  solicitante: string | null;
+  valor_soles: number | null;
+  item: string | null;
+  confianza_ccmn: NivelConfianza | null;
+}
+
+/** Un paso del recorrido propio de un CCMN. */
+export interface HitoCCMN {
+  codigo: string;
+  label: string;
+  numero: string | null;
+  alcanzado: boolean;
+}
+
+export interface CandidatoCCMN {
+  nro_consolid: number;
+  tipo_consolid: string | null;
+  fecha_cons: string | null;
+  valor_plan: number | null;
+  nro_est_mdo: number | null;
+  nro_certifica: number | null;
+  nro_certifica_siaf: number | null;
+  sec_cuadro: number | null;
+  nro_orden: number | null;
+  fecha_orden: string | null;
+  asociado_manual: boolean;
+  flujo: HitoCCMN[];
+}
+
+export interface Bolsa {
+  ano_eje: number;
+  sec_cua_mod_sal: number;
+  tipo_bien: string;
+  pedidos: PedidoEnBolsa[];
+  candidatos: CandidatoCCMN[];
+}
+
+export interface Resolucion {
+  id: string;
+  nro_consolid: number;
+  sec_cua_mod_sal: number | null;
+  nota: string | null;
+  usuario_id: string | null;
+  usuario_nombre: string | null;
+  creado_en: string;
+  revocado_en: string | null;
+  revocado_por: string | null;
+  revocado_por_nombre: string | null;
 }
 
 export interface PedidoDetalle {

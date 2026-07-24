@@ -383,6 +383,16 @@ class MovimientoAlmacen(BaseModel):
     nro_guia: str | None = None
 
 
+class DocumentoEtapa(BaseModel):
+    """Identificador con el que se encuentra el documento en SIGA.
+
+    Sin esto el recorrido dice "llego a certificacion" pero no *cual*, que es
+    justo el dato que el funcionario necesita para verificarlo.
+    """
+    etiqueta: str
+    valor: str
+
+
 class TimelineEvento(BaseModel):
     """Un evento verificable del timeline del pedido (13/16 hitos posibles)."""
     etapa: str
@@ -391,6 +401,7 @@ class TimelineEvento(BaseModel):
     macrofase: Macrofase
     fecha: datetime | None = None
     detalle: str | None = None
+    documentos: list[DocumentoEtapa] = []
     # Estado real de la etapa (§8). `grupo` es el caso critico: avance de
     # OTROS pedidos de la bolsa, que antes se pintaba como un verde creible.
     estado: EstadoEtapa = "sin_dato"
@@ -462,6 +473,14 @@ class PedidoEnBolsa(BaseModel):
     confianza_ccmn: NivelConfianza | None = None
 
 
+class HitoCCMN(BaseModel):
+    """Un paso del recorrido propio de un CCMN, para la vista de bolsa."""
+    codigo: str          # 'ccmn' | 'cotizacion' | 'cuadro' | 'ccp' | 'orden'
+    label: str
+    numero: str | None = None   # el identificador, si existe
+    alcanzado: bool = False
+
+
 class CandidatoCCMN(BaseModel):
     """Un CCMN candidato de la bolsa, con su avance propio."""
     nro_consolid: int
@@ -476,6 +495,9 @@ class CandidatoCCMN(BaseModel):
     fecha_orden: date | None = None
     # True si este CCMN esta asociado manualmente al pedido consultado.
     asociado_manual: bool = False
+    # Recorrido propio del CCMN: hasta donde llego ESTE cuadro, con sus
+    # numeros. Es lo que permite comparar candidatos entre si.
+    flujo: list[HitoCCMN] = []
 
 
 class BolsaResponse(BaseModel):

@@ -19,6 +19,7 @@ import { formatearMoneda, formatFecha } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import { useDetallePedido } from './api';
 import { Anotaciones } from './Anotaciones';
+import { BolsaPedido } from './BolsaPedido';
 import type {
   ItemPedido,
   OrdenAsociada,
@@ -102,6 +103,17 @@ export function PedidoDetalle({ nroPedido, tipoBien }: PedidoDetalleProps) {
       {data.items.length > 0 ? <BloqueItems items={data.items} /> : null}
 
       <BloqueTimeline eventos={data.timeline} pedido={data} />
+
+      {/* La bolsa: dónde vive la ambigüedad. Se muestra después del recorrido
+          porque es el contexto que explica por qué hay etapas en ámbar. */}
+      {data.tipo_pedido ? (
+        <BolsaPedido
+          nroPedido={data.nro_pedido}
+          tipoBien={data.tipo_bien}
+          tipoPedido={data.tipo_pedido}
+          confianza={data.confianza_ccmn}
+        />
+      ) : null}
 
       <Anotaciones nroPedido={nroPedido} tipoBien={tipoBien} />
     </div>
@@ -490,6 +502,7 @@ function BloqueTimeline({
     fecha: e.fecha,
     estado: e.estado,
     numero: e.etapa_numero,
+    documentos: e.documentos,
   }));
 
   const alcanzadas = eventos.filter((e) => e.alcanzada).length;

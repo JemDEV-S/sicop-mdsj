@@ -157,7 +157,15 @@ det AS (
         LTRIM(RTRIM(dp.CLASE_BIEN))                           AS clase_bien,
         LTRIM(RTRIM(dp.FAMILIA_BIEN))                         AS familia_bien,
         LTRIM(RTRIM(dp.ITEM_BIEN))                            AS item_bien,
-        COALESCE(dp.VALOR_TOTAL, 0)                           AS valor_soles
+        -- VALOR_TOTAL viene en 0.00 en el 100% de los servicios y el 55% de
+        -- los bienes (medido en 2026). El monto real es CANT_SOLICITADA *
+        -- PRECIO_UNIT. Importa para el match composite: con valor 0 se activa
+        -- el escape `d.valor_soles = 0`, que acepta CUALQUIER monto y hace que
+        -- un pedido matchee las ordenes de los otros pedidos de su bolsa.
+        CASE
+            WHEN COALESCE(dp.VALOR_TOTAL, 0) > 0 THEN dp.VALOR_TOTAL
+            ELSE COALESCE(dp.CANT_SOLICITADA, 0) * COALESCE(dp.PRECIO_UNIT, 0)
+        END                                                   AS valor_soles
     FROM pedidos_base pb
     LEFT JOIN SIG_DETALLE_PEDIDOS dp
         ON dp.ANO_EJE = pb.ANO_EJE
@@ -739,11 +747,30 @@ def contexto_pedido_bolsa(
 
     bolsas = sorted({int(b) for b, _ in filas if b is not None})
     candidatos = sorted({int(c) for _, c in filas if c is not None})
+    cand_set = frozenset(candidatos)
+
+    # Declaraciones de las dos fuentes de texto (§3.3), para que el caller
+    # pueda resolver la cascada sin repetir el parseo.
+    p_decl = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
+    with get_connection() as conn:
+        decl_orden = _agrupar_declaraciones(
+            conn.execute(text(_SQL_DECL_ORDEN), p_decl).mappings().all()
+        )
+        decl_cert = _agrupar_declaraciones(
+            conn.execute(text(_SQL_DECL_CERT), p_decl).mappings().all()
+        )
+
     return {
         **dict(cab),
         "centro_costo": (cab["CENTRO_COSTO"] or "").strip(),
         "bolsas": bolsas,
         "candidatos": candidatos,
+        "ccmn_declarado_orden": _elegir_declarado(
+            decl_orden, tipo_bien, nro_pedido, cand_set
+        ),
+        "ccmn_declarado_cert": _elegir_declarado(
+            decl_cert, tipo_bien, nro_pedido, cand_set
+        ),
     }
 
 
@@ -910,7 +937,13 @@ def obtener_pedido(
                     LTRIM(RTRIM(dp.FAMILIA_BIEN))   AS familia_bien,
                     LTRIM(RTRIM(dp.ITEM_BIEN))      AS item_bien,
                     dp.CANT_SOLICITADA, dp.CANT_APROBADA, dp.CANT_ATENDIDA,
-                    dp.VALOR_TOTAL,
+                    -- VALOR_TOTAL viene en 0.00 en servicios; el monto real
+                    -- es CANT_SOLICITADA * PRECIO_UNIT. Ver §9.5 del doc.
+                    CASE
+                        WHEN COALESCE(dp.VALOR_TOTAL, 0) > 0 THEN dp.VALOR_TOTAL
+                        ELSE COALESCE(dp.CANT_SOLICITADA, 0)
+                             * COALESCE(dp.PRECIO_UNIT, 0)
+                    END                             AS VALOR_TOTAL,
                     LTRIM(RTRIM(dp.CLASIFICADOR))   AS clasificador,
                     dp.NRO_ORDEN                    AS nro_orden_declarado,
                     dp.NRO_PECOSA,
@@ -940,7 +973,15 @@ def obtener_pedido(
                         LTRIM(RTRIM(dp.CLASE_BIEN))                 AS clase_bien,
                         LTRIM(RTRIM(dp.FAMILIA_BIEN))               AS familia_bien,
                         LTRIM(RTRIM(dp.ITEM_BIEN))                  AS item_bien,
-                        COALESCE(dp.VALOR_TOTAL, 0)                 AS valor_soles
+                        -- Mismo fallback que el kanban: con VALOR_TOTAL en 0
+                        -- el composite acepta cualquier monto y trae las
+                        -- ordenes de los demas pedidos de la bolsa.
+                        CASE
+                            WHEN COALESCE(dp.VALOR_TOTAL, 0) > 0
+                                THEN dp.VALOR_TOTAL
+                            ELSE COALESCE(dp.CANT_SOLICITADA, 0)
+                                 * COALESCE(dp.PRECIO_UNIT, 0)
+                        END                                         AS valor_soles
                     FROM SIG_DETALLE_PEDIDOS dp
                     INNER JOIN SIG_PEDIDOS p
                         ON p.ANO_EJE = dp.ANO_EJE AND p.SEC_EJEC = dp.SEC_EJEC
@@ -988,6 +1029,9 @@ def obtener_pedido(
                     o.NRO_ORDEN, o.TIPO_BIEN,
                     o.EXP_SIAF, o.EXP_SIGA,
                     o.SEC_CUADRO, o.NRO_CERTIFICA,
+                    -- CCMN del que sale la orden: permite quedarse solo con
+                    -- las ordenes del CCMN atribuido a ESTE pedido.
+                    ca_o.NRO_CONS_PAAC,
                     o.ESTADO, o.ESTADO_SIAF,
                     o.TOTAL_FACT_SOLES,
                     LTRIM(RTRIM(CAST(o.CONCEPTO AS VARCHAR(500)))) AS concepto,
@@ -1002,6 +1046,10 @@ def obtener_pedido(
                 FROM SIG_ORDEN_ADQUISICION o
                 INNER JOIN (SELECT DISTINCT NRO_ORDEN FROM todas) t
                     ON t.NRO_ORDEN = o.NRO_ORDEN
+                LEFT JOIN SIG_CUADRO_ADQUISICION ca_o
+                    ON ca_o.ANO_EJE = o.ANO_EJE AND ca_o.SEC_EJEC = o.SEC_EJEC
+                   AND ca_o.TIPO_BIEN = o.TIPO_BIEN
+                   AND ca_o.SEC_CUADRO = o.SEC_CUADRO
                 LEFT JOIN SIG_CONTRATISTAS c ON c.PROVEEDOR = o.PROVEEDOR
                 WHERE o.ANO_EJE = :ano AND o.SEC_EJEC = :sec_ejec
                   AND o.TIPO_BIEN = :tipo
@@ -1149,25 +1197,12 @@ def obtener_pedido(
     ctx = contexto_pedido_bolsa(ano, tipo_bien, tipo_pedido, nro_pedido) or {}
     candidatos = frozenset(ctx.get("candidatos") or ())
 
-    p_decl = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
-    with get_connection() as conn:
-        decl_orden = _agrupar_declaraciones(
-            conn.execute(text(_SQL_DECL_ORDEN), p_decl).mappings().all()
-        )
-        decl_cert = _agrupar_declaraciones(
-            conn.execute(text(_SQL_DECL_CERT), p_decl).mappings().all()
-        )
-
     return {
         **dict(cab),
         "n_candidatos_ccmn": len(candidatos),
         "ccmn_candidatos": candidatos,
-        "ccmn_declarado_orden": _elegir_declarado(
-            decl_orden, tipo_bien, nro_pedido, candidatos
-        ),
-        "ccmn_declarado_cert": _elegir_declarado(
-            decl_cert, tipo_bien, nro_pedido, candidatos
-        ),
+        "ccmn_declarado_orden": ctx.get("ccmn_declarado_orden"),
+        "ccmn_declarado_cert": ctx.get("ccmn_declarado_cert"),
         "ccmn_manual": None,  # lo inyecta el router desde Postgres
         "sec_cua_mod_sal": (ctx.get("bolsas") or [None])[0],
         "items": [dict(i) for i in items],

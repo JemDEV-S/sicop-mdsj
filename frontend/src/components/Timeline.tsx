@@ -1,4 +1,5 @@
-import { CheckCircle2, Circle, CircleDashed, CircleDot } from 'lucide-react';
+import * as React from 'react';
+import { CheckCircle2, Circle, CircleDashed, CircleDot, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatFecha } from '@/lib/formatters';
 
@@ -19,6 +20,12 @@ export type EstadoHito =
   | 'manual'
   | 'sin_dato';
 
+/** Identificador con el que se encuentra el documento en el sistema. */
+export interface DocumentoHito {
+  etiqueta: string;
+  valor: string;
+}
+
 export interface HitoTimeline {
   key: string;
   titulo: string;
@@ -26,6 +33,8 @@ export interface HitoTimeline {
   fecha?: string | null;
   estado: EstadoHito;
   numero?: number | null;
+  /** Números que identifican el documento de esta etapa (CCP 182, OC 132…). */
+  documentos?: DocumentoHito[];
 }
 
 interface TimelineProps {
@@ -116,6 +125,47 @@ export function esAlcanzado(estado: EstadoHito): boolean {
   return ALCANZADOS.has(estado);
 }
 
+/**
+ * Identificador de un documento, con copia al portapapeles.
+ *
+ * El número se copia solo (sin la etiqueta) porque es lo que se pega en el
+ * buscador de SIGA. La confirmación es textual, no solo un cambio de ícono.
+ */
+function BotonCopiar({ documento }: { documento: DocumentoHito }) {
+  const [copiado, setCopiado] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!copiado) return;
+    const t = setTimeout(() => setCopiado(false), 1600);
+    return () => clearTimeout(t);
+  }, [copiado]);
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(documento.valor).then(
+          () => setCopiado(true),
+          () => undefined, // sin portapapeles: el número igual está visible
+        );
+      }}
+      title={`Copiar ${documento.etiqueta} ${documento.valor}`}
+      className="inline-flex items-center gap-1 rounded border border-border bg-muted/50 px-1.5 py-0.5 text-[11px] hover:bg-muted hover:border-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      <span className="text-muted-foreground">{documento.etiqueta}</span>
+      <span className="font-mono tabular-nums">{documento.valor}</span>
+      {copiado ? (
+        <span className="text-secondary font-medium">copiado</span>
+      ) : (
+        <Copy
+          className="w-2.5 h-2.5 text-muted-foreground/60"
+          aria-hidden="true"
+        />
+      )}
+    </button>
+  );
+}
+
 // Componente vertical con línea conectora. Se declara aquí (nivel components/)
 // porque sirve también al detalle de obra (T-51) y al cierre de meta.
 export function Timeline({ hitos, className }: TimelineProps) {
@@ -181,6 +231,19 @@ export function Timeline({ hitos, className }: TimelineProps) {
                   </span>
                 ) : null}
               </div>
+
+              {/* Los números con los que el funcionario encuentra el
+                  documento en SIGA. Sin esto el recorrido dice "llegó a
+                  certificación" pero no cuál. */}
+              {h.documentos && h.documentos.length > 0 ? (
+                <ul className="mt-1 flex flex-wrap gap-1.5">
+                  {h.documentos.map((d) => (
+                    <li key={`${d.etiqueta}-${d.valor}`}>
+                      <BotonCopiar documento={d} />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
 
               {/* La explicación del estado va visible, no escondida en un
                   tooltip: el usuario objetivo no descubre tooltips (§4). */}

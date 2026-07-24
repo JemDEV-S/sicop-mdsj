@@ -601,12 +601,18 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         detalle: str | None = None,
         *,
         via_ccmn: bool = False,
+        docs: list[dict[str, Any]] | None = None,
     ):
-        """Agrega un hito con su estado de UI.
+        """Agrega un hito con su estado de UI y sus documentos identificadores.
 
         `via_ccmn=True` marca las etapas que solo se ven a traves del CCMN
         (4-7): ahi el estado sale de la cascada de confianza, no del booleano.
         El resto son evidencia directa del pedido.
+
+        `docs` son los numeros con los que el funcionario encuentra el
+        documento en SIGA (CCMN 2266, CCP 182, OC 132...). Sin esto el
+        recorrido dice "llego a certificacion" pero no *cual* certificacion,
+        que es justo lo que hace falta para verificarlo.
         """
         if not alcanzada:
             estado = "sin_dato"
@@ -623,35 +629,116 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
             "fecha": fecha,
             "detalle": detalle,
             "estado": estado,
+            # Solo tienen sentido si la etapa se alcanzo por este pedido.
+            "documentos": (docs or []) if estado in ESTADOS_ALCANZADOS else [],
             # `alcanzada` se mantiene por compatibilidad, pero ahora excluye
             # `grupo`: un avance ajeno no es avance de este pedido.
             "alcanzada": estado in ESTADOS_ALCANZADOS,
         })
 
+    def _doc(etiqueta: str, valor: Any) -> dict[str, Any] | None:
+        """Un identificador para mostrar y copiar. None si no hay valor."""
+        if valor in (None, "", 0):
+            return None
+        return {"etiqueta": etiqueta, "valor": str(valor).strip()}
+
+    def _docs(*pares: tuple[str, Any]) -> list[dict[str, Any]]:
+        return [d for e, v in pares if (d := _doc(e, v)) is not None]
+
+    # Identificadores por etapa: son los numeros con los que el funcionario
+    # busca el documento en SIGA. `detalle` queda como la tabla de origen (util
+    # para auditar de donde sale el dato), pero lo que se lee es `documentos`.
+    nro_pedido_txt = str(
+        ficha.get("NRO_PEDIDO") or ficha.get("nro_pedido") or ""
+    ).strip()
+    ccmn = ficha.get("ccmn_atribuido") or ficha.get("ccmn_manual") \
+        or ficha.get("ccmn_declarado_orden") or ficha.get("ccmn_declarado_cert")
+    bolsa = ficha.get("sec_cua_mod_sal")
+
+    # Las ordenes se matchean por composite (item + meta + clasificador), y en
+    # una bolsa compartida los pedidos comparten esos campos: el match trae las
+    # ordenes de TODOS. Si la cascada identifico el CCMN de este pedido, se usa
+    # su cadena (cuadro -> CCP -> OC) para quedarse solo con lo suyo. Mostrar
+    # las tres OC seria repetir el error de §7 en otro lugar.
+    ordenes_propias = ordenes
+    if ccmn is not None:
+        del_ccmn = [
+            o for o in ordenes
+            if o.get("NRO_CONS_PAAC") is not None
+            and int(o["NRO_CONS_PAAC"]) == int(ccmn)
+        ]
+        if del_ccmn:
+            ordenes_propias = del_ccmn
+
+    sec_cuadros_propios = {
+        o.get("SEC_CUADRO") for o in ordenes_propias if o.get("SEC_CUADRO")
+    }
+    certifs_propias = {
+        o.get("NRO_CERTIFICA") for o in ordenes_propias if o.get("NRO_CERTIFICA")
+    }
+    exp_sigas_propios = {
+        o.get("EXP_SIGA") for o in ordenes_propias if o.get("EXP_SIGA")
+    }
+
+    cert_filtradas = [
+        c for c in certificaciones
+        if not certifs_propias or c.get("NRO_CERTIFICA") in certifs_propias
+    ]
+    cuadros_filtrados = [
+        c for c in cuadros
+        if not sec_cuadros_propios or c.get("SEC_CUADRO") in sec_cuadros_propios
+    ]
+    exp_filtrados = [
+        e for e in expedientes
+        if not exp_sigas_propios or e.get("EXP_SIGA") in exp_sigas_propios
+    ]
+
+    docs_cert = _docs(
+        *[("CCP", c.get("NRO_CERTIFICA")) for c in cert_filtradas],
+        *[("Certif. SIAF", c.get("NRO_CERTIFICA_SIAF")) for c in cert_filtradas],
+    )
+    docs_orden = _docs(*[("OC", o.get("NRO_ORDEN")) for o in ordenes_propias])
+    docs_exp = _docs(
+        *[("Exp. SIGA", e.get("EXP_SIGA")) for e in exp_filtrados],
+        *[("Exp. SIAF", e.get("EXP_SIAF")) for e in exp_filtrados],
+    )
+    docs_cuadro = _docs(
+        *[("Cuadro adq.", c.get("SEC_CUADRO")) for c in cuadros_filtrados]
+    )
+    pecosas = _docs(*[
+        ("PECOSA", i.get("NRO_PECOSA") or i.get("nro_pecosa")) for i in items
+    ])
+
     _add(ETAPA_PEDIDO_REGISTRADO, fecha_pedido, fecha_pedido is not None,
-         "Pedido registrado en SIG_PEDIDOS")
+         "Pedido registrado en SIG_PEDIDOS",
+         docs=_docs(("Pedido", nro_pedido_txt)))
     _add(ETAPA_PEDIDO_APROBADO, fecha_aprob,
          fecha_aprob is not None or estado_pedido in ("1", "7"),
          "SIG_PEDIDOS.ESTADO='1' + FECHA_APROB")
     _add(ETAPA_CUADRO_NECESIDAD, None, tiene_cuadro_neces,
-         "SIG_DETALLE_PEDIDOS.SEC_CUA_MOD_SAL presente")
+         "SIG_DETALLE_PEDIDOS.SEC_CUA_MOD_SAL presente",
+         docs=_docs(("Cuadro necesidades", bolsa)))
     # Etapas 4-7: solo observables a traves del CCMN -> estado por cascada.
     _add(ETAPA_PUENTE_PAAC, None, tiene_cuadro_adq or tiene_certif,
-         "SIG_CUADRO_MODIFICADO_CMN", via_ccmn=True)
+         "SIG_CUADRO_MODIFICADO_CMN", via_ccmn=True,
+         docs=_docs(("CCMN", ccmn)))
     _add(ETAPA_CCMN, None, tiene_cuadro_adq or tiene_certif,
-         "SIG_PAAC_CONSOLIDADO", via_ccmn=True)
+         "SIG_PAAC_CONSOLIDADO", via_ccmn=True,
+         docs=_docs(("CCMN", ccmn)))
     _add(ETAPA_COTIZACION, None, tiene_cuadro_adq,
-         "SIG_SOLICITUD_COTIZACION", via_ccmn=True)
+         "SIG_SOLICITUD_COTIZACION", via_ccmn=True,
+         docs=_docs(("CCMN", ccmn)))
     _add(ETAPA_CUADRO_ADQUISICION, fecha_cuadro, tiene_cuadro_adq,
-         "SIG_CUADRO_ADQUISICION", via_ccmn=True)
+         "SIG_CUADRO_ADQUISICION", via_ccmn=True, docs=docs_cuadro)
     _add(ETAPA_CERTIFICACION, fecha_certif, tiene_certif,
-         "SIG_CERTIFICACION (CCP SIAF)")
+         "SIG_CERTIFICACION (CCP SIAF)", docs=docs_cert)
     _add(ETAPA_ORDEN_EMITIDA, fecha_orden, tiene_orden,
-         "SIG_ORDEN_ADQUISICION")
+         "SIG_ORDEN_ADQUISICION", docs=docs_orden)
     _add(ETAPA_COMPROMISO_SIAF, fecha_exp, tiene_compromiso,
-         "SIG_EXP_SIGA_DOCU.FECHA_INTERFASE")
+         "SIG_EXP_SIGA_DOCU.FECHA_INTERFASE", docs=docs_exp)
     _add(ETAPA_EJECUCION, fecha_confor or fecha_ingreso, tiene_ejecucion,
-         "Servicios: SIG_MOVIM_CONFOR_SERVICIO · Bienes: SIG_MOVIM_ALMACEN (I,1)")
+         "Servicios: SIG_MOVIM_CONFOR_SERVICIO · Bienes: SIG_MOVIM_ALMACEN (I,1)",
+         docs=docs_orden)
 
     if es_bien:
         _add(ETAPA_RECEPCION_KARDEX, fecha_kardex, fecha_kardex is not None,
@@ -659,7 +746,7 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         _add(ETAPA_PEDIDO_INTERNO, None, False,
              "Pedido TIPO=1 posterior con misma meta+CC (por composite)")
         _add(ETAPA_DESPACHO_PECOSA, fecha_despacho, fecha_despacho is not None,
-             "SIG_MOVIM_ALMACEN (S,1) + NRO_PECOSA")
+             "SIG_MOVIM_ALMACEN (S,1) + NRO_PECOSA", docs=pecosas)
 
     _add(ETAPA_DEVENGADO, None, False,
          "Devengado consolidado — proviene de SIAF (Fix #2 pendiente)")
