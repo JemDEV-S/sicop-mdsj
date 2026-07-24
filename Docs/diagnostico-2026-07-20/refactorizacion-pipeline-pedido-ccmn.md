@@ -18,8 +18,8 @@ Lo que sigue es implementación, con el diseño ya acordado con el usuario.
 | | |
 |---|---|
 | ✅ Decidido | Cascada de confianza, 4 estados de UI, resolución manual N:M, orden por fecha |
-| ✅ Implementado | Puntos **1 a 8** de §9 (`119f776`, `62d7454`, + §9.3 – §9.7) |
-| ⏳ Por implementar | Punto **9** (job de resoluciones obsoletas, §5.1) |
+| ✅ Implementado | **Los 9 puntos** de §9 (`119f776`, `62d7454`, + §9.3 – §9.8) |
+| ⏳ Por implementar | — (plan completo) |
 | ❌ Cerrado | `SIG_SEGUIMIENTO` (§3.2), `SEC_RESUMEN` (§3.1), y todo lo de §2 |
 
 ---
@@ -432,9 +432,9 @@ En el **timeline del pipeline** el orden se mantiene **ascendente** (etapa 1 arr
 | ~~6~~ | ✅ 5 estados con color distinto | `features/pipeline/` | hecho · §9.6 · ámbar ≠ verde |
 | ~~7~~ | ✅ Vista de bolsa con orden y monto | `features/pipeline/` | hecho · §9.7 |
 | ~~8~~ | ✅ Panel de trazabilidad con cascada automática visible | `features/pipeline/` | hecho · §9.7 |
-| 9 | Job: detectar resoluciones obsoletas | sync | §5.1 |
+| ~~9~~ | ✅ Job: detectar resoluciones obsoletas | sync | hecho · §9.8 · `c8d2e3f4a5b6` |
 
-**Orden sugerido:** ~~1 → 2 → 3 → 4 → 5 → 6 → 7/8~~ → **9**.
+**✅ PLAN COMPLETO.** Los 9 puntos implementados y verificados contra BD.
 Los puntos 1 y 2 eran correcciones de bug; el 3 hizo rendir la cascada (ya distingue los
 7 niveles, no solo `unico`/`ambiguo`/`sin_ccmn`).
 
@@ -787,6 +787,67 @@ pedido, el del ítem, el de la orden y el del CCMN por fin coinciden en pantalla
 Test de regresión en `test_declaraciones_ccmn.py` que fija el fallback en el SQL.
 Suite: **103 passed**, 1 failed (`test_sync_invierte`, preexistente), 8 skips.
 Verificado renderizado con Playwright sobre datos reales (login, detalle y flujo de asociación).
+
+### 9.8 Punto 9 · job de resoluciones obsoletas · sesión 2026-07-24
+
+Cierra el riesgo de §5.1: si SIGA agrega un CCMN a la bolsa **después** de una resolución
+manual, la resolución queda obsoleta sin avisar.
+
+**Corrección de una decisión del punto 5.** Ahí la foto de candidatos se guardaba solo en
+`logs.auditoria`. Auditoría es append-only y consultarla por cada resolución es frágil, así
+que la foto vive ahora en la propia fila (`candidatos_al_crear`), que es donde el job la
+necesita. Migración **`c8d2e3f4a5b6`** con esa columna + `revision_pendiente_desde` +
+`candidatos_en_revision`, con round-trip verificado.
+
+**Qué hace el job** (`revisar_resoluciones_obsoletas`, en el sync nocturno tras los catálogos):
+por cada resolución activa compara los candidatos guardados al crear contra los actuales de la
+bolsa en SIGA. Si cambiaron, sella `revision_pendiente_desde` y guarda los nuevos candidatos.
+
+**Lo que NO hace: nunca revoca.** Quitar el juicio de un humano sin avisar sería el fallo
+silencioso que toda la refactorización evita (§2, §7). Solo marca; el funcionario decide. La
+tentación de §5.1 —derivar una regla automática— se resiste por diseño.
+
+**Verificado end-to-end contra BD** (transacción revertida, 0 filas persistidas), los 5
+comportamientos:
+
+```
+1. sin cambios en la bolsa        -> no marca
+2. aparece el CCMN 9999           -> marca · detalle dice aparecieron=[9999]
+3. re-correr con el cambio        -> idempotente, no re-marca
+4. la bolsa vuelve a coincidir    -> DESMARCA (el aviso no queda pegado)
+5. en todos los casos            -> revocado_en = NULL (nunca revoca)
+```
+
+Endpoint admin `/admin/jobs/revisar-resoluciones-ccmn` para forzarlo (p.ej. tras una carga
+masiva). La UI muestra el aviso en ámbar dentro de la asociación afectada, con cuántos
+candidatos hay ahora — no la deshace.
+
+7 tests del job + el E2E. Suite: **110 passed**, 1 failed (`test_sync_invierte`, preexistente),
+8 skips. `tsc` limpio en lo tocado.
+
+---
+
+## §9.9 · Resumen de la refactorización completa
+
+| # | Qué se logró | Verificación |
+|---|---|---|
+| 1 | Llave de pedido `TIPO_BIEN+TIPO_PEDIDO+NRO_PEDIDO` | 2,358 filas → 2,358 únicas |
+| 2 | Cascada de confianza reemplaza `MAX(CASE...)` | 13 tests + testigo |
+| 3 | `declarado` + `declarado_cert` alimentados | B 95.5% · S 88.7% · cert corrobora 99.0% |
+| 4 | Tabla `resolucion_pedido_ccmn` N:M | 10 constraints contra PG16 |
+| 5 | Endpoints ver/asociar/revocar + auditoría | 17 tests · 422 si no es candidato |
+| 6 | 5 estados en la UI, ámbar ≠ verde | 131 pedidos dejan de verse verde falso |
+| 7-8 | Detalle rediseñado: bolsa, flujo, docs copiables | render verificado con Playwright |
+| 9 | Job de obsolescencia (nunca revoca) | 5 comportamientos contra BD |
+
+**Bugs de datos encontrados en el camino** (todos silenciosos, ninguno daba error):
+1. El `MAX(CASE...)` pintaba avance ajeno como propio (§7 · punto 2).
+2. `VALOR_TOTAL=0` en el 100% de servicios inflaba el match composite: cada pedido absorbía
+   las órdenes de su bolsa (§9.7 · encontrado *mirando la pantalla*).
+
+La búsqueda de una FK pedido↔CCMN se agotó (§1): no existe en SIGA. La solución no es
+encontrarla sino **declarar el nivel de confianza** de cada match y dejar que un humano resuelva
+lo que la estructura no puede. Preferible 88.7% honesto que 97% inventado.
 
 ---
 

@@ -82,6 +82,36 @@ def trigger_sync_invierte(
     return TriggerResponse(job_id=job_id, nombre="sync_invierte", estado="en_curso")
 
 
+@router.post(
+    "/revisar-resoluciones-ccmn",
+    response_model=TriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def trigger_revisar_resoluciones(
+    request: Request,
+    ano: int | None = None,
+    user: CurrentUser = Depends(require_role(CodigoRol.admin)),
+    db: Session = Depends(get_db),
+) -> TriggerResponse:
+    """Revisa si alguna resolucion manual pedido<->CCMN quedo obsoleta (§5.1).
+
+    Corre solo cada noche tras el sync; este endpoint es para forzarlo (p.ej.
+    despues de una carga masiva de SIGA).
+    """
+    job_id = sched.trigger_revisar_resoluciones(ano=ano)
+    auditoria_service.registrar_desde_request(
+        db,
+        request,
+        accion="trigger_revisar_resoluciones",
+        usuario_id=user.id,
+        detalle={"job_id": job_id, "ano": ano},
+    )
+    db.commit()
+    return TriggerResponse(
+        job_id=job_id, nombre="revisar_resoluciones", estado="en_curso"
+    )
+
+
 @router.get("/{job_id}", response_model=RunEstadoResponse)
 def estado_run(
     job_id: str,

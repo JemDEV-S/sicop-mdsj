@@ -500,6 +500,7 @@ def asociar_ccmn(
         sec_cua_mod_sal=ctx["bolsas"][0] if ctx["bolsas"] else 0,
         usuario_id=user.id,
         nota=payload.nota,
+        candidatos_al_crear=ctx["candidatos"],
     )
     if not creada:
         raise HTTPException(

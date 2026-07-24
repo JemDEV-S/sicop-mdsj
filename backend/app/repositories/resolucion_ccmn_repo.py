@@ -86,7 +86,8 @@ def resoluciones_de_pedido(
             SELECT r.id, r.nro_consolid, r.sec_cua_mod_sal, r.nota,
                    r.usuario_id, u.nombre_completo AS usuario_nombre,
                    r.creado_en, r.revocado_en, r.revocado_por,
-                   ur.nombre_completo AS revocado_por_nombre
+                   ur.nombre_completo AS revocado_por_nombre,
+                   r.revision_pendiente_desde, r.candidatos_en_revision
               FROM sistema.resolucion_pedido_ccmn r
               LEFT JOIN auth.usuarios u  ON u.id  = r.usuario_id
               LEFT JOIN auth.usuarios ur ON ur.id = r.revocado_por
@@ -145,22 +146,29 @@ def crear_resolucion(
     sec_cua_mod_sal: int,
     usuario_id: UUID,
     nota: str | None = None,
+    candidatos_al_crear: list[int] | None = None,
 ) -> dict[str, Any]:
     """Asocia un CCMN a un pedido. Idempotente sobre el par activo.
 
     Si el par ya existe activo devuelve el existente en vez de reventar contra
     `uq_par_activo`: asociar dos veces lo mismo es una accion inocua, no un
     error que deba interrumpir al funcionario.
+
+    `candidatos_al_crear` es la foto de los CCMN de la bolsa al resolver. El
+    job de obsolescencia (§5.1) la compara contra los candidatos actuales: si
+    SIGA agrego uno despues, marca la resolucion para revision.
     """
     row = db.execute(
         text(
             """
             INSERT INTO sistema.resolucion_pedido_ccmn
                 (ano_eje, sec_ejec, tipo_bien, tipo_pedido, nro_pedido,
-                 nro_consolid, sec_cua_mod_sal, nota, usuario_id)
+                 nro_consolid, sec_cua_mod_sal, nota, usuario_id,
+                 candidatos_al_crear)
             VALUES
                 (:ano, :sec_ejec, :tipo_bien, :tipo_pedido, :nro_pedido,
-                 :nro_consolid, :sec_cua_mod_sal, :nota, :usuario_id)
+                 :nro_consolid, :sec_cua_mod_sal, :nota, :usuario_id,
+                 :candidatos)
             ON CONFLICT ON CONSTRAINT uq_par_activo DO NOTHING
             RETURNING id, nro_consolid, creado_en
             """
@@ -175,6 +183,7 @@ def crear_resolucion(
             "sec_cua_mod_sal": sec_cua_mod_sal,
             "nota": nota,
             "usuario_id": usuario_id,
+            "candidatos": sorted(candidatos_al_crear or []),
         },
     ).mappings().first()
 

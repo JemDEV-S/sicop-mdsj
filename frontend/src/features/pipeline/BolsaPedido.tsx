@@ -535,6 +535,26 @@ function ListaResoluciones({
                   {r.nota}
                 </p>
               ) : null}
+              {/* Obsolescencia (§5.1): el cuadro de necesidades sumó cuadros
+                  consolidados después de esta asociación. Se avisa, no se
+                  deshace: quizás el nuevo sea el correcto y solo un humano
+                  puede decidirlo. */}
+              {!revocadas && r.revision_pendiente_desde ? (
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-semaforo-alerta">
+                  <AlertTriangle
+                    className="w-3.5 h-3.5 shrink-0 mt-0.5"
+                    aria-hidden="true"
+                  />
+                  <span>
+                    El cuadro de necesidades cambió desde que se hizo esta
+                    asociación. Conviene revisar si sigue siendo correcta
+                    {r.candidatos_en_revision
+                      ? ` (ahora hay ${r.candidatos_en_revision.length} cuadros candidatos)`
+                      : ''}
+                    .
+                  </span>
+                </p>
+              ) : null}
               {/* La UI siempre muestra qué dice la cascada automática junto a
                   la resolución manual (§5): el origen debe ser auditable. */}
               {!revocadas && confianza && confianza !== 'resuelto_manual' ? (

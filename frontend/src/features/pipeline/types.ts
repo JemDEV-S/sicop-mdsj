@@ -195,6 +195,9 @@ export interface Resolucion {
   revocado_en: string | null;
   revocado_por: string | null;
   revocado_por_nombre: string | null;
+  /** Sellado por el job si la bolsa cambió tras resolver (§5.1). */
+  revision_pendiente_desde: string | null;
+  candidatos_en_revision: number[] | null;
 }
 
 export interface PedidoDetalle {

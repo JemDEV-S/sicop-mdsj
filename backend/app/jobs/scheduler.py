@@ -21,6 +21,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
+from app.jobs.revisar_resoluciones_ccmn import revisar_resoluciones_obsoletas
 from app.jobs.sync_invierte import sync_invierte
 from app.jobs.sync_siaf import sync_siaf
 
@@ -57,6 +58,13 @@ def _ejecutar_encadenado_siaf_invierte() -> None:
         sync_invierte()
     except Exception:
         logger.exception("scheduler: sync_invierte FALLO")
+    # Tras refrescar los catalogos de SIGA, revisar si alguna resolucion manual
+    # pedido<->CCMN quedo obsoleta porque la bolsa cambio (§5.1).
+    try:
+        logger.info("scheduler: iniciando revisar_resoluciones_obsoletas...")
+        revisar_resoluciones_obsoletas()
+    except Exception:
+        logger.exception("scheduler: revisar_resoluciones_obsoletas FALLO")
 
 
 def iniciar_scheduler() -> BackgroundScheduler:
@@ -133,6 +141,13 @@ def trigger_sync_siaf(ano: int | None = None) -> str:
 
 def trigger_sync_invierte() -> str:
     return _wrap_run("sync_invierte", sync_invierte)
+
+
+def trigger_revisar_resoluciones(ano: int | None = None) -> str:
+    return _wrap_run(
+        "revisar_resoluciones",
+        lambda: revisar_resoluciones_obsoletas(ano=ano),
+    )
 
 
 def obtener_run(job_id: str) -> JobRun | None:

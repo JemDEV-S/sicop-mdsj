@@ -534,6 +534,10 @@ class ResolucionResponse(BaseModel):
     revocado_en: datetime | None = None
     revocado_por: UUID | None = None
     revocado_por_nombre: str | None = None
+    # Obsolescencia (§5.1): sellado por el job cuando la bolsa cambio despues
+    # de resolver. NULL = vigente. `candidatos_en_revision` deja ver que cambio.
+    revision_pendiente_desde: datetime | None = None
+    candidatos_en_revision: list[int] | None = None
 
 
 # ─── Anotaciones (sin cambios) ────────────────────────────────────────────
