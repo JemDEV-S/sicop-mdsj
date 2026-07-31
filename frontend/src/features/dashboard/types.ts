@@ -27,6 +27,65 @@ export type EtapaCodigo =
   | 'devengado'            // [15]
   | 'cierre';              // [16]
 
+// ─── Puente pedido<->CCMN y alertas v2 (Guía Pipeline v2 §02) ────────────
+
+export type NivelConfianza =
+  | 'unico'
+  | 'declarado'
+  | 'declarado_cert'
+  | 'resuelto_manual'
+  | 'conflicto'
+  | 'ambiguo'
+  | 'sin_ccmn';
+
+/** Tipos de alerta v2. Rojo solo estancado_real; el resto ámbar/gris (§02.4). */
+export type TipoAlerta =
+  | 'estancado_real'
+  | 'puente_pendiente'
+  | 'conflicto_puente'
+  | 'cerrado_negativo'
+  | 'sin_consolidar'
+  | 'desfase_devengado';
+
+export type SeveridadAlerta = 'rojo' | 'ambar' | 'gris';
+
+export interface Alerta {
+  tipo: TipoAlerta;
+  severidad: SeveridadAlerta;
+  evidencia: string;
+  desde: string | null;
+}
+
+/** Los 3 identificadores principales, visibles en toda vista (§00 principio 2). */
+export interface Identificadores {
+  pedido: string;
+  orden: string | null;
+  exp_siaf: number | null;
+  ccp_siaf: number | null;
+}
+
+export interface OrdenBolsa {
+  nro_orden: number;
+  fecha: string | null;
+}
+
+/** Avance duro de la bolsa: cierto aunque el puente no resuelva (§02.1). */
+export interface AvanceBolsa {
+  n_ordenes: number;
+  ordenes: OrdenBolsa[];
+  max_etapa: EtapaCodigo | null;
+  max_etapa_label: string | null;
+}
+
+export interface Puente {
+  nivel: NivelConfianza | null;
+  nivel_label: string | null;
+  bolsa: number | null;
+  candidatos: number[];
+  ccmn_atribuido: number | null;
+  avance_bolsa: AvanceBolsa;
+}
+
 export interface PedidoCard {
   ano_eje: number;
   sec_ejec: string;
@@ -51,30 +110,17 @@ export interface PedidoCard {
   macrofase: Macrofase;
   macrofase_label: string;
 
-  tiene_cuadro_neces?: number;
-  tiene_puente_paac?: number;
-  tiene_ccmn?: number;
-  tiene_cotizacion?: number;
-  tiene_cuadro_adq?: number;
-  tiene_certificacion?: number;
-  tiene_orden?: number;
-  tiene_compromiso?: number;
-  tiene_ejecucion?: number;
-  tiene_kardex?: number;
-  tiene_pedido_interno?: number;
-  tiene_pecosa?: number;
-  tiene_devengado?: number;
-  tiene_cierre?: number;
+  // v2
+  identificadores?: Identificadores | null;
+  fechas?: Partial<Record<EtapaCodigo, string>>;
+  puente?: Puente | null;
+  alerta?: Alerta | null;
+  sincronizado_hasta?: string | null;
 
-  nro_consolid_muestra?: number | null;
-  nro_est_mdo_muestra?: number | null;
-  nro_orden_muestra?: number | null;
-  exp_siaf_muestra?: number | null;
-  exp_siga_muestra?: number | null;
-  sec_cuadro_muestra?: number | null;
-  nro_certifica_muestra?: number | null;
-  nro_certifica_siaf_muestra?: number | null;
-  match_metodo?: string | null;
+  n_candidatos_ccmn?: number;
+  confianza_ccmn?: NivelConfianza | null;
+  confianza_ccmn_label?: string | null;
+  ccmn_atribuido?: number | null;
 
   dias_en_etapa?: number | null;
   estancado: boolean;

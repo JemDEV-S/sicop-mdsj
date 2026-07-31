@@ -3,6 +3,7 @@ import { GitBranch, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/layout/EmptyState';
 import { ErrorState } from '@/components/layout/ErrorState';
 import { SectionCard } from '@/components/layout/SectionCard';
+import { cn } from '@/lib/utils';
 import { useKanban } from '@/features/dashboard/api';
 import type {
   EtapaCodigo,
@@ -93,6 +94,16 @@ function aplicarFiltros(
   return { pedidosPorEtapa, conteosPorMacrofase, totalEstancadosVisible };
 }
 
+/** Frescura del snapshot: primer `sincronizado_hasta` de cualquier tarjeta. */
+function frescuraDelKanban(data: KanbanResponse): string | null {
+  for (const cards of Object.values(data.pedidos_por_etapa)) {
+    for (const p of cards ?? []) {
+      if (p.sincronizado_hasta) return p.sincronizado_hasta;
+    }
+  }
+  return null;
+}
+
 export function PipelineKanban() {
   const { data, isLoading, isError, error, refetch } = useKanban();
   const [filtros, setFiltros] = useState<FiltrosPipelineState>(FILTROS_DEFAULT);
@@ -104,6 +115,11 @@ export function PipelineKanban() {
       0,
     );
   }, [data]);
+
+  const sincronizadoHasta = useMemo(
+    () => (data ? frescuraDelKanban(data) : null),
+    [data],
+  );
 
   const filtrado = useMemo(() => {
     if (!data) return null;
@@ -173,6 +189,57 @@ export function PipelineKanban() {
           />
         ))}
       </div>
+
+      <FrescuraFooter sincronizadoHasta={sincronizadoHasta} onActualizar={() => refetch()} />
+    </div>
+  );
+}
+
+// ─── Pie de frescura (§03.1.2): "Datos SIGA al …" + botón Actualizar ─────
+
+function FrescuraFooter({
+  sincronizadoHasta,
+  onActualizar,
+}: {
+  sincronizadoHasta: string | null;
+  onActualizar: () => void;
+}) {
+  // Punto verde si el snapshot es de hoy; ámbar si es más viejo (umbral simple:
+  // 12 h). El estado se comunica con color + texto (§04), nunca color solo.
+  let al = 'sin dato de sincronización';
+  let fresco = false;
+  if (sincronizadoHasta) {
+    const d = new Date(sincronizadoHasta);
+    al = d.toLocaleString('es-PE', {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    fresco = Date.now() - d.getTime() < 12 * 60 * 60 * 1000;
+  }
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            'inline-block h-2 w-2 rounded-full',
+            fresco ? 'bg-secondary' : 'bg-accent',
+          )}
+          aria-hidden="true"
+        />
+        Datos de SIGA al {al}
+        <span className="sr-only">
+          {fresco ? ' (actualizado)' : ' (desactualizado, más de 12 horas)'}
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={onActualizar}
+        className="rounded border border-border bg-card px-2 py-1 font-medium text-foreground transition-colors hover:border-primary/50"
+      >
+        Actualizar
+      </button>
     </div>
   );
 }
