@@ -48,6 +48,19 @@ RE_PEDIDO = re.compile(
 )
 RE_CONTRATO = re.compile(r"SEGUN\s+CONTRATO", re.I)
 
+# El pedido de atencion ('1') declara su O/C en el motivo: "ATENCION DE PEDIDO
+# A LA O/C N°570" (531/576 en 2026, diagnostico_sesion6/06). El caracter entre
+# la N y el numero varia (°, mojibake, espacios) — de ahi el comodin.
+RE_OC = re.compile(r"O/C\s*N[^0-9]{0,4}(\d{1,6})", re.I)
+
+
+def parsear_nro_oc(texto: str | None) -> int | None:
+    """Extrae el numero de O/C que un pedido de atencion declara en su motivo."""
+    if not texto:
+        return None
+    m = RE_OC.search(texto)
+    return int(m.group(1)) if m else None
+
 
 def parsear_nro_pedido(texto: str | None) -> int | None:
     """Extrae el numero de pedido declarado en un texto libre de SIGA.
@@ -770,6 +783,12 @@ def obtener_pedido(
                 ).mappings().all()
             ]
 
+        # Circuito de almacen de las ORDENES del pedido (bienes):
+        #   - Recepcion: la entrada ('I') referencia NRO_ORDEN — llave dura,
+        #     100% de las entradas 2026 (diagnostico_sesion6/05).
+        #   - Despacho: la salida ('S') NO referencia orden; se llega por el
+        #     pedido de atencion ('1') que declara la O/C en su motivo y cuyos
+        #     items llevan la pecosa (declarativo, 92% de cobertura).
         movimientos_almacen: list[dict[str, Any]] = []
         if tipo_bien == "B":
             movimientos_almacen = [
@@ -796,6 +815,20 @@ def obtener_pedido(
                     params,
                 ).mappings().all()
             ]
+
+            # Los items del pedido de compra ('2') NUNCA llevan pecosa: sin
+            # estos puentes la ejecucion de bienes era invisible en el detalle
+            # mientras el kanban (v_bolsa_avance, migracion a7e5f8c1d2b9) si
+            # la veia — el mismo dato debe salir igual en ambas vistas.
+            movimientos_almacen.extend(
+                _movimientos_por_ordenes(conn, ano, nro_ordenes)
+            )
+            unicos: dict[tuple[Any, str], dict[str, Any]] = {}
+            for m in movimientos_almacen:
+                unicos.setdefault(
+                    (m["NRO_MOVIMTO"], (m["TIPO_MOVIMTO"] or "").strip()), m
+                )
+            movimientos_almacen = list(unicos.values())
 
     # Campos de la cascada de confianza: el timeline los necesita para saber
     # si las etapas 4-7 son de ESTE pedido o avance del grupo (§4). Sin esto
@@ -828,3 +861,87 @@ def obtener_pedido(
         "conformidades": conformidades,
         "movimientos_almacen": movimientos_almacen,
     }
+
+
+def _movimientos_por_ordenes(
+    conn: Any, ano: int, nro_ordenes: list[Any]
+) -> list[dict[str, Any]]:
+    """Movimientos de almacen de las O/C dadas (recepcion y despacho).
+
+    Entradas ('I') por llave dura NRO_ORDEN; salidas ('S') via el pedido de
+    atencion ('1') que declara la O/C en su motivo (RE_OC). Es el equivalente
+    en caliente de los laterales `alm`/`pec` de v_bolsa_avance (a7e5f8c1d2b9).
+    """
+    ordenes = {int(o) for o in nro_ordenes if o is not None}
+    if not ordenes:
+        return []
+
+    out: list[dict[str, Any]] = []
+    binds = ", ".join(f":oc{i}" for i in range(len(ordenes)))
+    p: dict[str, Any] = {f"oc{i}": v for i, v in enumerate(sorted(ordenes))}
+    p.update({"ano": ano, "sec_ejec": settings.SEC_EJEC})
+
+    out.extend(
+        dict(r) for r in conn.execute(
+            text(
+                f"""
+                SELECT DISTINCT
+                    ma.NRO_MOVIMTO, ma.NRO_ORDEN, ma.TIPO_MOVIMTO,
+                    ma.TIPO_TRANSAC, ma.TIPO_PPTO, ma.FECHA_MOVIMTO,
+                    LTRIM(RTRIM(ma.NRO_GUIA)) AS nro_guia
+                FROM SIG_MOVIM_ALMACEN ma
+                WHERE ma.ANO_EJE = :ano AND ma.SEC_EJEC = :sec_ejec
+                  AND ma.TIPO_MOVIMTO = 'I' AND ma.TIPO_TRANSAC = 1
+                  AND ma.NRO_ORDEN IN ({binds})
+                """
+            ),
+            p,
+        ).mappings().all()
+    )
+
+    # Pedidos de atencion que declaran alguna de estas O/C. El parseo del
+    # motivo se hace en Python (regex validado), no en T-SQL.
+    atenciones = conn.execute(
+        text(
+            """
+            SELECT NRO_PEDIDO, CAST(MOTIVO_PEDIDO AS VARCHAR(300)) AS MOTIVO
+            FROM SIG_PEDIDOS
+            WHERE ANO_EJE = :ano AND SEC_EJEC = :sec_ejec
+              AND TIPO_BIEN = 'B' AND TIPO_PEDIDO = '1'
+            """
+        ),
+        {"ano": ano, "sec_ejec": settings.SEC_EJEC},
+    ).mappings().all()
+    ped_atencion = sorted({
+        int(a["NRO_PEDIDO"])
+        for a in atenciones
+        if parsear_nro_oc(a["MOTIVO"]) in ordenes
+    })
+    if not ped_atencion:
+        return out
+
+    binds_pa = ", ".join(f":pa{i}" for i in range(len(ped_atencion)))
+    p2: dict[str, Any] = {f"pa{i}": v for i, v in enumerate(ped_atencion)}
+    p2.update({"ano": ano, "sec_ejec": settings.SEC_EJEC})
+    out.extend(
+        dict(r) for r in conn.execute(
+            text(
+                f"""
+                SELECT DISTINCT
+                    ma.NRO_MOVIMTO, ma.NRO_ORDEN, ma.TIPO_MOVIMTO,
+                    ma.TIPO_TRANSAC, ma.TIPO_PPTO, ma.FECHA_MOVIMTO,
+                    LTRIM(RTRIM(ma.NRO_GUIA)) AS nro_guia
+                FROM SIG_MOVIM_ALMACEN ma
+                INNER JOIN SIG_DETALLE_PEDIDOS dp
+                    ON dp.ANO_EJE = ma.ANO_EJE AND dp.SEC_EJEC = ma.SEC_EJEC
+                   AND dp.NRO_PECOSA = ma.NRO_MOVIMTO
+                WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
+                  AND dp.TIPO_BIEN = 'B' AND dp.TIPO_PEDIDO = '1'
+                  AND dp.NRO_PEDIDO IN ({binds_pa}) AND dp.NRO_PECOSA > 0
+                  AND ma.TIPO_MOVIMTO = 'S' AND ma.TIPO_TRANSAC = 1
+                """
+            ),
+            p2,
+        ).mappings().all()
+    )
+    return out
