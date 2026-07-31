@@ -704,16 +704,21 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         _add(ETAPA_DESPACHO_PECOSA, fecha_despacho, fecha_despacho is not None,
              "El almacen despacho el bien (PECOSA).", docs=pecosas)
 
-    # Devengado presupuestal: es del MEF (nivel meta), no de SIGA. Se muestra
-    # como confirmacion si la meta del pedido registra devengado en el MEF; la
-    # cifra exacta por orden no cruza (el clasificador SIGA no es 1:1 con SIAF),
-    # asi que aqui solo se marca "hay devengado en la meta" — el monto va en el
-    # bloque de expediente del detalle.
+    # Devengado presupuestal: es del MEF, pero a NIVEL META (sec_func), no por
+    # orden — el clasificador SIGA no cruza 1:1 con SIAF y EXPEDIENTE_SIAF de la
+    # conformidad viene NULL. Por eso el devengado MEF NO puede marcar por si
+    # solo esta etapa: casi toda meta tiene algo devengado y marcaria devengado
+    # a pedidos sin siquiera ejecucion (timeline incoherente: devengado [15]
+    # alcanzado con ejecucion [11] pendiente). La etapa se alcanza con la
+    # evidencia REAL de ejecucion del pedido (conformidad / entrada a almacen);
+    # el devengado MEF de la meta se muestra como confirmacion en el texto.
     dev_mef = float(ficha.get("devengado_mef") or 0)
-    _add(ETAPA_DEVENGADO, None, dev_mef > 0,
-         "La meta del pedido registra devengado en el MEF."
-         if dev_mef > 0
-         else "Devengado: proviene del MEF (a nivel de meta).")
+    _add(ETAPA_DEVENGADO, fecha_confor or fecha_ingreso, tiene_ejecucion,
+         "El gasto se devengo. La meta del pedido registra devengado en el MEF."
+         if (tiene_ejecucion and dev_mef > 0)
+         else "El gasto se devengo (ejecucion con conformidad)."
+         if tiene_ejecucion
+         else "Devengado: el monto autoritativo proviene del MEF.")
 
     fecha_cierre_final = (
         fecha_cierre_ord or (fecha_atenc if estado_pedido == "7" else None)
