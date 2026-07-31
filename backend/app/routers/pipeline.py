@@ -31,8 +31,14 @@ from app.schemas.pipeline import (
     ResolucionCreate,
     ResolucionResponse,
 )
+from app.jobs.siga_refresh import refrescar_pedido
 from app.security.deps import CurrentUser, get_current_user
-from app.services import auditoria_service, permisos_service, pipeline_service
+from app.services import (
+    auditoria_service,
+    permisos_service,
+    pipeline_service,
+    rate_limit,
+)
 
 pipeline_router = APIRouter(prefix="/interno/pipeline", tags=["interno-pipeline"])
 pedidos_router = APIRouter(prefix="/interno/pedidos", tags=["interno-pedidos"])
@@ -578,6 +584,47 @@ def revocar_ccmn(
     )
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@pedidos_router.post("/{nro_pedido}/{tipo_bien}/{tipo_pedido}/refrescar")
+def refrescar_desde_siga(
+    nro_pedido: int,
+    tipo_bien: str,
+    tipo_pedido: str,
+    ano: int | None = None,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Refresca UN pedido y su cadena desde SIGA (§01.3), sin esperar al ciclo.
+
+    Rate-limit por usuario (1 cada REFRESH_PUNTUAL_COOLDOWN_SEG). Valida el
+    alcance de CC igual que el detalle. Tras refrescar, la vista materializada
+    del kanban NO se recalcula aqui (es cara): el detalle ya lee de las tablas
+    base, asi que el usuario ve su cambio de inmediato.
+    """
+    if tipo_bien not in ("B", "S"):
+        raise HTTPException(status_code=400, detail="tipo_bien debe ser B o S")
+
+    ano_eje = ano or settings.ANO_VIGENTE
+    ctx = pipeline_repo.contexto_pedido_bolsa(
+        ano_eje, tipo_bien, tipo_pedido, nro_pedido
+    )
+    if ctx is None:
+        raise HTTPException(status_code=404, detail="pedido no encontrado")
+    _verificar_cc_permitido(user, ctx.get("centro_costo"))
+
+    if not rate_limit.permitir(
+        f"refresh_siga:{user.id}",
+        max_hits=1,
+        ventana_seg=settings.REFRESH_PUNTUAL_COOLDOWN_SEG,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"espera {settings.REFRESH_PUNTUAL_COOLDOWN_SEG}s entre refrescos",
+        )
+
+    r = refrescar_pedido(ano_eje, tipo_bien, tipo_pedido, nro_pedido)
+    return {"refrescado": True, "tablas": r.tablas, "total": r.total}
 
 
 @alertas_router.get("/pedidos-estancados", response_model=list[PedidoCard])

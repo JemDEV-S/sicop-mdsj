@@ -92,21 +92,23 @@ ETAPA_A_NUMERO: dict[str, int] = {
 }
 
 # Etiquetas humanas para el UI (evita duplicar strings en el front).
+# Nombres en lenguaje del funcionario (no jerga SIGA). Fuente unica: la usan
+# el kanban, el detalle del pedido y los reportes. Cambiar aqui cambia todo.
 ETAPA_A_LABEL: dict[str, str] = {
     ETAPA_PEDIDO_REGISTRADO:  "Pedido registrado",
-    ETAPA_PEDIDO_APROBADO:    "Aprobacion pedido",
-    ETAPA_CUADRO_NECESIDAD:   "Cuadro necesidad",
-    ETAPA_PUENTE_PAAC:        "Puente pedido<->PAAC",
-    ETAPA_CCMN:               "CCMN / EM (CVR)",
+    ETAPA_PEDIDO_APROBADO:    "Pedido aprobado",
+    ETAPA_CUADRO_NECESIDAD:   "Cuadro de necesidades",
+    ETAPA_PUENTE_PAAC:        "En programacion anual",
+    ETAPA_CCMN:               "Estudio de mercado",
     ETAPA_COTIZACION:         "Cotizacion",
-    ETAPA_CUADRO_ADQUISICION: "Cuadro adquisicion",
-    ETAPA_CERTIFICACION:      "Certificacion (CCP)",
+    ETAPA_CUADRO_ADQUISICION: "Cuadro de adquisicion",
+    ETAPA_CERTIFICACION:      "Certificacion presupuestal",
     ETAPA_ORDEN_EMITIDA:      "Orden emitida",
-    ETAPA_COMPROMISO_SIAF:    "Compromiso / envio SIAF",
+    ETAPA_COMPROMISO_SIAF:    "Compromiso (SIAF)",
     ETAPA_EJECUCION:          "Ejecucion",
-    ETAPA_RECEPCION_KARDEX:   "Recepcion kardex",
+    ETAPA_RECEPCION_KARDEX:   "Recepcion en almacen",
     ETAPA_PEDIDO_INTERNO:     "Pedido interno",
-    ETAPA_DESPACHO_PECOSA:    "Despacho / pecosa",
+    ETAPA_DESPACHO_PECOSA:    "Despacho (PECOSA)",
     ETAPA_DEVENGADO:          "Devengado",
     ETAPA_CIERRE:             "Cierre",
 }
@@ -195,6 +197,72 @@ CONFIANZA_A_ESTADO: dict[str, str] = {
 }
 
 
+# ─── Alertas v2 (Guia Pipeline v2 §02.4) ─────────────────────────────────
+#
+# Principio: una alerta necesita EVIDENCIA y FECHA. El sistema solo alarma en
+# rojo cuando puede probar el problema. Lo inferido (puente sin resolver) es
+# ambar/info, nunca rojo.
+
+TipoAlerta = Literal[
+    "estancado_real",     # etapa con fecha > umbral Y ninguna posterior (rojo)
+    "puente_pendiente",   # bolsa con avance pero puente sin resolver (ambar/info)
+    "conflicto_puente",   # fuente declara un CCMN fuera de los candidatos (ambar)
+    "cerrado_negativo",   # denegado/anulado con fecha (gris, terminal)
+    "sin_consolidar",     # aprobado hace > umbral sin bolsa (ambar)
+    "desfase_devengado",  # comprometido hace > umbral y devengado MEF = 0 (ambar)
+]
+
+# Severidad -> color de la UI. La semantica de color es unica en todo el modulo
+# (§04): rojo solo estancado_real; el resto ambar/gris.
+ALERTA_SEVERIDAD: dict[str, str] = {
+    "estancado_real":    "rojo",
+    "puente_pendiente":  "ambar",
+    "conflicto_puente":  "ambar",
+    "cerrado_negativo":  "gris",
+    "sin_consolidar":    "ambar",
+    "desfase_devengado": "ambar",
+}
+
+
+class Alerta(BaseModel):
+    """Una advertencia con su evidencia y fecha (§02.4). Sin dato cierto, no hay alerta."""
+    tipo: TipoAlerta
+    severidad: Literal["rojo", "ambar", "gris"]
+    evidencia: str                    # texto para el tooltip / aria-label
+    desde: date | None = None         # fecha que sustenta la alerta
+
+
+class Identificadores(BaseModel):
+    """Los 3 IDs principales, visibles en toda vista (§00 principio 2)."""
+    pedido: str                       # "232-2026/S"
+    orden: str | None = None          # "O/S 232" — null si el puente no resuelve
+    exp_siaf: int | None = None
+    ccp_siaf: int | None = None
+
+
+class OrdenBolsa(BaseModel):
+    nro_orden: int
+    fecha: date | None = None
+
+
+class AvanceBolsa(BaseModel):
+    """Avance DURO de la bolsa (cierto aunque el puente no resuelva, §02.1)."""
+    n_ordenes: int = 0
+    ordenes: list[OrdenBolsa] = []
+    max_etapa: str | None = None      # etapa mas avanzada alcanzada por la bolsa
+    max_etapa_label: str | None = None
+
+
+class Puente(BaseModel):
+    """Estado del puente pedido<->CCMN + avance de su bolsa."""
+    nivel: NivelConfianza | None = None
+    nivel_label: str | None = None
+    bolsa: int | None = None
+    candidatos: list[int] = []
+    ccmn_atribuido: int | None = None
+    avance_bolsa: AvanceBolsa = AvanceBolsa()
+
+
 # ─── Tarjeta del pedido (kanban) ──────────────────────────────────────────
 
 class PedidoCard(BaseModel):
@@ -222,36 +290,20 @@ class PedidoCard(BaseModel):
     macrofase: Macrofase
     macrofase_label: str
 
-    # Flags de evidencia — utiles para debug y para pintar el timeline en detalle.
-    tiene_cuadro_neces: int = 0
-    tiene_puente_paac: int = 0
-    tiene_ccmn: int = 0
-    tiene_cotizacion: int = 0
-    tiene_cuadro_adq: int = 0
-    tiene_certificacion: int = 0
-    tiene_orden: int = 0
-    tiene_compromiso: int = 0
-    tiene_ejecucion: int = 0
-    tiene_kardex: int = 0
-    tiene_pedido_interno: int = 0
-    tiene_pecosa: int = 0
-    tiene_devengado: int = 0
-    tiene_cierre: int = 0
+    # ─── v2 ───────────────────────────────────────────────────────────
+    # Los 3 identificadores principales, siempre presentes (§00 principio 2).
+    identificadores: Identificadores | None = None
+    # Fechas de TODAS las etapas alcanzadas (§02.3). La UI muestra "en X desde
+    # <fecha>", no solo "N dias".
+    fechas: dict[str, date] = {}
+    # Estado del puente + avance de la bolsa (cierto aunque el puente no resuelva).
+    puente: Puente | None = None
+    # Alerta v2: una sola, con evidencia y fecha. null = sin alerta (§02.4).
+    alerta: Alerta | None = None
+    # Frescura del snapshot (§01.4): ultimo sync OK. La UI lo muestra en el pie.
+    sincronizado_hasta: datetime | None = None
 
-    # Muestras: primer ID encontrado en cada tabla (para drill-down / tooltips).
-    nro_consolid_muestra: int | None = None      # CCMN
-    nro_est_mdo_muestra: int | None = None       # EM/CVR
-    nro_orden_muestra: int | None = None
-    exp_siaf_muestra: int | None = None
-    exp_siga_muestra: int | None = None
-    sec_cuadro_muestra: int | None = None
-    nro_certifica_muestra: int | None = None
-    nro_certifica_siaf_muestra: int | None = None
-    match_metodo: str | None = None
-
-    # Cascada de confianza del match pedido <-> CCMN (§4 del doc). El frontend
-    # debe pintar `estado_programacion` con color propio: `grupo` es avance de
-    # OTROS pedidos de la bolsa y hoy se ve como un verde falso.
+    # Cascada de confianza (compatibilidad; el frontend v2 usa `puente`).
     n_candidatos_ccmn: int = 0
     confianza_ccmn: NivelConfianza | None = None
     confianza_ccmn_label: str | None = None
@@ -259,6 +311,8 @@ class PedidoCard(BaseModel):
     ccmn_atribuido: int | None = None
 
     dias_en_etapa: int | None = None
+    # `estancado` ahora significa estancado_real (rojo). Los demas casos van en
+    # `alerta` con su severidad — un pedido con puente_pendiente NO esta estancado.
     estancado: bool = False
 
     model_config = {"populate_by_name": True}

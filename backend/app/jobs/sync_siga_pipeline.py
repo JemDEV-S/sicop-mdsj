@@ -191,6 +191,28 @@ def _sincronizar_tabla(
     return len(filas)
 
 
+def _refrescar_vista(engine: Any) -> None:
+    """REFRESH de la vista materializada del kanban tras un sync.
+
+    CONCURRENTLY exige indice unico (existe) y no bloquea lecturas. Si falla
+    (p. ej. primer refresh sin datos), cae a un refresh normal. El error no
+    aborta el sync: los datos ya estan en las tablas base.
+    """
+    try:
+        with engine.begin() as pg:
+            pg.execute(
+                text("REFRESH MATERIALIZED VIEW CONCURRENTLY siga.v_pipeline_pedido")
+            )
+    except Exception:
+        logger.warning("REFRESH CONCURRENTLY fallo; intentando refresh normal",
+                       exc_info=True)
+        try:
+            with engine.begin() as pg:
+                pg.execute(text("REFRESH MATERIALIZED VIEW siga.v_pipeline_pedido"))
+        except Exception:
+            logger.exception("REFRESH de la vista del pipeline fallo")
+
+
 def _correr(
     extractores: list[Extractor], ano: int, *, job_sufijo: str
 ) -> ResultadoSync:
@@ -213,6 +235,10 @@ def _correr(
                     n = _sincronizar_tabla(siga, pg, ext, ano)
                 resultado.tablas[ext.destino] = n
                 logger.info("sync siga.%s: %d filas", ext.destino, n)
+
+        # Al final de cada sync se refresca la vista materializada del kanban
+        # (§01.1). CONCURRENTLY para no bloquear las lecturas en curso.
+        _refrescar_vista(engine)
 
         with engine.begin() as pg:
             _registrar_fin(pg, sync_id, ok=True, n=resultado.total)

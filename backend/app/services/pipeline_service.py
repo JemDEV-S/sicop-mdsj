@@ -18,7 +18,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.repositories import pipeline_repo, resolucion_ccmn_repo
+from app.repositories import (
+    pipeline_read_repo,
+    pipeline_repo,
+    resolucion_ccmn_repo,
+)
+from app.services import pipeline_v2
 from app.schemas.pipeline import (
     CONFIANZA_A_ESTADO,
     CONFIANZA_A_LABEL,
@@ -385,10 +390,12 @@ def _aplicar_resoluciones_manuales(
         return
 
     for fila in filas:
+        # Acepta tanto las filas del snapshot (snake_case) como las de SIGA
+        # (UPPER) que aun consume el detalle.
         clave = (
-            str(fila.get("TIPO_BIEN") or "").strip(),
-            str(fila.get("TIPO_PEDIDO") or "").strip(),
-            int(fila["NRO_PEDIDO"]),
+            str(fila.get("tipo_bien") or fila.get("TIPO_BIEN") or "").strip(),
+            str(fila.get("tipo_pedido") or fila.get("TIPO_PEDIDO") or "").strip(),
+            int(fila.get("nro_pedido") or fila["NRO_PEDIDO"]),
         )
         ccmns = activas.get(clave)
         if not ccmns:
@@ -403,20 +410,41 @@ def _aplicar_resoluciones_manuales(
 # ─── API publica del servicio ─────────────────────────────────────────────
 
 
+def _sincronizado_hasta(db: Session) -> datetime | None:
+    """Ultimo sync SIGA exitoso (para la frescura de la UI, §01.4)."""
+    row = db.execute(
+        text(
+            """
+            SELECT MAX(fin) FROM logs.sincronizacion
+             WHERE job LIKE 'siga_pipeline:%' AND estado = 'exito'
+            """
+        )
+    ).first()
+    return row[0] if row and row[0] else None
+
+
 def clasificar_pedidos(
     db: Session, *, ano: int, centros: list[str] | None
 ) -> list[dict[str, Any]]:
-    """Devuelve la lista plana de pedidos clasificados a etapa + macrofase,
-    ya enriquecidos con dias_en_etapa y estancado, y renombrados a snake_case.
+    """Lista plana de cards v2 desde el snapshot (vista materializada).
+
+    Guia Pipeline v2 §02: etapa por fecha cierta, avance de bolsa siempre
+    visible, alertas honestas. Lee de Postgres (pipeline_read_repo), no de SIGA.
     """
-    raw = pipeline_repo.pipeline_pedidos_raw(ano, centros)
-    _aplicar_resoluciones_manuales(db, raw, ano=ano)
+    filas = pipeline_read_repo.pipeline_pedidos(db, ano, centros)
+    _aplicar_resoluciones_manuales(db, filas, ano=ano)
     dias_fallback, por_macrofase = _cargar_umbrales(db)
     hoy = date.today()
-    return [
-        _renombrar(_enriquecer(f, hoy, dias_fallback, por_macrofase))
-        for f in raw
-    ]
+    sinc = _sincronizado_hasta(db)
+
+    cards: list[dict[str, Any]] = []
+    for f in filas:
+        confianza = confianza_match(f)
+        etapa, _fecha = pipeline_v2.clasificar_etapa(f, confianza)
+        macrofase = ETAPA_A_MACROFASE[etapa]
+        umbral = _umbral_para(macrofase, dias_fallback, por_macrofase)
+        cards.append(pipeline_v2.construir_card(f, confianza, hoy, umbral, sinc))
+    return cards
 
 
 def kanban(
@@ -579,9 +607,26 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
     )
     tiene_orden = bool(ordenes)
     tiene_certif = bool(certificaciones)
-    tiene_cuadro_adq = bool(cuadros)
+
+    # Etapas 4-7: presencia por la cadena del CCMN (bolsa -> CCMN -> PAAC ->
+    # cotizacion -> cuadro adq.), no por `cuadros`/`certificaciones`, que solo
+    # existen si ya hay orden. Un pedido detenido en el estudio de mercado
+    # tiene CCMN pero no orden: con el proxy viejo se veia en "cuadro
+    # necesidad" (caso 311/S). Los flags vienen del repo (`_flags_programacion`).
+    tiene_puente_paac = bool(ficha.get("tiene_puente_paac"))
+    tiene_ccmn_prog = bool(ficha.get("tiene_ccmn"))
+    tiene_cotizacion = bool(ficha.get("tiene_cotizacion"))
+    # El cuadro de adquisicion puede verse por la cadena del CCMN o por la
+    # orden ya emitida; cualquiera de las dos cuenta.
+    tiene_cuadro_adq = bool(ficha.get("tiene_cuadro_adq")) or bool(cuadros)
+    # Compromiso: la interfase al SIAF (FECHA_INTERFASE) es la senal que usa el
+    # kanban. El compromiso se hizo aunque SIAF aun no devuelva FECHA_SIAF
+    # (caso 1005/S). Se toma cualquiera de las dos para que detalle y kanban
+    # coincidan; sin FECHA_INTERFASE el detalle subcontaba la etapa 10.
     tiene_compromiso = any(
-        _to_dt(e.get("FECHA_SIAF") or e.get("fecha_siaf")) for e in expedientes
+        _to_dt(e.get("FECHA_INTERFASE") or e.get("fecha_interfase")
+               or e.get("FECHA_SIAF") or e.get("fecha_siaf"))
+        for e in expedientes
     )
     tiene_ejecucion = bool(conformidades) if not es_bien else bool(fecha_ingreso)
     tiene_cierre = estado_pedido == "7"
@@ -708,49 +753,62 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
     pecosas = _docs(*[
         ("PECOSA", i.get("NRO_PECOSA") or i.get("nro_pecosa")) for i in items
     ])
+    # Estudio de mercado: su numero identifica la etapa 5 cuando el pedido llego
+    # ahi sin tener aun orden. Sale de la cadena del CCMN (`_flags_programacion`).
+    # El CCMN es el "cuadro consolidado" (NRO_CONSOLID), distinto de la bolsa
+    # (SEC_CUA_MOD_SAL) que se muestra en "Cuadro de necesidades" (etapa 3).
+    # Etiquetarlos distinto evita que dos numeros lean como lo mismo.
+    docs_estudio = _docs(
+        ("Cuadro consolidado", ccmn),
+        ("Estudio de mercado", ficha.get("nro_est_mdo")),
+    )
 
+    # El `detalle` de cada etapa es lenguaje del funcionario: explica QUE paso,
+    # no de que tabla de SIGA sale (eso vivia aqui antes y no le servia a nadie
+    # -- el numero del documento, que si sirve, va en `docs`).
     _add(ETAPA_PEDIDO_REGISTRADO, fecha_pedido, fecha_pedido is not None,
-         "Pedido registrado en SIG_PEDIDOS",
+         "El area solicitante registro el pedido.",
          docs=_docs(("Pedido", nro_pedido_txt)))
     _add(ETAPA_PEDIDO_APROBADO, fecha_aprob,
          fecha_aprob is not None or estado_pedido in ("1", "7"),
-         "SIG_PEDIDOS.ESTADO='1' + FECHA_APROB")
+         "El pedido fue aprobado.")
     _add(ETAPA_CUADRO_NECESIDAD, None, tiene_cuadro_neces,
-         "SIG_DETALLE_PEDIDOS.SEC_CUA_MOD_SAL presente",
+         "La necesidad se incluyo en un cuadro de necesidades.",
          docs=_docs(("Cuadro necesidades", bolsa)))
-    # Etapas 4-7: solo observables a traves del CCMN -> estado por cascada.
-    _add(ETAPA_PUENTE_PAAC, None, tiene_cuadro_adq or tiene_certif,
-         "SIG_CUADRO_MODIFICADO_CMN", via_ccmn=True,
-         docs=_docs(("CCMN", ccmn)))
-    _add(ETAPA_CCMN, None, tiene_cuadro_adq or tiene_certif,
-         "SIG_PAAC_CONSOLIDADO", via_ccmn=True,
-         docs=_docs(("CCMN", ccmn)))
-    _add(ETAPA_COTIZACION, None, tiene_cuadro_adq,
-         "SIG_SOLICITUD_COTIZACION", via_ccmn=True,
-         docs=_docs(("CCMN", ccmn)))
+    # Etapas 4-7: se ven por la cadena del CCMN -> estado por la cascada.
+    _add(ETAPA_PUENTE_PAAC, None, tiene_puente_paac,
+         "La necesidad entro a la programacion anual (PAAC).", via_ccmn=True,
+         docs=_docs(("Cuadro consolidado", ccmn)))
+    _add(ETAPA_CCMN, None, tiene_ccmn_prog,
+         "Se hizo el estudio de mercado del requerimiento.", via_ccmn=True,
+         docs=docs_estudio)
+    _add(ETAPA_COTIZACION, None, tiene_cotizacion,
+         "Se solicitaron cotizaciones a proveedores.", via_ccmn=True,
+         docs=_docs(("Cuadro consolidado", ccmn)))
     _add(ETAPA_CUADRO_ADQUISICION, fecha_cuadro, tiene_cuadro_adq,
-         "SIG_CUADRO_ADQUISICION", via_ccmn=True, docs=docs_cuadro)
+         "Se elaboro el cuadro de adquisicion.", via_ccmn=True, docs=docs_cuadro)
     _add(ETAPA_CERTIFICACION, fecha_certif, tiene_certif,
-         "SIG_CERTIFICACION (CCP SIAF)", docs=docs_cert)
+         "Se certifico el presupuesto (CCP).", docs=docs_cert)
     _add(ETAPA_ORDEN_EMITIDA, fecha_orden, tiene_orden,
-         "SIG_ORDEN_ADQUISICION", docs=docs_orden)
+         "Se emitio la orden de compra o de servicio.", docs=docs_orden)
     _add(ETAPA_COMPROMISO_SIAF, fecha_exp, tiene_compromiso,
-         "SIG_EXP_SIGA_DOCU.FECHA_INTERFASE", docs=docs_exp)
+         "El gasto se comprometio en el SIAF.", docs=docs_exp)
     _add(ETAPA_EJECUCION, fecha_confor or fecha_ingreso, tiene_ejecucion,
-         "Servicios: SIG_MOVIM_CONFOR_SERVICIO · Bienes: SIG_MOVIM_ALMACEN (I,1)",
+         "El bien o servicio se recibio con conformidad."
+         if not es_bien else "El bien ingreso a almacen.",
          docs=docs_orden)
 
     if es_bien:
         _add(ETAPA_RECEPCION_KARDEX, fecha_kardex, fecha_kardex is not None,
-             "SIG_MOVIM_ALMACEN (R,1)")
+             "El bien se registro en el kardex de almacen.")
         _add(ETAPA_PEDIDO_INTERNO, None, False,
-             "Pedido TIPO=1 posterior con misma meta+CC (por composite)")
+             "Pedido interno para retirar el bien de almacen.")
         _add(ETAPA_DESPACHO_PECOSA, fecha_despacho, fecha_despacho is not None,
-             "SIG_MOVIM_ALMACEN (S,1) + NRO_PECOSA", docs=pecosas)
+             "El almacen despacho el bien (PECOSA).", docs=pecosas)
 
     _add(ETAPA_DEVENGADO, None, False,
-         "Devengado consolidado — proviene de SIAF (Fix #2 pendiente)")
+         "Devengado: proviene del SIAF (pendiente de integrar).")
     _add(ETAPA_CIERRE, fecha_atenc if tiene_cierre else None, tiene_cierre,
-         "SIG_PEDIDOS.ESTADO='7' o SIG_SEGUIMIENTO tipo=19")
+         "El pedido fue atendido y cerrado.")
 
     return hitos
