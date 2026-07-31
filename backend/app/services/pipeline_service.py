@@ -18,15 +18,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.repositories import (
-    pipeline_read_repo,
-    pipeline_repo,
-    resolucion_ccmn_repo,
-)
+from app.repositories import pipeline_read_repo, resolucion_ccmn_repo
 from app.services import pipeline_v2
 from app.schemas.pipeline import (
     CONFIANZA_A_ESTADO,
-    CONFIANZA_A_LABEL,
     ESTADOS_ALCANZADOS,
     ETAPA_A_LABEL,
     ETAPA_A_MACROFASE,
@@ -50,7 +45,6 @@ from app.schemas.pipeline import (
     ETAPAS_ORDEN,
     MACROFASE_A_LABEL,
     MACROFASES,
-    Macrofase,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,211 +146,6 @@ def confianza_match(fila: dict[str, Any]) -> str:
     return "ambiguo"
 
 
-def estado_etapa_programacion(fila: dict[str, Any]) -> str:
-    """Estado de las etapas 4-7, que solo son observables a traves del CCMN."""
-    return CONFIANZA_A_ESTADO.get(confianza_match(fila), "sin_dato")
-
-
-# ─── Clasificacion pedido -> etapa maxima alcanzada ───────────────────────
-#
-# Se recorre en orden inverso (de la ultima hacia la primera) y se toma la
-# etapa mas avanzada cuyo flag este en 1. Si ninguna, cae a pedido_registrado.
-
-def _etapa_maxima(fila: dict[str, Any]) -> str:
-    tipo_bien = fila.get("TIPO_BIEN") or fila.get("tipo_bien")
-    # Etapas 4-7: solo cuentan si el CCMN es atribuible a ESTE pedido. Con
-    # nivel `ambiguo`/`conflicto` el avance es del grupo (otros pedidos de la
-    # bolsa) y marcarlo aqui es el bug que pintaba verdes ajenos.
-    prog_atribuible = estado_etapa_programacion(fila) in ESTADOS_ALCANZADOS
-
-    # [16] Cierre
-    if fila.get("tiene_cierre"):
-        return ETAPA_CIERRE
-
-    # [15] Devengado (solo cuando SIGA lo marca — no cae en 0 para servicios
-    # porque el devengado real vendra de SIAF via Fix #2).
-    if fila.get("tiene_devengado"):
-        return ETAPA_DEVENGADO
-
-    # Bienes: [14] Despacho pecosa · [13] Pedido interno · [12] Kardex.
-    if tipo_bien == "B":
-        if fila.get("tiene_pecosa"):
-            return ETAPA_DESPACHO_PECOSA
-        if fila.get("tiene_pedido_interno"):
-            return ETAPA_PEDIDO_INTERNO
-        if fila.get("tiene_kardex"):
-            return ETAPA_RECEPCION_KARDEX
-
-    # [11] Ejecucion (S: conformidades · B: entrada almacen I,1)
-    if fila.get("tiene_ejecucion"):
-        return ETAPA_EJECUCION
-
-    # [10] Compromiso / envio SIAF
-    if fila.get("tiene_compromiso"):
-        return ETAPA_COMPROMISO_SIAF
-
-    # [9] Orden emitida
-    if fila.get("tiene_orden"):
-        return ETAPA_ORDEN_EMITIDA
-
-    # [8] Certificacion (CCP)
-    if fila.get("tiene_certificacion") or fila.get("tiene_ccp_siaf"):
-        return ETAPA_CERTIFICACION
-
-    # [7] Cuadro adquisicion
-    if fila.get("tiene_cuadro_adq") and prog_atribuible:
-        return ETAPA_CUADRO_ADQUISICION
-
-    # [6] Cotizacion
-    if fila.get("tiene_cotizacion") and prog_atribuible:
-        return ETAPA_COTIZACION
-
-    # [5] CCMN
-    if fila.get("tiene_ccmn") and prog_atribuible:
-        return ETAPA_CCMN
-
-    # [4] Puente pedido<->PAAC
-    if fila.get("tiene_puente_paac") and prog_atribuible:
-        return ETAPA_PUENTE_PAAC
-
-    # [3] Cuadro necesidad
-    if fila.get("tiene_cuadro_neces"):
-        return ETAPA_CUADRO_NECESIDAD
-
-    # [2] Aprobacion pedido
-    estado = fila.get("estado_pedido") or fila.get("ESTADO")
-    if str(estado).strip() == "1":
-        return ETAPA_PEDIDO_APROBADO
-
-    # [1] Pedido registrado
-    return ETAPA_PEDIDO_REGISTRADO
-
-
-def _fecha_etapa(fila: dict[str, Any]) -> date | None:
-    """Fecha del evento que llevó al pedido a su etapa actual.
-
-    Antes usaba solo las 3 fechas cabecera del pedido (FECHA_PEDIDO/APROB/ATENC),
-    lo que hacía que un pedido en 'certificacion' con solo FECHA_PEDIDO cayera
-    a esa fecha e inflara dias_en_etapa a "hace medio año" → ~1700 falsos
-    estancados en 2026. El repo ahora expone fecha_ccmn, fecha_certificacion,
-    fecha_orden, fecha_compromiso, fecha_ejecucion, fecha_pecosa, fecha_cierre_seg.
-    """
-    etapa = fila["etapa"]
-    if etapa == ETAPA_CIERRE:
-        return (fila.get("fecha_cierre_seg")
-                or fila.get("FECHA_ATENC")
-                or fila.get("fecha_ejecucion")
-                or fila.get("FECHA_APROB")
-                or fila.get("FECHA_PEDIDO"))
-    if etapa == ETAPA_DEVENGADO:
-        return (fila.get("fecha_ejecucion")
-                or fila.get("fecha_compromiso")
-                or fila.get("FECHA_ATENC")
-                or fila.get("FECHA_APROB")
-                or fila.get("FECHA_PEDIDO"))
-    if etapa == ETAPA_DESPACHO_PECOSA:
-        return fila.get("fecha_pecosa") or fila.get("fecha_ejecucion") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa in (ETAPA_EJECUCION, ETAPA_RECEPCION_KARDEX, ETAPA_PEDIDO_INTERNO):
-        return fila.get("fecha_ejecucion") or fila.get("fecha_compromiso") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa == ETAPA_COMPROMISO_SIAF:
-        return fila.get("fecha_compromiso") or fila.get("fecha_orden") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa == ETAPA_ORDEN_EMITIDA:
-        return fila.get("fecha_orden") or fila.get("fecha_certificacion") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa == ETAPA_CERTIFICACION:
-        return fila.get("fecha_certificacion") or fila.get("fecha_ccmn") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa == ETAPA_CUADRO_ADQUISICION:
-        return fila.get("fecha_cuadro_adq") or fila.get("fecha_ccmn") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa in (ETAPA_COTIZACION, ETAPA_CCMN, ETAPA_PUENTE_PAAC, ETAPA_CUADRO_NECESIDAD):
-        return fila.get("fecha_ccmn") or fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    if etapa == ETAPA_PEDIDO_APROBADO:
-        return fila.get("FECHA_APROB") or fila.get("FECHA_PEDIDO")
-    return fila.get("FECHA_PEDIDO")
-
-
-def _enriquecer(
-    fila: dict[str, Any],
-    hoy: date,
-    dias_fallback: int,
-    dias_por_macrofase: dict[str, int | None],
-) -> dict[str, Any]:
-    # Se resuelve ANTES de clasificar: las etapas 4-7 dependen del nivel.
-    confianza = confianza_match(fila)
-    fila["confianza_ccmn"] = confianza
-    fila["confianza_ccmn_label"] = CONFIANZA_A_LABEL.get(confianza, confianza)
-    fila["estado_programacion"] = CONFIANZA_A_ESTADO.get(confianza, "sin_dato")
-    # El CCMN atribuido solo se expone cuando la cascada lo resolvio; con
-    # `ambiguo`/`conflicto` no hay un CCMN de ESTE pedido que mostrar.
-    fila["ccmn_atribuido"] = (
-        fila.get("ccmn_manual")
-        or fila.get("ccmn_declarado_orden")
-        or fila.get("ccmn_declarado_cert")
-        or (fila.get("nro_consolid_muestra") if confianza == "unico" else None)
-    )
-
-    etapa = _etapa_maxima(fila)
-    macrofase = ETAPA_A_MACROFASE[etapa]
-    fila["etapa"] = etapa
-    fila["etapa_numero"] = ETAPA_A_NUMERO[etapa]
-    fila["etapa_label"] = ETAPA_A_LABEL[etapa]
-    fila["macrofase"] = macrofase
-    fila["macrofase_label"] = MACROFASE_A_LABEL[macrofase]
-
-    umbral_macro = _umbral_para(macrofase, dias_fallback, dias_por_macrofase)
-
-    f = _fecha_etapa(fila)
-    if f is not None:
-        if isinstance(f, datetime):
-            f = f.date()
-        dias = (hoy - f).days
-        fila["dias_en_etapa"] = dias
-        # Estancado sólo si (1) hay umbral definido para la macrofase, (2) la
-        # etapa no es terminal, y (3) los días superan el umbral.
-        fila["estancado"] = (
-            umbral_macro is not None
-            and dias > umbral_macro
-            and etapa not in ETAPAS_FINALES
-        )
-    else:
-        fila["dias_en_etapa"] = None
-        fila["estancado"] = False
-    return fila
-
-
-def _renombrar(fila: dict[str, Any]) -> dict[str, Any]:
-    """SQL Server -> snake_case Pydantic + coerce tipos."""
-    mapping = {
-        "ANO_EJE": "ano_eje",
-        "SEC_EJEC": "sec_ejec",
-        "NRO_PEDIDO": "nro_pedido",
-        "TIPO_BIEN": "tipo_bien",
-        "TIPO_PEDIDO": "tipo_pedido",
-        "CENTRO_COSTO": "centro_costo",
-        "FECHA_PEDIDO": "fecha_pedido",
-        "FECHA_APROB": "fecha_aprob",
-        "FECHA_ATENC": "fecha_atenc",
-    }
-    # Campos de trabajo de la cascada: ya se consumieron en _enriquecer y no
-    # son serializables (frozenset). `confianza_ccmn` es lo que sale al API.
-    internos = {"ccmn_candidatos", "ccmn_declarado_orden",
-                "ccmn_declarado_cert", "ccmn_manual", "ccmn_manual_todos"}
-
-    out: dict[str, Any] = {}
-    for k, v in fila.items():
-        if k in internos:
-            continue
-        nk = mapping.get(k, k)
-        if isinstance(v, datetime):
-            v = v.date()
-        elif nk == "sec_ejec" and v is not None:
-            v = str(v)
-        elif nk == "monto_total" and v is not None:
-            v = float(v)
-        out[nk] = v
-    cc = out.get("centro_costo")
-    if isinstance(cc, str):
-        out["centro_costo"] = cc.strip()
-    return out
-
 
 # ─── Resoluciones manuales (Postgres) sobre las filas de SIGA ────────────
 
@@ -437,12 +226,18 @@ def clasificar_pedidos(
     hoy = date.today()
     sinc = _sincronizado_hasta(db)
 
+    # Devengado MEF por meta (§02.6): una sola consulta agregada para todas las
+    # metas del lote, para la alerta desfase_devengado sin N+1.
+    sec_funcs = sorted({int(f["sec_func"]) for f in filas if f.get("sec_func")})
+    dev_mef = pipeline_read_repo.devengado_mef_por_sec_func(db, ano, sec_funcs)
+
     cards: list[dict[str, Any]] = []
     for f in filas:
         confianza = confianza_match(f)
         etapa, _fecha = pipeline_v2.clasificar_etapa(f, confianza)
         macrofase = ETAPA_A_MACROFASE[etapa]
         umbral = _umbral_para(macrofase, dias_fallback, por_macrofase)
+        f["devengado_mef"] = dev_mef.get(int(f["sec_func"]), 0.0) if f.get("sec_func") else 0.0
         cards.append(pipeline_v2.construir_card(f, confianza, hoy, umbral, sinc))
     return cards
 

@@ -256,6 +256,23 @@ def calcular_alerta(
                        f"aprobado hace {(hoy - fecha_etapa).days} dias sin entrar a un cuadro",
                        fecha_etapa)
 
+    # desfase_devengado: el gasto se comprometio hace > umbral pero la meta no
+    # tiene devengado MEF. Solo con puente resuelto (si no, el compromiso es de
+    # la bolsa, no atribuible a ESTE pedido). Ambar: es un desfase, no un bloqueo.
+    fecha_comp = _d(fila.get("bolsa_fecha_compromiso"))
+    if (
+        confianza in CONFIANZA_RESUELTA
+        and fecha_comp is not None
+        and umbral is not None
+        and (hoy - fecha_comp).days > umbral
+        and float(fila.get("devengado_mef") or 0) == 0
+        and etapa in (ETAPA_COMPROMISO_SIAF, ETAPA_ORDEN_EMITIDA)
+    ):
+        return _alerta("desfase_devengado",
+                       f"comprometido hace {(hoy - fecha_comp).days} dias y la "
+                       f"meta aun no registra devengado en el MEF",
+                       fecha_comp)
+
     # estancado_real: etapa con fecha > umbral Y ninguna posterior (ni del
     # pedido ni de su bolsa). Si la bolsa avanzo, NO es estancado (regla 1).
     if (

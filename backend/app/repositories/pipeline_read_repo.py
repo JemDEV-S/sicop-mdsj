@@ -147,3 +147,39 @@ def _adjuntar_puente(
     # la orden es la fuente unica. Se deja el campo por compatibilidad de cascada.
     fila["ccmn_declarado_cert"] = None
     fila["ccmn_manual"] = None
+
+
+# ─── Cruce MEF por celda (§02.6) ─────────────────────────────────────────
+#
+# El devengado presupuestal es SIEMPRE del MEF (principio 1), nunca de SIGA. La
+# celda es (SEC_FUNC, CLASIFICADOR); la llave 100% fiable que ambos lados
+# comparten es SEC_FUNC (la orden la trae de SIG_ORDEN_PRESUPUESTO). El
+# clasificador de SIGA ('2.3. 2  9. 1  1') no cruza 1:1 con el desglose SIAF,
+# asi que el cruce se hace a nivel meta (SEC_FUNC) y el EXP_SIAF/CCP se muestran
+# como identificadores para la verificacion manual en SIAF (como pide el doc).
+
+
+def devengado_mef_por_sec_func(
+    db: Session, ano: int, sec_funcs: list[int]
+) -> dict[int, float]:
+    """Devengado MEF acumulado del año por SEC_FUNC (suma de meses > 0).
+
+    Regla de agregacion SIAF (CLAUDE.md §5): la ejecucion son flujos mensuales,
+    el total anual es SUM de los meses > 0. PIA/PIM viven en mes 0 y no se suman.
+    """
+    if not sec_funcs:
+        return {}
+    from sqlalchemy import bindparam
+
+    rows = db.execute(
+        text(
+            """
+            SELECT sec_func, COALESCE(SUM(monto_devengado), 0) AS dev
+            FROM siaf.ejecucion_presupuestal
+            WHERE ano_eje = :ano AND mes_eje > 0 AND sec_func IN :sfs
+            GROUP BY sec_func
+            """
+        ).bindparams(bindparam("sfs", expanding=True)),
+        {"ano": ano, "sfs": sec_funcs},
+    ).all()
+    return {int(r[0]): float(r[1]) for r in rows}

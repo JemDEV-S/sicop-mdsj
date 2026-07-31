@@ -1,31 +1,20 @@
-"""Repositorio SIGA: pipeline de pedidos con 13 etapas para servicios y 16 para bienes.
+"""Repositorio SIGA de DETALLE del pipeline (lectura puntual de un documento).
 
-Ver:
-    - Docs/exploracion-siga-pipeline-extendido.md §16 (puente CMN, mapa final)
-    - Docs/exploracion-siga-pipeline-extendido.md §17 (pipeline bienes con pecosa)
+Guia Pipeline v2 §07: el kanban ya NO vive aqui. La query masiva de 12 CTE
+(`_SQL_KANBAN`) y el match composite por monto se retiraron: el kanban lee del
+snapshot (siga.v_pipeline_pedido via pipeline_read_repo), sin tocar SIGA en
+caliente. Lo que queda aqui consulta SIGA para UN pedido/bolsa a la vez
+(detalle, vista de bolsa, validacion al asociar) — costo bajo, pocas filas.
 
 Cadena estructural (FK real o composite verificado en 232/S y 005/B):
 
-    [1]  SIG_PEDIDOS.ESTADO='0'                                 -> pedido registrado
-    [2]  SIG_PEDIDOS.ESTADO='1' AND FECHA_APROB IS NOT NULL     -> pedido aprobado
     [3]  SIG_DETALLE_PEDIDOS.SEC_CUA_MOD_SAL IS NOT NULL        -> cuadro necesidad
     [4]  SIG_CUADRO_MODIFICADO_CMN (puente pedido<->PAAC)       -> CCMN candidato
     [5]  SIG_PAAC_CONSOLIDADO.NRO_CONSOLID                      -> CCMN / EM(CVR)
     [6]  SIG_SOLICITUD_COTIZACION.NRO_CONSOLID                  -> cotizacion
     [7]  SIG_CUADRO_ADQUISICION.NRO_CONS_PAAC                   -> cuadro adquisicion
     [8]  SIG_CERTIFICACION.NRO_CERTIFICA_SIAF IS NOT NULL       -> CCP
-    [9]  SIG_ORDEN_ADQUISICION matcheada                        -> orden emitida
-    [10] SIG_EXP_SIGA_DOCU.FECHA_INTERFASE IS NOT NULL          -> compromiso / SIAF
-    [11] S: SIG_MOVIM_CONFOR_SERVICIO   B: SIG_MOVIM_ALMACEN(I,1)  -> ejecucion
-    [12] SIG_MOVIM_ALMACEN(R,1)   solo B                        -> recepcion kardex
-    [13] SIG_PEDIDOS TIPO_PEDIDO=1 misma meta+cc     solo B     -> pedido interno
-    [14] SIG_MOVIM_ALMACEN(S,1) + NRO_PECOSA         solo B     -> despacho pecosa
-    [15] S: TOTAL_FACT_SOLES cubierto      B: EXP fase D        -> devengado
-    [16] SIG_PEDIDOS.ESTADO='7' OR SIG_SEGUIMIENTO t=19         -> cierre
-
-Match pedido<->orden (sin FK):
-    - Bienes con NRO_PECOSA>0: llave dura via SIG_MOVIM_ALMACEN.NRO_MOVIMTO
-    - Resto: composite (SEC_FUNC + CLASIFICADOR + item + VALOR_SOLES)
+    [9]  SIG_ORDEN_ADQUISICION (cadena dura CCMN)               -> orden emitida
 
 Filtro por CC del usuario (RN-04) via SIG_PEDIDOS.CENTRO_COSTO IN (...).
 """
@@ -40,12 +29,6 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.siga.conexion import get_connection
-
-
-def _bind_centros(centros: list[str]) -> tuple[str, dict[str, str]]:
-    binds = [f":cc{i}" for i in range(len(centros))]
-    params = {f"cc{i}": c for i, c in enumerate(centros)}
-    return ", ".join(binds), params
 
 
 # ─── Parseo de las fuentes declarativas ──────────────────────────────────
@@ -119,473 +102,6 @@ def _elegir_declarado(
     return next(iter(decl)) if len(decl) == 1 else None
 
 
-# ─── Query principal del kanban ──────────────────────────────────────────
-#
-# Emite UNA fila por pedido con flags de evidencia para cada una de las 16
-# etapas. La clasificacion final (etapa maxima alcanzada) la hace el service.
-# Cada rama es LEFT JOIN + agregada para evitar explosion de filas.
-
-_SQL_KANBAN = """
-WITH pedidos_base AS (
-    SELECT
-        p.ANO_EJE, p.SEC_EJEC, p.NRO_PEDIDO, p.TIPO_BIEN, p.TIPO_PEDIDO,
-        p.ESTADO                                              AS estado_pedido,
-        p.CENTRO_COSTO, p.sec_func,
-        p.FECHA_PEDIDO, p.FECHA_APROB, p.FECHA_ATENC,
-        LTRIM(RTRIM(CAST(p.MOTIVO_PEDIDO AS VARCHAR(500))))   AS motivo,
-        LTRIM(RTRIM(p.NOMBRE_EMPLEADO))                       AS solicitante,
-        LTRIM(RTRIM(p.FUENTE_FINANC))                         AS fuente_financ
-    FROM SIG_PEDIDOS p
-    WHERE p.ANO_EJE = :ano
-      AND p.SEC_EJEC = :sec_ejec
-      -- ESTADO=0 son "en proceso" reales (no borradores puros), ver §4.2 handoff.
-      AND p.ESTADO IN ('0', '1', '7')
-      {filtro_cc}
-),
--- Cada item del pedido con los atributos del composite (para match a orden).
-det AS (
-    SELECT
-        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO,
-        dp.SECUENCIA,
-        dp.NRO_PECOSA,
-        dp.NRO_ORDEN                                          AS nro_orden_declarado,
-        dp.SEC_CUA_MOD_SAL,
-        dp.ESTADO_CONFOR,
-        pb.sec_func                                           AS sec_func_item,
-        LTRIM(RTRIM(dp.CLASIFICADOR))                         AS clasificador,
-        LTRIM(RTRIM(dp.GRUPO_BIEN))                           AS grupo_bien,
-        LTRIM(RTRIM(dp.CLASE_BIEN))                           AS clase_bien,
-        LTRIM(RTRIM(dp.FAMILIA_BIEN))                         AS familia_bien,
-        LTRIM(RTRIM(dp.ITEM_BIEN))                            AS item_bien,
-        -- VALOR_TOTAL viene en 0.00 en el 100% de los servicios y el 55% de
-        -- los bienes (medido en 2026). El monto real es CANT_SOLICITADA *
-        -- PRECIO_UNIT. Importa para el match composite: con valor 0 se activa
-        -- el escape `d.valor_soles = 0`, que acepta CUALQUIER monto y hace que
-        -- un pedido matchee las ordenes de los otros pedidos de su bolsa.
-        CASE
-            WHEN COALESCE(dp.VALOR_TOTAL, 0) > 0 THEN dp.VALOR_TOTAL
-            ELSE COALESCE(dp.CANT_SOLICITADA, 0) * COALESCE(dp.PRECIO_UNIT, 0)
-        END                                                   AS valor_soles
-    FROM pedidos_base pb
-    LEFT JOIN SIG_DETALLE_PEDIDOS dp
-        ON dp.ANO_EJE = pb.ANO_EJE
-       AND dp.SEC_EJEC = pb.SEC_EJEC
-       AND dp.TIPO_BIEN = pb.TIPO_BIEN
-       AND dp.NRO_PEDIDO = pb.NRO_PEDIDO
-),
--- [3][4][5] Cadena programacion via puente SIG_CUADRO_MODIFICADO_CMN.
--- Un mismo SEC_CUA_MOD_SAL puede tener N CCMN (§16.1) -- agrupamos por pedido.
-programacion AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
-        MAX(CASE WHEN d.SEC_CUA_MOD_SAL IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cuadro_neces,
-        MAX(CASE WHEN cmn.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)  AS tiene_puente_paac,
-        MAX(CASE WHEN pc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)   AS tiene_ccmn,
-        MIN(pc.NRO_CONSOLID)                                            AS nro_consolid_muestra,
-        MIN(pc.NRO_EST_MDO)                                             AS nro_est_mdo_muestra,
-        MIN(pc.NRO_CERTIFICA)                                           AS nro_certifica_via_paac,
-        MAX(pc.FECHA_CONS)                                              AS fecha_ccmn,
-        -- Nº de CCMN candidatos de la bolsa. 1 => nivel `unico`; >1 => ambiguo
-        -- salvo que una fuente declarativa resuelva. Ver §4 del doc de refactorizacion.
-        COUNT(DISTINCT cmn.NRO_CONSOLID)                                AS n_candidatos_ccmn
-    FROM det d
-    LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
-        ON cmn.SEC_EJEC = d.SEC_EJEC
-       AND cmn.ANNO_EJEC = d.ANO_EJE
-       AND cmn.SEC_CUA_MOD_SAL = d.SEC_CUA_MOD_SAL
-       AND cmn.TIPO_BIEN = d.TIPO_BIEN
-    LEFT JOIN SIG_PAAC_CONSOLIDADO pc
-        ON pc.ANO_EJE = cmn.ANNO_EJEC
-       AND pc.SEC_EJEC = cmn.SEC_EJEC
-       AND pc.TIPO_CONSOLID = cmn.TIPO_CONSOLID
-       AND pc.NRO_CONSOLID = cmn.NRO_CONSOLID
-       AND pc.TIPO_BIEN = cmn.TIPO_BIEN
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
-),
--- Candidatos CCMN de la bolsa, como lista. La cascada necesita el conjunto
--- (no solo el conteo) para verificar que un CCMN declarado este entre ellos:
--- si declara uno de fuera es typo/desfase -> `conflicto`, no se acepta.
-candidatos AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
-        STUFF((
-            SELECT DISTINCT ',' + CAST(CAST(c2.NRO_CONSOLID AS INT) AS VARCHAR(12))
-            FROM det d2
-            JOIN SIG_CUADRO_MODIFICADO_CMN c2
-              ON c2.SEC_EJEC = d2.SEC_EJEC
-             AND c2.ANNO_EJEC = d2.ANO_EJE
-             AND c2.SEC_CUA_MOD_SAL = d2.SEC_CUA_MOD_SAL
-             AND c2.TIPO_BIEN = d2.TIPO_BIEN
-            WHERE d2.ANO_EJE = d.ANO_EJE AND d2.SEC_EJEC = d.SEC_EJEC
-              AND d2.NRO_PEDIDO = d.NRO_PEDIDO AND d2.TIPO_BIEN = d.TIPO_BIEN
-              AND d2.TIPO_PEDIDO = d.TIPO_PEDIDO
-            FOR XML PATH('')
-        ), 1, 1, '') AS ccmn_candidatos_csv
-    FROM det d
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
-),
--- [6] Cotizacion: hay solicitud para algun CCMN del pedido.
-cotizacion AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
-        MAX(CASE WHEN sc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cotizacion
-    FROM det d
-    LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
-        ON cmn.SEC_EJEC = d.SEC_EJEC
-       AND cmn.ANNO_EJEC = d.ANO_EJE
-       AND cmn.SEC_CUA_MOD_SAL = d.SEC_CUA_MOD_SAL
-       AND cmn.TIPO_BIEN = d.TIPO_BIEN
-    LEFT JOIN SIG_SOLICITUD_COTIZACION sc
-        ON sc.ANO_EJE = cmn.ANNO_EJEC
-       AND sc.SEC_EJEC = cmn.SEC_EJEC
-       AND sc.tipo_bien = cmn.TIPO_BIEN
-       AND sc.NRO_CONSOLID = cmn.NRO_CONSOLID
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
-),
--- [7] Cuadro de adquisicion: FK dura via NRO_CONS_PAAC.
-cuadro_adq AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
-        MAX(CASE WHEN ca.SEC_CUADRO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cuadro_adq,
-        MIN(ca.SEC_CUADRO)                                          AS sec_cuadro_muestra,
-        MAX(ca.FECHA_CUADRO)                                        AS fecha_cuadro_adq
-    FROM det d
-    LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
-        ON cmn.SEC_EJEC = d.SEC_EJEC
-       AND cmn.ANNO_EJEC = d.ANO_EJE
-       AND cmn.SEC_CUA_MOD_SAL = d.SEC_CUA_MOD_SAL
-       AND cmn.TIPO_BIEN = d.TIPO_BIEN
-    LEFT JOIN SIG_CUADRO_ADQUISICION ca
-        ON ca.ANO_EJE = cmn.ANNO_EJEC
-       AND ca.SEC_EJEC = cmn.SEC_EJEC
-       AND ca.TIPO_BIEN = cmn.TIPO_BIEN
-       AND ca.NRO_CONS_PAAC = cmn.NRO_CONSOLID
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
-),
--- [8] Certificacion CCP (SIGA -> SIAF). Se llega desde la cabecera PAAC.
-certificacion AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
-        MAX(CASE WHEN c.NRO_CERTIFICA IS NOT NULL THEN 1 ELSE 0 END)         AS tiene_certificacion,
-        MAX(CASE WHEN c.NRO_CERTIFICA_SIAF IS NOT NULL THEN 1 ELSE 0 END)    AS tiene_ccp_siaf,
-        MIN(c.NRO_CERTIFICA)                                                  AS nro_certifica_muestra,
-        MIN(c.NRO_CERTIFICA_SIAF)                                             AS nro_certifica_siaf_muestra,
-        MAX(c.FECHA)                                                          AS fecha_certificacion
-    FROM det d
-    LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
-        ON cmn.SEC_EJEC = d.SEC_EJEC
-       AND cmn.ANNO_EJEC = d.ANO_EJE
-       AND cmn.SEC_CUA_MOD_SAL = d.SEC_CUA_MOD_SAL
-       AND cmn.TIPO_BIEN = d.TIPO_BIEN
-    LEFT JOIN SIG_PAAC_CONSOLIDADO pc
-        ON pc.ANO_EJE = cmn.ANNO_EJEC
-       AND pc.SEC_EJEC = cmn.SEC_EJEC
-       AND pc.TIPO_CONSOLID = cmn.TIPO_CONSOLID
-       AND pc.NRO_CONSOLID = cmn.NRO_CONSOLID
-       AND pc.TIPO_BIEN = cmn.TIPO_BIEN
-    LEFT JOIN SIG_CERTIFICACION c
-        ON c.ANO_EJE = pc.ANO_EJE
-       AND c.SEC_EJEC = pc.SEC_EJEC
-       AND c.NRO_CERTIFICA = pc.NRO_CERTIFICA
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
-),
--- [9] Orden emitida: llave dura pecosa (bienes) o composite.
-match_pecosa AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA,
-        MIN(ma.NRO_ORDEN) AS nro_orden
-    FROM det d
-    INNER JOIN SIG_MOVIM_ALMACEN ma
-        ON ma.ANO_EJE = d.ANO_EJE
-       AND ma.SEC_EJEC = d.SEC_EJEC
-       AND ma.TIPO_BIEN = d.TIPO_BIEN
-       AND ma.NRO_MOVIMTO = d.NRO_PECOSA
-    WHERE d.TIPO_BIEN = 'B' AND d.NRO_PECOSA > 0
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA
-),
-match_composite AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA,
-        MIN(oi.NRO_ORDEN) AS nro_orden
-    FROM det d
-    LEFT JOIN match_pecosa mp
-        ON mp.ANO_EJE = d.ANO_EJE AND mp.SEC_EJEC = d.SEC_EJEC
-       AND mp.NRO_PEDIDO = d.NRO_PEDIDO AND mp.TIPO_BIEN = d.TIPO_BIEN
-       AND mp.TIPO_PEDIDO = d.TIPO_PEDIDO
-       AND mp.SECUENCIA = d.SECUENCIA
-    INNER JOIN SIG_ORDEN_ITEM oi
-        ON oi.ANO_EJE = d.ANO_EJE
-       AND oi.SEC_EJEC = d.SEC_EJEC
-       AND oi.TIPO_BIEN = d.TIPO_BIEN
-       AND LTRIM(RTRIM(oi.GRUPO_BIEN)) = d.grupo_bien
-       AND LTRIM(RTRIM(oi.CLASE_BIEN)) = d.clase_bien
-       AND LTRIM(RTRIM(oi.FAMILIA_BIEN)) = d.familia_bien
-       AND LTRIM(RTRIM(oi.ITEM_BIEN)) = d.item_bien
-    INNER JOIN SIG_ORDEN_ITEM_PPTO op
-        ON op.ANO_EJE = oi.ANO_EJE
-       AND op.SEC_EJEC = oi.SEC_EJEC
-       AND op.NRO_ORDEN = oi.NRO_ORDEN
-       AND op.TIPO_BIEN = oi.TIPO_BIEN
-       AND op.TIPO_PPTO = oi.TIPO_PPTO
-       AND op.SEC_ORDEN = oi.SEC_ORDEN
-       AND op.SEC_ITEM = oi.SEC_ITEM
-       AND op.SEC_FUNC = d.sec_func_item
-       AND LTRIM(RTRIM(op.CLASIFICADOR)) = d.clasificador
-       AND (d.valor_soles = 0 OR ROUND(op.VALOR_SOLES, 2) = ROUND(d.valor_soles, 2))
-    WHERE mp.nro_orden IS NULL
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA
-),
--- Orden final por item con marca de metodo.
-det_matched AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO, d.SECUENCIA,
-        d.NRO_PECOSA, d.ESTADO_CONFOR, d.valor_soles,
-        COALESCE(mp.nro_orden, mc.nro_orden, NULLIF(d.nro_orden_declarado, 0)) AS nro_orden_final,
-        CASE
-            WHEN mp.nro_orden IS NOT NULL             THEN 'pecosa'
-            WHEN mc.nro_orden IS NOT NULL             THEN 'composite'
-            WHEN d.nro_orden_declarado > 0            THEN 'declarado'
-            ELSE NULL
-        END AS match_metodo
-    FROM det d
-    LEFT JOIN match_pecosa mp
-        ON mp.ANO_EJE = d.ANO_EJE AND mp.SEC_EJEC = d.SEC_EJEC
-       AND mp.NRO_PEDIDO = d.NRO_PEDIDO AND mp.TIPO_BIEN = d.TIPO_BIEN
-       AND mp.TIPO_PEDIDO = d.TIPO_PEDIDO
-       AND mp.SECUENCIA = d.SECUENCIA
-    LEFT JOIN match_composite mc
-        ON mc.ANO_EJE = d.ANO_EJE AND mc.SEC_EJEC = d.SEC_EJEC
-       AND mc.NRO_PEDIDO = d.NRO_PEDIDO AND mc.TIPO_BIEN = d.TIPO_BIEN
-       AND mc.TIPO_PEDIDO = d.TIPO_PEDIDO
-       AND mc.SECUENCIA = d.SECUENCIA
-),
--- [9][10][15-bienes] Datos de la orden + expediente + interfase SIAF.
-orden_enriquecida AS (
-    SELECT
-        dm.ANO_EJE, dm.SEC_EJEC, dm.NRO_PEDIDO, dm.TIPO_BIEN, dm.TIPO_PEDIDO, dm.SECUENCIA,
-        dm.NRO_PECOSA, dm.ESTADO_CONFOR, dm.valor_soles,
-        dm.nro_orden_final, dm.match_metodo,
-        o.EXP_SIAF, o.EXP_SIGA, o.TOTAL_FACT_SOLES,
-        o.FECHA_ORDEN,
-        exd.FECHA_INTERFASE,
-        MAX(CASE WHEN LTRIM(RTRIM(exd.TIPO_OPERACION)) = 'DV'
-                 THEN 1 ELSE 0 END) OVER (
-            PARTITION BY dm.ANO_EJE, dm.SEC_EJEC, dm.NRO_PEDIDO, dm.TIPO_BIEN,
-                         dm.TIPO_PEDIDO
-        ) AS tiene_devengado_exp
-    FROM det_matched dm
-    LEFT JOIN SIG_ORDEN_ADQUISICION o
-        ON o.ANO_EJE = dm.ANO_EJE
-       AND o.SEC_EJEC = dm.SEC_EJEC
-       AND o.TIPO_BIEN = dm.TIPO_BIEN
-       AND o.NRO_ORDEN = dm.nro_orden_final
-    LEFT JOIN SIG_EXP_SIGA_DOCU exd
-        ON exd.ANO_EJE = o.ANO_EJE
-       AND exd.SEC_EJEC = o.SEC_EJEC
-       AND exd.EXP_SIGA = o.EXP_SIGA
-),
--- [11] Servicios: conformidades SIG_MOVIM_CONFOR_SERVICIO por orden.
---       Bienes: entrada al almacen (I,1) por orden (excluye kardex R).
-ejecucion AS (
-    SELECT
-        oe.ANO_EJE, oe.SEC_EJEC, oe.NRO_PEDIDO, oe.TIPO_BIEN, oe.TIPO_PEDIDO,
-        MAX(CASE
-            WHEN oe.TIPO_BIEN = 'S' AND cf.NRO_ORDEN IS NOT NULL      THEN 1
-            WHEN oe.TIPO_BIEN = 'B' AND ma_i.NRO_MOVIMTO IS NOT NULL  THEN 1
-            ELSE 0
-        END)                                                          AS tiene_ejecucion,
-        MAX(CASE WHEN ma_r.NRO_MOVIMTO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_kardex,
-        -- Suma facturada acumulada por orden (para umbral devengado servicio).
-        SUM(COALESCE(cf.n_confor, 0))                                 AS n_conformidades_srv,
-        -- Última fecha de movimiento (conformidad para S, entrada al almacén para B).
-        MAX(COALESCE(cf.ultima_fecha_confor, ma_i.FECHA_MOVIMTO))     AS fecha_ejecucion,
-        MAX(ma_r.FECHA_MOVIMTO)                                       AS fecha_kardex
-    FROM orden_enriquecida oe
-    LEFT JOIN (
-        SELECT ANO_ORDEN, SEC_EJEC, TIPO_BIEN, NRO_ORDEN,
-               COUNT(*)               AS n_confor,
-               MAX(FECHA_MOVIMTO)     AS ultima_fecha_confor
-        FROM SIG_MOVIM_CONFOR_SERVICIO
-        WHERE ANO_ORDEN = :ano AND SEC_EJEC = :sec_ejec
-        GROUP BY ANO_ORDEN, SEC_EJEC, TIPO_BIEN, NRO_ORDEN
-    ) cf ON cf.ANO_ORDEN = oe.ANO_EJE AND cf.SEC_EJEC = oe.SEC_EJEC
-        AND cf.TIPO_BIEN = oe.TIPO_BIEN AND cf.NRO_ORDEN = oe.nro_orden_final
-    LEFT JOIN SIG_MOVIM_ALMACEN ma_i
-        ON ma_i.ANO_EJE = oe.ANO_EJE
-       AND ma_i.SEC_EJEC = oe.SEC_EJEC
-       AND ma_i.TIPO_BIEN = oe.TIPO_BIEN
-       AND ma_i.NRO_ORDEN = oe.nro_orden_final
-       AND ma_i.TIPO_MOVIMTO = 'I' AND ma_i.TIPO_TRANSAC = 1
-    LEFT JOIN SIG_MOVIM_ALMACEN ma_r
-        ON ma_r.ANO_EJE = oe.ANO_EJE
-       AND ma_r.SEC_EJEC = oe.SEC_EJEC
-       AND ma_r.TIPO_BIEN = oe.TIPO_BIEN
-       AND ma_r.NRO_ORDEN = oe.nro_orden_final
-       AND ma_r.TIPO_MOVIMTO = 'R' AND ma_r.TIPO_TRANSAC = 1
-    GROUP BY oe.ANO_EJE, oe.SEC_EJEC, oe.NRO_PEDIDO, oe.TIPO_BIEN, oe.TIPO_PEDIDO
-),
--- [13] Pedido interno (TIPO_PEDIDO=1) que consume lo comprado.
---      Se detecta si existe otro pedido con misma meta+CC y fecha posterior.
-pedido_interno AS (
-    SELECT
-        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO,
-        MAX(CASE WHEN pi2.NRO_PEDIDO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_pedido_interno
-    FROM pedidos_base pb
-    LEFT JOIN SIG_PEDIDOS pi2
-        ON pi2.ANO_EJE = pb.ANO_EJE
-       AND pi2.SEC_EJEC = pb.SEC_EJEC
-       AND pi2.TIPO_BIEN = pb.TIPO_BIEN
-       AND pi2.TIPO_PEDIDO = '1'
-       AND pi2.sec_func = pb.sec_func
-       AND pi2.CENTRO_COSTO = pb.CENTRO_COSTO
-       AND pi2.FECHA_PEDIDO >= pb.FECHA_PEDIDO
-       AND pi2.NRO_PEDIDO <> pb.NRO_PEDIDO
-    WHERE pb.TIPO_BIEN = 'B' AND pb.TIPO_PEDIDO = '2'
-    GROUP BY pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO
-),
--- [14] Despacho / pecosa: SIG_MOVIM_ALMACEN (S,1) con NRO_PECOSA del detalle.
-pecosa AS (
-    SELECT
-        d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO,
-        MAX(CASE WHEN ma.NRO_MOVIMTO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_pecosa,
-        MAX(ma.FECHA_MOVIMTO)                                        AS fecha_pecosa
-    FROM det d
-    LEFT JOIN SIG_MOVIM_ALMACEN ma
-        ON ma.ANO_EJE = d.ANO_EJE
-       AND ma.SEC_EJEC = d.SEC_EJEC
-       AND ma.TIPO_BIEN = d.TIPO_BIEN
-       AND ma.NRO_MOVIMTO = d.NRO_PECOSA
-       AND ma.TIPO_MOVIMTO = 'S' AND ma.TIPO_TRANSAC = 1
-    WHERE d.TIPO_BIEN = 'B' AND d.NRO_PECOSA > 0
-    GROUP BY d.ANO_EJE, d.SEC_EJEC, d.NRO_PEDIDO, d.TIPO_BIEN, d.TIPO_PEDIDO
-),
--- [16] Cierre: ESTADO='7' o rastro en SIG_SEGUIMIENTO t=19.
-cierre AS (
-    SELECT
-        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO,
-        MAX(CASE WHEN pb.estado_pedido = '7' THEN 1
-                 WHEN sg.NRO_PEDIDO IS NOT NULL THEN 1 ELSE 0 END) AS tiene_cierre,
-        MAX(sg.FECHA_TRANSACCION)                                   AS fecha_cierre_seg
-    FROM pedidos_base pb
-    LEFT JOIN SIG_SEGUIMIENTO sg
-        ON sg.ANO_EJE = pb.ANO_EJE
-       AND sg.SEC_EJEC = pb.SEC_EJEC
-       AND sg.TIPO_BIEN = pb.TIPO_BIEN
-       AND sg.TIPO_TRANSACCION = 19
-       AND TRY_CAST(sg.NRO_PEDIDO AS INT) = pb.NRO_PEDIDO
-    GROUP BY pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO
-),
--- Agregacion por pedido de todas las evidencias + valor total.
-agrup AS (
-    SELECT
-        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO,
-        pb.estado_pedido, pb.CENTRO_COSTO, pb.sec_func,
-        pb.FECHA_PEDIDO, pb.FECHA_APROB, pb.FECHA_ATENC,
-        pb.motivo, pb.solicitante, pb.fuente_financ,
-        COALESCE(pg.tiene_cuadro_neces, 0)                    AS tiene_cuadro_neces,
-        COALESCE(pg.tiene_puente_paac, 0)                     AS tiene_puente_paac,
-        COALESCE(pg.tiene_ccmn, 0)                            AS tiene_ccmn,
-        COALESCE(cot.tiene_cotizacion, 0)                     AS tiene_cotizacion,
-        COALESCE(cad.tiene_cuadro_adq, 0)                     AS tiene_cuadro_adq,
-        COALESCE(cer.tiene_certificacion, 0)                  AS tiene_certificacion,
-        COALESCE(cer.tiene_ccp_siaf, 0)                       AS tiene_ccp_siaf,
-        MAX(CASE WHEN oe.nro_orden_final IS NOT NULL THEN 1 ELSE 0 END) AS tiene_orden,
-        MAX(CASE WHEN oe.FECHA_INTERFASE IS NOT NULL THEN 1 ELSE 0 END) AS tiene_compromiso,
-        COALESCE(ej.tiene_ejecucion, 0)                       AS tiene_ejecucion,
-        COALESCE(ej.tiene_kardex, 0)                          AS tiene_kardex,
-        COALESCE(pin.tiene_pedido_interno, 0)                 AS tiene_pedido_interno,
-        COALESCE(pec.tiene_pecosa, 0)                         AS tiene_pecosa,
-        -- Devengado: para bienes usamos EXP fase DV; para servicios,
-        -- cuando la sumatoria facturada cubre el TOTAL_FACT_SOLES de la orden.
-        MAX(CASE
-            WHEN pb.TIPO_BIEN = 'B' AND oe.tiene_devengado_exp = 1 THEN 1
-            WHEN pb.TIPO_BIEN = 'S' AND COALESCE(ej.n_conformidades_srv, 0) >= 1
-                 -- Sin datos de MNTO_FACT por conformidad, aproximamos con "hay
-                 -- al menos una conformidad" para ejecucion; el devengado real
-                 -- vendra del Fix #2 SIAF. Aqui no se marca todavia.
-                 THEN 0
-            ELSE 0
-        END)                                                  AS tiene_devengado,
-        COALESCE(cie.tiene_cierre, 0)                         AS tiene_cierre,
-        SUM(COALESCE(oe.valor_soles, 0))                      AS monto_total,
-        COUNT(oe.SECUENCIA)                                   AS items,
-        MIN(pg.nro_consolid_muestra)                          AS nro_consolid_muestra,
-        MIN(pg.nro_est_mdo_muestra)                           AS nro_est_mdo_muestra,
-        MAX(COALESCE(pg.n_candidatos_ccmn, 0))                AS n_candidatos_ccmn,
-        MAX(cnd.ccmn_candidatos_csv)                          AS ccmn_candidatos_csv,
-        MAX(oe.nro_orden_final)                               AS nro_orden_muestra,
-        MAX(oe.EXP_SIAF)                                      AS exp_siaf_muestra,
-        MAX(oe.EXP_SIGA)                                      AS exp_siga_muestra,
-        MIN(cad.sec_cuadro_muestra)                           AS sec_cuadro_muestra,
-        MIN(cer.nro_certifica_muestra)                        AS nro_certifica_muestra,
-        MIN(cer.nro_certifica_siaf_muestra)                   AS nro_certifica_siaf_muestra,
-        MAX(oe.match_metodo)                                  AS match_metodo,
-        -- Fechas por etapa (para calcular dias_en_etapa correctamente en el service).
-        MAX(pg.fecha_ccmn)                                    AS fecha_ccmn,
-        MAX(cad.fecha_cuadro_adq)                             AS fecha_cuadro_adq,
-        MAX(cer.fecha_certificacion)                          AS fecha_certificacion,
-        MAX(oe.FECHA_ORDEN)                                   AS fecha_orden,
-        MAX(oe.FECHA_INTERFASE)                               AS fecha_compromiso,
-        MAX(ej.fecha_ejecucion)                               AS fecha_ejecucion,
-        MAX(ej.fecha_kardex)                                  AS fecha_kardex,
-        MAX(pec.fecha_pecosa)                                 AS fecha_pecosa,
-        MAX(cie.fecha_cierre_seg)                             AS fecha_cierre_seg
-    FROM pedidos_base pb
-    LEFT JOIN programacion pg
-        ON pg.ANO_EJE = pb.ANO_EJE AND pg.SEC_EJEC = pb.SEC_EJEC
-       AND pg.NRO_PEDIDO = pb.NRO_PEDIDO AND pg.TIPO_BIEN = pb.TIPO_BIEN
-       AND pg.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN candidatos cnd
-        ON cnd.ANO_EJE = pb.ANO_EJE AND cnd.SEC_EJEC = pb.SEC_EJEC
-       AND cnd.NRO_PEDIDO = pb.NRO_PEDIDO AND cnd.TIPO_BIEN = pb.TIPO_BIEN
-       AND cnd.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN cotizacion cot
-        ON cot.ANO_EJE = pb.ANO_EJE AND cot.SEC_EJEC = pb.SEC_EJEC
-       AND cot.NRO_PEDIDO = pb.NRO_PEDIDO AND cot.TIPO_BIEN = pb.TIPO_BIEN
-       AND cot.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN cuadro_adq cad
-        ON cad.ANO_EJE = pb.ANO_EJE AND cad.SEC_EJEC = pb.SEC_EJEC
-       AND cad.NRO_PEDIDO = pb.NRO_PEDIDO AND cad.TIPO_BIEN = pb.TIPO_BIEN
-       AND cad.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN certificacion cer
-        ON cer.ANO_EJE = pb.ANO_EJE AND cer.SEC_EJEC = pb.SEC_EJEC
-       AND cer.NRO_PEDIDO = pb.NRO_PEDIDO AND cer.TIPO_BIEN = pb.TIPO_BIEN
-       AND cer.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN orden_enriquecida oe
-        ON oe.ANO_EJE = pb.ANO_EJE AND oe.SEC_EJEC = pb.SEC_EJEC
-       AND oe.NRO_PEDIDO = pb.NRO_PEDIDO AND oe.TIPO_BIEN = pb.TIPO_BIEN
-       AND oe.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN ejecucion ej
-        ON ej.ANO_EJE = pb.ANO_EJE AND ej.SEC_EJEC = pb.SEC_EJEC
-       AND ej.NRO_PEDIDO = pb.NRO_PEDIDO AND ej.TIPO_BIEN = pb.TIPO_BIEN
-       AND ej.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN pedido_interno pin
-        ON pin.ANO_EJE = pb.ANO_EJE AND pin.SEC_EJEC = pb.SEC_EJEC
-       AND pin.NRO_PEDIDO = pb.NRO_PEDIDO AND pin.TIPO_BIEN = pb.TIPO_BIEN
-       AND pin.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN pecosa pec
-        ON pec.ANO_EJE = pb.ANO_EJE AND pec.SEC_EJEC = pb.SEC_EJEC
-       AND pec.NRO_PEDIDO = pb.NRO_PEDIDO AND pec.TIPO_BIEN = pb.TIPO_BIEN
-       AND pec.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    LEFT JOIN cierre cie
-        ON cie.ANO_EJE = pb.ANO_EJE AND cie.SEC_EJEC = pb.SEC_EJEC
-       AND cie.NRO_PEDIDO = pb.NRO_PEDIDO AND cie.TIPO_BIEN = pb.TIPO_BIEN
-       AND cie.TIPO_PEDIDO = pb.TIPO_PEDIDO
-    GROUP BY
-        pb.ANO_EJE, pb.SEC_EJEC, pb.NRO_PEDIDO, pb.TIPO_BIEN, pb.TIPO_PEDIDO,
-        pb.estado_pedido, pb.CENTRO_COSTO, pb.sec_func,
-        pb.FECHA_PEDIDO, pb.FECHA_APROB, pb.FECHA_ATENC,
-        pb.motivo, pb.solicitante, pb.fuente_financ,
-        pg.tiene_cuadro_neces, pg.tiene_puente_paac, pg.tiene_ccmn,
-        cot.tiene_cotizacion, cad.tiene_cuadro_adq,
-        cer.tiene_certificacion, cer.tiene_ccp_siaf,
-        ej.tiene_ejecucion, ej.tiene_kardex,
-        pin.tiene_pedido_interno, pec.tiene_pecosa, cie.tiene_cierre
-)
-SELECT * FROM agrup
-ORDER BY FECHA_PEDIDO DESC
-"""
-
 
 # ─── Fuentes declarativas (§3.3) ─────────────────────────────────────────
 #
@@ -630,63 +146,6 @@ WHERE cd.ANO_EJE = :ano AND cd.SEC_EJEC = :sec_ejec
 """
 
 
-def pipeline_pedidos_raw(
-    ano: int,
-    centros: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Devuelve una lista de pedidos con los flags de evidencia de las 16 etapas.
-
-    La clasificacion a etapa maxima alcanzada + macrofase se hace en el
-    service (para poder testearlo sin BD).
-    """
-    if centros is not None and len(centros) == 0:
-        return []
-
-    params: dict[str, Any] = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
-
-    if centros is not None:
-        binds_sql, binds_params = _bind_centros(centros)
-        filtro_cc = f"AND p.CENTRO_COSTO IN ({binds_sql})"
-        params.update(binds_params)
-    else:
-        filtro_cc = ""
-
-    sql = _SQL_KANBAN.format(filtro_cc=filtro_cc)
-    p_decl = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
-
-    with get_connection() as conn:
-        rows = conn.execute(text(sql), params).mappings().all()
-        decl_orden = _agrupar_declaraciones(
-            conn.execute(text(_SQL_DECL_ORDEN), p_decl).mappings().all()
-        )
-        decl_cert = _agrupar_declaraciones(
-            conn.execute(text(_SQL_DECL_CERT), p_decl).mappings().all()
-        )
-
-    out: list[dict[str, Any]] = []
-    for r in rows:
-        fila = dict(r)
-        tipo_bien = (fila.get("TIPO_BIEN") or "").strip()
-        nro_pedido = int(fila["NRO_PEDIDO"])
-
-        csv = fila.pop("ccmn_candidatos_csv", None)
-        candidatos = frozenset(
-            int(x) for x in csv.split(",") if x.strip()
-        ) if csv else frozenset()
-
-        fila["ccmn_candidatos"] = candidatos
-        fila["ccmn_declarado_orden"] = _elegir_declarado(
-            decl_orden, tipo_bien, nro_pedido, candidatos
-        )
-        fila["ccmn_declarado_cert"] = _elegir_declarado(
-            decl_cert, tipo_bien, nro_pedido, candidatos
-        )
-        # `ccmn_manual` vive en Postgres, no en SIGA: lo inyecta el service
-        # (aqui solo se deja el campo para que la cascada lo encuentre).
-        fila["ccmn_manual"] = None
-        out.append(fila)
-
-    return out
 
 
 # ─── Vista de bolsa (SEC_CUA_MOD_SAL) ────────────────────────────────────
@@ -884,6 +343,84 @@ def obtener_bolsa(
 # ─── Detalle de un pedido con la cadena completa ─────────────────────────
 
 
+def _flags_programacion(
+    ano: int, tipo_bien: str, tipo_pedido: str, nro_pedido: int
+) -> dict[str, Any]:
+    """Presencia de las etapas 4-7 mirando la cadena del CCMN hacia arriba.
+
+    Mismos joins que los CTE del kanban (bolsa -> CCMN -> PAAC -> cotizacion ->
+    cuadro de adquisicion). Devuelve los flags que `construir_timeline` usa para
+    distinguir cada etapa, y `nro_est_mdo` / `nro_consolid` como identificadores
+    del estudio de mercado.
+
+    Sin esto el detalle solo veia la cadena hacia abajo desde la orden, y un
+    pedido detenido en el estudio de mercado se mostraba en "cuadro necesidad"
+    (caso 311/S).
+    """
+    params = {
+        "ano": ano,
+        "sec_ejec": settings.SEC_EJEC,
+        "tipo": tipo_bien,
+        "tipo_ped": tipo_pedido,
+        "nro": nro_pedido,
+    }
+    with get_connection() as conn:
+        fila = conn.execute(
+            text(
+                """
+                WITH det AS (
+                    SELECT DISTINCT dp.SEC_CUA_MOD_SAL, dp.TIPO_BIEN,
+                           dp.ANO_EJE, dp.SEC_EJEC
+                    FROM SIG_DETALLE_PEDIDOS dp
+                    WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
+                      AND dp.TIPO_BIEN = :tipo AND dp.TIPO_PEDIDO = :tipo_ped
+                      AND dp.NRO_PEDIDO = :nro
+                      AND dp.SEC_CUA_MOD_SAL IS NOT NULL
+                )
+                SELECT
+                    MAX(CASE WHEN cmn.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END) AS tiene_puente_paac,
+                    MAX(CASE WHEN pc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)  AS tiene_ccmn,
+                    MAX(CASE WHEN sc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)  AS tiene_cotizacion,
+                    MAX(CASE WHEN ca.SEC_CUADRO IS NOT NULL THEN 1 ELSE 0 END)    AS tiene_cuadro_adq,
+                    MIN(pc.NRO_CONSOLID)                                          AS nro_consolid,
+                    MIN(pc.NRO_EST_MDO)                                           AS nro_est_mdo,
+                    MIN(ca.SEC_CUADRO)                                            AS sec_cuadro_prog
+                FROM det d
+                LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
+                    ON cmn.SEC_EJEC = d.SEC_EJEC
+                   AND cmn.ANNO_EJEC = d.ANO_EJE
+                   AND cmn.SEC_CUA_MOD_SAL = d.SEC_CUA_MOD_SAL
+                   AND cmn.TIPO_BIEN = d.TIPO_BIEN
+                LEFT JOIN SIG_PAAC_CONSOLIDADO pc
+                    ON pc.ANO_EJE = cmn.ANNO_EJEC
+                   AND pc.SEC_EJEC = cmn.SEC_EJEC
+                   AND pc.TIPO_CONSOLID = cmn.TIPO_CONSOLID
+                   AND pc.NRO_CONSOLID = cmn.NRO_CONSOLID
+                   AND pc.TIPO_BIEN = cmn.TIPO_BIEN
+                LEFT JOIN SIG_SOLICITUD_COTIZACION sc
+                    ON sc.ANO_EJE = cmn.ANNO_EJEC
+                   AND sc.SEC_EJEC = cmn.SEC_EJEC
+                   AND sc.tipo_bien = cmn.TIPO_BIEN
+                   AND sc.NRO_CONSOLID = cmn.NRO_CONSOLID
+                LEFT JOIN SIG_CUADRO_ADQUISICION ca
+                    ON ca.ANO_EJE = cmn.ANNO_EJEC
+                   AND ca.SEC_EJEC = cmn.SEC_EJEC
+                   AND ca.TIPO_BIEN = cmn.TIPO_BIEN
+                   AND ca.NRO_CONS_PAAC = cmn.NRO_CONSOLID
+                """
+            ),
+            params,
+        ).mappings().first()
+
+    if fila is None:
+        return {
+            "tiene_puente_paac": 0, "tiene_ccmn": 0,
+            "tiene_cotizacion": 0, "tiene_cuadro_adq": 0,
+            "nro_consolid": None, "nro_est_mdo": None, "sec_cuadro_prog": None,
+        }
+    return dict(fila)
+
+
 def obtener_pedido(
     ano: int, nro_pedido: int, tipo_bien: str
 ) -> dict[str, Any] | None:
@@ -1020,10 +557,42 @@ def obtener_pedido(
                     SELECT DISTINCT nro_orden_declarado AS NRO_ORDEN
                     FROM det WHERE nro_orden_declarado > 0
                 ),
+                -- Cadena dura CCMN -> cuadro de adquisicion -> orden. FK real
+                -- de SIGA, no heuristica de monto. Solo se activa cuando la
+                -- bolsa tiene UN SOLO CCMN candidato (caso `unico`): ahi el
+                -- cuadro es de ESTE pedido con certeza, asi que no reintroduce
+                -- el fallo de §2 (mezcla ordenes en bolsas compartidas).
+                -- Recupera ordenes que el composite pierde cuando el monto
+                -- cambio tras cotizar (226/S: pidio 5600, la OC 97 salio 5500).
+                bolsa_unica AS (
+                    SELECT dp.SEC_CUA_MOD_SAL, MIN(cmn.NRO_CONSOLID) AS ccmn
+                    FROM SIG_DETALLE_PEDIDOS dp
+                    JOIN SIG_CUADRO_MODIFICADO_CMN cmn
+                        ON cmn.SEC_EJEC = dp.SEC_EJEC
+                       AND cmn.ANNO_EJEC = dp.ANO_EJE
+                       AND cmn.SEC_CUA_MOD_SAL = dp.SEC_CUA_MOD_SAL
+                       AND cmn.TIPO_BIEN = dp.TIPO_BIEN
+                    WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
+                      AND dp.TIPO_BIEN = :tipo AND dp.NRO_PEDIDO = :nro
+                      AND dp.SEC_CUA_MOD_SAL IS NOT NULL
+                    GROUP BY dp.SEC_CUA_MOD_SAL
+                    HAVING COUNT(DISTINCT cmn.NRO_CONSOLID) = 1
+                ),
+                cadena_ccmn AS (
+                    SELECT DISTINCT o.NRO_ORDEN
+                    FROM bolsa_unica b
+                    JOIN SIG_CUADRO_ADQUISICION ca
+                        ON ca.ANO_EJE = :ano AND ca.SEC_EJEC = :sec_ejec
+                       AND ca.TIPO_BIEN = :tipo AND ca.NRO_CONS_PAAC = b.ccmn
+                    JOIN SIG_ORDEN_ADQUISICION o
+                        ON o.ANO_EJE = :ano AND o.SEC_EJEC = :sec_ejec
+                       AND o.TIPO_BIEN = :tipo AND o.SEC_CUADRO = ca.SEC_CUADRO
+                ),
                 todas AS (
                     SELECT NRO_ORDEN, 'pecosa' AS metodo FROM pecosa
                     UNION SELECT NRO_ORDEN, 'composite' FROM composite
                     UNION SELECT NRO_ORDEN, 'declarado' FROM declarado
+                    UNION SELECT NRO_ORDEN, 'cadena_ccmn' FROM cadena_ccmn
                 )
                 SELECT
                     o.NRO_ORDEN, o.TIPO_BIEN,
@@ -1123,8 +692,25 @@ def obtener_pedido(
                         f"""
                         SELECT e.EXP_SIGA, e.TIPO_PPTO, e.TIPO_FASE,
                                e.EXP_SIAF, e.ESTADO_SIAF,
-                               e.FECHA_EXP_SIGA, e.FECHA_DOCUMENTO, e.FECHA_SIAF
+                               e.FECHA_EXP_SIGA, e.FECHA_DOCUMENTO, e.FECHA_SIAF,
+                               -- Fecha de interfase al SIAF (compromiso). Es la
+                               -- misma senal que usa el kanban: el compromiso se
+                               -- hizo aunque SIAF aun no devuelva EXP_SIAF /
+                               -- FECHA_SIAF (caso 1005/S). Sin esto el detalle
+                               -- subcuenta la etapa 10 respecto al kanban.
+                               doc.FECHA_INTERFASE
                         FROM SIG_EXP_SIGA e
+                        LEFT JOIN (
+                            SELECT ANO_EJE, SEC_EJEC, EXP_SIGA,
+                                   MIN(FECHA_INTERFASE) AS FECHA_INTERFASE
+                            FROM SIG_EXP_SIGA_DOCU
+                            WHERE ANO_EJE = :ano AND SEC_EJEC = :sec_ejec
+                              AND FECHA_INTERFASE IS NOT NULL
+                            GROUP BY ANO_EJE, SEC_EJEC, EXP_SIGA
+                        ) doc
+                            ON doc.ANO_EJE = e.ANO_EJE
+                           AND doc.SEC_EJEC = e.SEC_EJEC
+                           AND doc.EXP_SIGA = e.EXP_SIGA
                         WHERE e.ANO_EJE = :ano AND e.SEC_EJEC = :sec_ejec
                           AND e.EXP_SIGA IN ({binds})
                         ORDER BY e.EXP_SIGA
@@ -1197,8 +783,17 @@ def obtener_pedido(
     ctx = contexto_pedido_bolsa(ano, tipo_bien, tipo_pedido, nro_pedido) or {}
     candidatos = frozenset(ctx.get("candidatos") or ())
 
+    # Etapas 4-7 (programacion): solo se ven por la cadena del CCMN, y este
+    # `obtener_pedido` construye la cadena hacia abajo DESDE la orden. Un pedido
+    # que llego al estudio de mercado pero no tiene orden aun no traeria ninguna
+    # de estas etapas, y el detalle se cortaba en "cuadro de necesidad" aunque
+    # el estudio de mercado ya existiera (caso 311/S). Estos flags miran la
+    # cadena hacia ARRIBA, igual que el kanban, para que el detalle coincida.
+    prog = _flags_programacion(ano, tipo_bien, tipo_pedido, nro_pedido)
+
     return {
         **dict(cab),
+        **prog,
         "n_candidatos_ccmn": len(candidatos),
         "ccmn_candidatos": candidatos,
         "ccmn_declarado_orden": ctx.get("ccmn_declarado_orden"),

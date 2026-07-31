@@ -9,15 +9,7 @@ Ref: Docs/diagnostico-2026-07-20/refactorizacion-pipeline-pedido-ccmn.md §4
 
 from datetime import datetime
 
-from app.schemas.pipeline import (
-    ETAPA_CUADRO_ADQUISICION,
-    ETAPA_CUADRO_NECESIDAD,
-)
-from app.services.pipeline_service import (
-    _etapa_maxima,
-    confianza_match,
-    estado_etapa_programacion,
-)
+from app.services.pipeline_service import confianza_match
 
 
 def _fila(**kw):
@@ -96,47 +88,6 @@ def test_manual_gana_sobre_la_cascada_automatica():
     assert confianza_match(fila) == "resuelto_manual"
 
 
-# ─── El bug corregido: avance del grupo no cuenta como propio ────────────
-
-
-def test_ambiguo_no_marca_etapas_de_programacion():
-    """El MAX(CASE...) del repo respondia '¿algun candidato llego?'.
-
-    Los otros candidatos son de OTROS pedidos de la misma bolsa, asi que el
-    pedido se mostraba en cuadro_adquisicion por avance ajeno.
-    """
-    fila = _fila(n_candidatos_ccmn=3)
-    assert estado_etapa_programacion(fila) == "grupo"
-    assert _etapa_maxima(fila) == ETAPA_CUADRO_NECESIDAD
-
-
-def test_unico_si_marca_etapas_de_programacion():
-    fila = _fila(n_candidatos_ccmn=1)
-    assert estado_etapa_programacion(fila) == "directo"
-    assert _etapa_maxima(fila) == ETAPA_CUADRO_ADQUISICION
-
-
-def test_declarado_marca_etapas_via_ccmn():
-    fila = _fila(
-        n_candidatos_ccmn=3,
-        ccmn_candidatos=(2266, 2281, 3532),
-        ccmn_declarado_orden=2266,
-    )
-    assert estado_etapa_programacion(fila) == "via_ccmn"
-    assert _etapa_maxima(fila) == ETAPA_CUADRO_ADQUISICION
-
-
-def test_conflicto_no_marca_etapas():
-    """Un conflicto no resuelve: se comporta como ambiguo, no como declarado."""
-    fila = _fila(
-        n_candidatos_ccmn=3,
-        ccmn_candidatos=(2266, 2281, 3532),
-        ccmn_declarado_orden=9999,
-    )
-    assert estado_etapa_programacion(fila) == "grupo"
-    assert _etapa_maxima(fila) == ETAPA_CUADRO_NECESIDAD
-
-
 # ─── Testigo 232/S · regresion obligatoria (doc §10) ─────────────────────
 
 
@@ -155,14 +106,18 @@ def test_testigo_232S():
 
     con_orden = dict(sin_declaracion, ccmn_declarado_orden=2266)
     assert confianza_match(con_orden) == "declarado"
-    assert estado_etapa_programacion(con_orden) == "via_ccmn"
 
 
 # ─── Estados del timeline del detalle (punto 6) ──────────────────────────
 
 
 def _ficha(**kw):
-    """Ficha del detalle (obtener_pedido) con avance de programacion."""
+    """Ficha del detalle (obtener_pedido) con avance de programacion.
+
+    Las etapas 4-7 se declaran ahora por flags de la cadena del CCMN
+    (`_flags_programacion`), no por las listas `cuadros`/`certificaciones`
+    (que solo existen tras la orden). Ver el fix del caso 311/S.
+    """
     base = {
         "TIPO_BIEN": "S",
         "estado_pedido": "1",
@@ -175,6 +130,11 @@ def _ficha(**kw):
         "conformidades": [],
         "movimientos_almacen": [],
         "n_candidatos_ccmn": 1,
+        # Avance de programacion: llego hasta el cuadro de adquisicion (7).
+        "tiene_puente_paac": 1,
+        "tiene_ccmn": 1,
+        "tiene_cotizacion": 1,
+        "tiene_cuadro_adq": 1,
     }
     base.update(kw)
     return base
@@ -230,6 +190,29 @@ def test_timeline_sin_avance_es_sin_dato():
     """Una etapa no alcanzada nunca hereda el estado de la cascada."""
     hitos = _por_etapa(_ficha(
         n_candidatos_ccmn=3, cuadros=[], certificaciones=[],
+        tiene_puente_paac=0, tiene_ccmn=0,
+        tiene_cotizacion=0, tiene_cuadro_adq=0,
     ))
     for n in (4, 5, 6, 7):
         assert hitos[n]["estado"] == "sin_dato", n
+
+
+def test_timeline_detenido_en_estudio_de_mercado():
+    """Caso 311/S: el pedido llego al estudio de mercado y a cotizacion, pero
+    no tiene cuadro de adquisicion ni orden. Antes se cortaba en "cuadro de
+    necesidades" porque el detalle solo miraba la cadena hacia abajo desde la
+    orden. Ahora las etapas 4-6 se alcanzan y la 7 no."""
+    hitos = _por_etapa(_ficha(
+        n_candidatos_ccmn=1,
+        tiene_puente_paac=1, tiene_ccmn=1, tiene_cotizacion=1,
+        tiene_cuadro_adq=0,          # no llego al cuadro de adquisicion
+        cuadros=[], certificaciones=[], ordenes=[],  # ni orden ni cert
+        nro_est_mdo=352,
+    ))
+    for n in (4, 5, 6):
+        assert hitos[n]["alcanzada"] is True, n
+    assert hitos[7]["estado"] == "sin_dato"      # cuadro de adquisicion: no
+    assert hitos[8]["estado"] == "sin_dato"      # certificacion: no
+    # El numero del estudio de mercado se muestra como identificador de la 5.
+    docs = {d["etiqueta"]: d["valor"] for d in hitos[5]["documentos"]}
+    assert docs.get("Estudio de mercado") == "352"
