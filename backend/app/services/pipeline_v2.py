@@ -60,6 +60,9 @@ def _d(v: Any) -> date | None:
 # Orden de las etapas de bolsa por fecha, de la mas avanzada a la mas temprana.
 # La bolsa "alcanzo" la etapa mas avanzada que tenga fecha.
 _ETAPAS_BOLSA: tuple[tuple[str, str], ...] = (
+    # Cierre real: la orden recibio todos sus items (FLAG_RECEP='3'). Es la
+    # etapa mas avanzada; si la bolsa/CCMN atribuido cerro, el pedido cerro.
+    ("bolsa_fecha_cierre", ETAPA_CIERRE),
     ("bolsa_fecha_devengado", ETAPA_DEVENGADO),
     ("bolsa_fecha_despacho", ETAPA_DESPACHO_PECOSA),
     ("bolsa_fecha_ejecucion", ETAPA_EJECUCION),
@@ -94,9 +97,10 @@ def aplicar_avance_ccmn(fila: dict[str, Any], avance: dict[str, Any]) -> None:
     3472). `avance` es una fila de `siga.v_ccmn_avance`.
     """
     fila["bolsa_n_ordenes"] = int(avance.get("n_ordenes") or 0)
+    fila["bolsa_n_ordenes_anuladas"] = int(avance.get("n_ordenes_anuladas") or 0)
     fila["bolsa_ordenes_csv"] = avance.get("ordenes_csv")
     for hito in ("consolid", "cotizacion", "cuadro", "certificacion", "orden",
-                 "compromiso", "ejecucion", "despacho", "devengado"):
+                 "compromiso", "ejecucion", "despacho", "devengado", "cierre"):
         fila[f"bolsa_fecha_{hito}"] = avance.get(f"fecha_{hito}")
 
 
@@ -132,26 +136,31 @@ def clasificar_etapa(fila: dict[str, Any], confianza: str) -> tuple[str, date | 
     estado = str(fila.get("estado") or "").strip()
     atribuible = confianza in CONFIANZA_RESUELTA
 
-    # Cierre propio del pedido (ESTADO='7').
+    # Cierre propio del pedido (ESTADO='7'). Casi nunca ocurre en compras (el
+    # cierre real llega por recepcion completa de la orden, abajo), pero si
+    # SIGA lo marca es terminal.
     if estado == "7":
         f = _d(fila.get("fecha_atenc")) or _d(fila.get("fecha_pedido"))
         return ETAPA_CIERRE, f
 
+    # Avance heredado de la bolsa: solo si el puente atribuye la bolsa a ESTE
+    # pedido. Si no, el pedido se queda en su etapa propia (cuadro de necesidad)
+    # y el avance de la bolsa se muestra aparte (avance_bolsa), no como etapa.
+    # Va ANTES que la pecosa de bienes: el cierre por recepcion completa
+    # (bolsa_fecha_cierre) es un hito mas avanzado que el despacho.
+    if atribuible:
+        etapa_b, fecha_b = max_etapa_bolsa(fila)
+        if etapa_b is not None:
+            return etapa_b, fecha_b
+
     # Bienes: pecosa / almacen son etapas PROPIAS del pedido (llave dura via
-    # su NRO_PECOSA), no dependen del puente.
+    # su NRO_PECOSA), no dependen del puente. Solo se llega aqui si la bolsa
+    # atribuida no dio una etapa mas avanzada (o el puente no resuelve).
     if tipo_bien == "B":
         if fila.get("tiene_pecosa"):
             return ETAPA_DESPACHO_PECOSA, _d(fila.get("fecha_pecosa"))
         if fila.get("tiene_ingreso"):
             return ETAPA_EJECUCION, _d(fila.get("fecha_ingreso"))
-
-    # Avance heredado de la bolsa: solo si el puente atribuye la bolsa a ESTE
-    # pedido. Si no, el pedido se queda en su etapa propia (cuadro de necesidad)
-    # y el avance de la bolsa se muestra aparte (avance_bolsa), no como etapa.
-    if atribuible:
-        etapa_b, fecha_b = max_etapa_bolsa(fila)
-        if etapa_b is not None:
-            return etapa_b, fecha_b
 
     # Etapas propias tempranas.
     if fila.get("tiene_cuadro_neces"):
@@ -193,6 +202,7 @@ def fechas_alcanzadas(fila: dict[str, Any], confianza: str) -> dict[str, date]:
         _set(ETAPA_EJECUCION, fila.get("bolsa_fecha_ejecucion"))
         _set(ETAPA_DESPACHO_PECOSA, fila.get("bolsa_fecha_despacho"))
         _set(ETAPA_DEVENGADO, fila.get("bolsa_fecha_devengado"))
+        _set(ETAPA_CIERRE, fila.get("bolsa_fecha_cierre"))
 
     tipo_bien = (fila.get("tipo_bien") or "").strip()
     if tipo_bien == "B":
@@ -246,8 +256,22 @@ def calcular_alerta(
     if etapa == ETAPA_CIERRE:
         return None
 
-    tiene_avance_bolsa = int(fila.get("bolsa_n_ordenes") or 0) > 0
+    n_ordenes = int(fila.get("bolsa_n_ordenes") or 0)
+    n_anuladas = int(fila.get("bolsa_n_ordenes_anuladas") or 0)
+    tiene_avance_bolsa = n_ordenes > 0
     n_cand = int(fila.get("n_candidatos_ccmn") or 0)
+
+    # cerrado_negativo (gris, terminal): la(s) orden(es) atribuida(s) al pedido
+    # estan anuladas y no hay ninguna orden viva. Solo con puente resuelto, para
+    # no atribuir una anulacion ajena; sale del flujo activo (no estancado).
+    if (
+        confianza in CONFIANZA_RESUELTA
+        and n_anuladas > 0
+        and n_anuladas >= n_ordenes
+    ):
+        return _alerta("cerrado_negativo",
+                       f"la orden atribuida al pedido esta anulada en SIGA",
+                       _d(fila.get("bolsa_fecha_orden")))
 
     # conflicto_puente: una fuente declara un CCMN fuera de los candidatos.
     if confianza == "conflicto":

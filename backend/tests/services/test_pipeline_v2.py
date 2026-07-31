@@ -94,6 +94,59 @@ def test_cierre_estado_7():
     assert fecha == date(2026, 5, 1)
 
 
+def test_cierre_por_recepcion_completa():
+    """Cierre real (caso guia): la orden atribuida recibio todos sus items
+    (bolsa_fecha_cierre). Es la etapa mas avanzada, por encima de devengado."""
+    f = _fila(
+        bolsa_n_ordenes=1, bolsa_fecha_orden=date(2026, 2, 16),
+        bolsa_fecha_ejecucion=date(2026, 3, 12),
+        bolsa_fecha_devengado=date(2026, 3, 12),
+        bolsa_fecha_cierre=date(2026, 5, 7),
+    )
+    etapa, fecha = pipeline_v2.clasificar_etapa(f, "unico")
+    assert etapa == ETAPA_CIERRE
+    assert fecha == date(2026, 5, 7)
+
+
+def test_recepcion_parcial_no_cierra():
+    """Una O/S con conformidades parciales (varios entregables/pagos) NO cierra
+    hasta recibir todo: sin bolsa_fecha_cierre queda en devengado/ejecucion."""
+    f = _fila(
+        bolsa_n_ordenes=1, bolsa_fecha_orden=date(2026, 3, 17),
+        bolsa_fecha_ejecucion=date(2026, 3, 23),
+        bolsa_fecha_devengado=date(2026, 3, 23),
+        bolsa_fecha_cierre=None,
+    )
+    etapa, _ = pipeline_v2.clasificar_etapa(f, "unico")
+    assert etapa == ETAPA_DEVENGADO
+
+
+def test_cierre_no_atribuible_si_puente_ambiguo():
+    """El cierre de la bolsa no se atribuye al pedido si el puente no resuelve;
+    su avance se muestra aparte (avance_bolsa), no como etapa del pedido."""
+    f = _fila(
+        n_candidatos_ccmn=3, ccmn_candidatos_csv="1,2,3",
+        bolsa_n_ordenes=1, bolsa_fecha_cierre=date(2026, 5, 7),
+    )
+    etapa, _ = pipeline_v2.clasificar_etapa(f, "ambiguo")
+    assert etapa == ETAPA_CUADRO_NECESIDAD
+
+
+def test_cerrado_negativo_orden_anulada():
+    """Orden atribuida anulada (estado '4') -> cerrado_negativo (gris), fuera
+    del flujo activo, no estancado."""
+    f = _fila(
+        bolsa_n_ordenes=1, bolsa_n_ordenes_anuladas=1,
+        bolsa_fecha_orden=date(2026, 3, 1),
+    )
+    alerta = pipeline_v2.calcular_alerta(
+        f, ETAPA_ORDEN_EMITIDA, date(2026, 3, 1), "unico", HOY, 30
+    )
+    assert alerta is not None
+    assert alerta["tipo"] == "cerrado_negativo"
+    assert alerta["severidad"] == "gris"
+
+
 # ─── Avance de la bolsa (cierto aunque el puente no resuelva) ─────────────
 
 

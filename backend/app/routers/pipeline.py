@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models.enums import CodigoRol
-from app.repositories import pipeline_repo, resolucion_ccmn_repo
+from app.repositories import pipeline_read_repo, pipeline_repo, resolucion_ccmn_repo
 from app.schemas.pipeline import (
     CONFIANZA_A_ESTADO,
     CONFIANZA_A_LABEL,
@@ -208,6 +208,16 @@ def detalle_pedido(
         or (sorted(ficha.get("ccmn_candidatos") or ())[0]
             if confianza == "unico" else None)
     )
+
+    # Devengado MEF de la meta del pedido (confirmacion, nivel meta): el
+    # timeline lo usa para marcar la etapa devengado (§02.6). El monto exacto
+    # por orden no cruza 1:1, asi que solo confirma "hay devengado en la meta".
+    sec_func = ficha.get("sec_func") or ficha.get("SEC_FUNC")
+    if sec_func:
+        dev = pipeline_read_repo.devengado_mef_por_sec_func(
+            db, ano or settings.ANO_VIGENTE, [int(sec_func)]
+        )
+        ficha["devengado_mef"] = dev.get(int(sec_func), 0.0)
 
     # Timeline con las 13/16 etapas + etapa actual del pedido.
     timeline = pipeline_service.construir_timeline(ficha)

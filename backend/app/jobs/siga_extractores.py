@@ -256,6 +256,7 @@ _ORDENES = Extractor(
         "sec_func", "clasificador", "mes_cale",
         "proveedor", "proveedor_nombre", "proveedor_ruc", "concepto",
         "total_fact_soles", "estado", "estado_siaf", "fecha_orden", "fecha_reg",
+        "flag_recep", "fecha_cierre",
     ),
     _sql_base="""
         SELECT o.ANO_EJE, o.SEC_EJEC, o.TIPO_BIEN, o.NRO_ORDEN,
@@ -265,7 +266,8 @@ _ORDENES = Extractor(
                CAST(o.CONCEPTO AS VARCHAR(2000)) AS CONCEPTO,
                ca.NRO_CONS_PAAC AS NRO_CONSOLID,
                op.SEC_FUNC, op.CLASIFICADOR, op.MES_CALE,
-               c.NOMBRE_PROV, c.NRO_RUC
+               c.NOMBRE_PROV, c.NRO_RUC,
+               it.FLAG_RECEP, it.FECHA_CIERRE
         FROM SIG_ORDEN_ADQUISICION o
         LEFT JOIN SIG_CUADRO_ADQUISICION ca
             ON ca.ANO_EJE = o.ANO_EJE AND ca.SEC_EJEC = o.SEC_EJEC
@@ -280,6 +282,25 @@ _ORDENES = Extractor(
         ) op ON op.ANO_EJE = o.ANO_EJE AND op.SEC_EJEC = o.SEC_EJEC
             AND op.TIPO_BIEN = o.TIPO_BIEN AND op.NRO_ORDEN = o.NRO_ORDEN
         LEFT JOIN SIG_CONTRATISTAS c ON c.PROVEEDOR = o.PROVEEDOR
+        -- Recepcion de la orden (SIG_ORDEN_ITEM). El cierre real de una orden
+        -- es que TODOS sus items esten recibidos: FLAG_RECEP correlaciona 1:1
+        -- con CANT_RECIBIDA vs CANT_ITEM ('1'=nada, '2'=parcial, '3'=completo,
+        -- medido 2026, correlacion perfecta). Una O/S puede tener varias
+        -- conformidades (entregables/pagos); CANT_RECIBIDA ya las agrega, asi
+        -- que no hay que contarlas a mano. flag_recep de la orden = el minimo de
+        -- sus items ('1'<'2'<'3'): la orden solo cierra si el peor item cerro.
+        LEFT JOIN (
+            SELECT ANO_EJE, SEC_EJEC, TIPO_BIEN, NRO_ORDEN,
+                   MIN(FLAG_RECEP) AS FLAG_RECEP,
+                   -- Fecha de cierre = ultima recepcion, solo si TODOS los items
+                   -- estan completos (ningun item con FLAG_RECEP <> '3').
+                   CASE WHEN MIN(FLAG_RECEP) = '3'
+                        THEN MAX(FECHA_RECEP) END AS FECHA_CIERRE
+            FROM SIG_ORDEN_ITEM
+            WHERE ANO_EJE = :ano AND SEC_EJEC = :sec_ejec
+            GROUP BY ANO_EJE, SEC_EJEC, TIPO_BIEN, NRO_ORDEN
+        ) it ON it.ANO_EJE = o.ANO_EJE AND it.SEC_EJEC = o.SEC_EJEC
+            AND it.TIPO_BIEN = o.TIPO_BIEN AND it.NRO_ORDEN = o.NRO_ORDEN
         WHERE o.ANO_EJE = :ano AND o.SEC_EJEC = :sec_ejec
     """,
     mapear=lambda r: {
@@ -294,6 +315,7 @@ _ORDENES = Extractor(
         "total_fact_soles": _f(r["TOTAL_FACT_SOLES"]), "estado": _s(r["ESTADO"]),
         "estado_siaf": _s(r["ESTADO_SIAF"]), "fecha_orden": r["FECHA_ORDEN"],
         "fecha_reg": r["FECHA_REG"],
+        "flag_recep": _s(r["FLAG_RECEP"]), "fecha_cierre": r["FECHA_CIERRE"],
     },
 )
 

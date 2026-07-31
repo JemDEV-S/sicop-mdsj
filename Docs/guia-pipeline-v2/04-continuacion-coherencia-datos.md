@@ -354,6 +354,55 @@ requiere re-sync) y en `v_pipeline_pedido` (COALESCE de `fecha_aprob` desde
 
 ---
 
+## 5.4 Cerrado (2026-07-31, sesión 8): cierre real por recepción completa
+
+La columna **Cierre** del kanban salía vacía: el cierre solo se marcaba con
+`SIG_PEDIDOS.ESTADO='7'`, que **ningún** pedido de compra 2026 alcanza (ese
+estado es del pedido interno de almacén, no de la compra — 0/1782 en la vista).
+Muchos pedidos con orden emitida y servicio/bien ya recibido seguían en
+contratación/ejecución.
+
+**Señal de cierre autoritativa, por orden** (medida contra SIGA, correlación
+perfecta): `SIG_ORDEN_ITEM.FLAG_RECEP` por item de la orden atribuida —
+`'1'`⟺`CANT_RECIBIDA=0` (pendiente), `'2'`⟺parcial, `'3'`⟺`CANT_RECIBIDA>=CANT_ITEM`
+(recibido completo). SIGA mantiene `CANT_RECIBIDA` y voltea `FLAG_RECEP='3'`
+cuando el item se recibe del todo, **agregando ya todas las conformidades**:
+una O/S puede tener varias (una por entregable/pago — la O/S 317 tiene 4 pagos
+y sigue en curso porque su item está en `FLAG_RECEP='2'`), así que NO hay que
+contarlas a mano. Regla: **orden cerrada = todos sus items con `FLAG_RECEP='3'`**
+(`fecha_cierre = MAX(FECHA_RECEP)`). Solo se atribuye al pedido si el puente
+pedido↔CCMN resuelve.
+
+Cambios (migración `d5e6f7a8b9c2`, re-sync requerido):
+- **Extractor `_ORDENES`**: agrega `flag_recep` (MIN de los items) y
+  `fecha_cierre` (MAX(FECHA_RECEP) solo si el MIN es `'3'`) a `siga.ordenes`.
+- **Vistas**: `fecha_cierre` propagado por `v_ccmn_avance` y `v_bolsa_avance`
+  (una bolsa/CCMN cierra cuando TODAS sus órdenes no anuladas cerraron), y
+  `bolsa_fecha_cierre` en `v_pipeline_pedido`. Nueva columna
+  `n_ordenes_anuladas` (órdenes con `ESTADO='4'`).
+- **`pipeline_v2`**: `bolsa_fecha_cierre` es la entrada más alta de
+  `_ETAPAS_BOLSA` (por encima de devengado); `clasificar_etapa` la hereda si
+  el puente resuelve; nueva alerta `cerrado_negativo` (gris/terminal) cuando la
+  orden atribuida está anulada. `aplicar_avance_ccmn` propaga el hito cierre.
+- **Detalle** (`construir_timeline`): el hito cierre sale de `FLAG_RECEP` de
+  las órdenes propias (no de `ESTADO='7'`); el hito devengado se marca con el
+  **devengado MEF de la meta** como confirmación (nivel meta, `sec_func`).
+
+**Correcciones a supuestos del doc 02:**
+- `ESTADO_DEVENG` es `'D'` en el 100% (833/833): no discrimina devengado, solo
+  marca que existe conformidad. Ejecución≈devengado para servicios en SIGA.
+- `SIG_MOVIM_CONFOR_SERVICIO.EXPEDIENTE_SIAF`/`SECUENCIA_SIAF` = 100% NULL en el
+  backup local → no hay cruce fino conformidad→SIAF. El devengado MEF (nivel
+  meta) queda como confirmación en el detalle, no dispara el cierre.
+
+**Distribución post-fix (2026, 1782 compras vivas):** cierre 677 (S 160, B 517),
+programación 873, contratación 141, ejecución 51, certificación 29, solicitud 11.
+Alertas: sin_alerta 861, puente_pendiente 646, estancado_real 256,
+sin_consolidar 11, desfase_devengado 8. Testigos: 232/S → **cierre** (07-may);
+159/S (dueño de la O/S 317, 4 pagos parciales) → **devengado, no cierre** ✓.
+
+---
+
 ## 6. Trabajos de coherencia priorizados (el objetivo de la sesión)
 
 Orden sugerido; cada uno **verifica el dato contra SIGA antes de tocar la vista**.

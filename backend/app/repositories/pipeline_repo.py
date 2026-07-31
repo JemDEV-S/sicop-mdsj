@@ -761,6 +761,11 @@ def obtener_pedido(
                     o.FECHA_ORDEN,
                     LTRIM(RTRIM(c.NOMBRE_PROV))      AS proveedor_nombre,
                     LTRIM(RTRIM(c.NRO_RUC))          AS proveedor_ruc,
+                    -- Recepcion de la orden: el minimo FLAG_RECEP de sus items
+                    -- ('1'=pendiente, '2'=parcial, '3'=recibido completo) y la
+                    -- fecha de cierre (ultima recepcion) solo si TODO se recibio.
+                    -- El cierre real del pedido cuelga de aqui, no de ESTADO='7'.
+                    rc.FLAG_RECEP, rc.FECHA_CIERRE,
                     STUFF((
                         SELECT ',' + t2.metodo
                         FROM todas t2 WHERE t2.NRO_ORDEN = o.NRO_ORDEN
@@ -774,6 +779,14 @@ def obtener_pedido(
                    AND ca_o.TIPO_BIEN = o.TIPO_BIEN
                    AND ca_o.SEC_CUADRO = o.SEC_CUADRO
                 LEFT JOIN SIG_CONTRATISTAS c ON c.PROVEEDOR = o.PROVEEDOR
+                OUTER APPLY (
+                    SELECT MIN(oi.FLAG_RECEP) AS FLAG_RECEP,
+                           CASE WHEN MIN(oi.FLAG_RECEP) = '3'
+                                THEN MAX(oi.FECHA_RECEP) END AS FECHA_CIERRE
+                    FROM SIG_ORDEN_ITEM oi
+                    WHERE oi.ANO_EJE = o.ANO_EJE AND oi.SEC_EJEC = o.SEC_EJEC
+                      AND oi.TIPO_BIEN = o.TIPO_BIEN AND oi.NRO_ORDEN = o.NRO_ORDEN
+                ) rc
                 WHERE o.ANO_EJE = :ano AND o.SEC_EJEC = :sec_ejec
                   AND o.TIPO_BIEN = :tipo
                 ORDER BY o.FECHA_ORDEN

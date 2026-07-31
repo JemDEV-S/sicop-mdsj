@@ -170,10 +170,11 @@ def avance_por_ccmn(
     rows = db.execute(
         text(
             """
-            SELECT tipo_bien, nro_consolid, n_ordenes, ordenes_csv,
+            SELECT tipo_bien, nro_consolid, n_ordenes, n_ordenes_anuladas,
+                   ordenes_csv,
                    fecha_consolid, fecha_cotizacion, fecha_cuadro, fecha_certificacion,
                    fecha_orden, fecha_compromiso, fecha_ejecucion,
-                   fecha_despacho, fecha_devengado
+                   fecha_despacho, fecha_devengado, fecha_cierre
             FROM siga.v_ccmn_avance
             WHERE ano_eje = :ano AND sec_ejec = :sec_ejec
               AND nro_consolid IN :ccmns

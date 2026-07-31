@@ -587,6 +587,32 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         o.get("EXP_SIGA") for o in ordenes_propias if o.get("EXP_SIGA")
     }
 
+    # Cierre real del pedido: sus ordenes atribuidas recibieron todos sus items
+    # (FLAG_RECEP='3'). Una O/S puede tener varias conformidades (entregables /
+    # pagos); CANT_RECIBIDA ya las agrega, asi que FECHA_CIERRE solo llega
+    # cuando el ultimo entregable entro. El pedido cierra cuando TODAS sus
+    # ordenes atribuidas cerraron; la fecha es la mas tardia. ESTADO='7' de la
+    # cabecera tambien cierra (rara vez ocurre en compras).
+    ordenes_vivas = [o for o in ordenes_propias
+                     if (o.get("ESTADO") or "").strip() != "4"]
+    fechas_cierre_ord = [
+        _to_dt(o.get("FECHA_CIERRE") or o.get("fecha_cierre"))
+        for o in ordenes_vivas
+    ]
+    cierre_por_recepcion = (
+        bool(ordenes_vivas)
+        and all(f is not None for f in fechas_cierre_ord)
+    )
+    fecha_cierre_ord = (
+        max(f for f in fechas_cierre_ord if f is not None)
+        if cierre_por_recepcion else None
+    )
+    tiene_cierre = tiene_cierre or cierre_por_recepcion
+    # Terminal negativo: todas las ordenes atribuidas estan anuladas.
+    tiene_cierre_negativo = (
+        bool(ordenes_propias) and not ordenes_vivas
+    )
+
     cert_filtradas = [
         c for c in certificaciones
         if not certifs_propias or c.get("NRO_CERTIFICA") in certifs_propias
@@ -678,9 +704,26 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         _add(ETAPA_DESPACHO_PECOSA, fecha_despacho, fecha_despacho is not None,
              "El almacen despacho el bien (PECOSA).", docs=pecosas)
 
-    _add(ETAPA_DEVENGADO, None, False,
-         "Devengado: proviene del SIAF (pendiente de integrar).")
-    _add(ETAPA_CIERRE, fecha_atenc if tiene_cierre else None, tiene_cierre,
-         "El pedido fue atendido y cerrado.")
+    # Devengado presupuestal: es del MEF (nivel meta), no de SIGA. Se muestra
+    # como confirmacion si la meta del pedido registra devengado en el MEF; la
+    # cifra exacta por orden no cruza (el clasificador SIGA no es 1:1 con SIAF),
+    # asi que aqui solo se marca "hay devengado en la meta" — el monto va en el
+    # bloque de expediente del detalle.
+    dev_mef = float(ficha.get("devengado_mef") or 0)
+    _add(ETAPA_DEVENGADO, None, dev_mef > 0,
+         "La meta del pedido registra devengado en el MEF."
+         if dev_mef > 0
+         else "Devengado: proviene del MEF (a nivel de meta).")
+
+    fecha_cierre_final = (
+        fecha_cierre_ord or (fecha_atenc if estado_pedido == "7" else None)
+    )
+    if tiene_cierre_negativo:
+        _add(ETAPA_CIERRE, fecha_orden, True,
+             "El pedido se cerro: su orden fue anulada en SIGA.")
+    else:
+        _add(ETAPA_CIERRE, fecha_cierre_final, tiene_cierre,
+             "El pedido se cerro: la orden recibio todo lo solicitado."
+             if cierre_por_recepcion else "El pedido fue atendido y cerrado.")
 
     return hitos
