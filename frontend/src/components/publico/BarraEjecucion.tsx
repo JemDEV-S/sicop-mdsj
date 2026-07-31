@@ -141,10 +141,12 @@ function EtiquetasEtapas({ etapas, formatoMonto }: EtiquetasEtapasProps) {
         ancho: itemRefs.current[e.key]?.offsetWidth || ANCHO_ESTIMADO_PX,
       }));
 
-      // Empuje de izquierda a derecha: cada etiqueta respeta el espacio de la anterior
+      // Empuje de izquierda a derecha: cada etiqueta respeta el espacio de la
+      // anterior. Los índices están dentro de rango por construcción del for;
+      // `noUncheckedIndexedAccess` no lo deduce, de ahí las aserciones.
       for (let i = 1; i < nodos.length; i++) {
-        const prev = nodos[i - 1];
-        const cur = nodos[i];
+        const prev = nodos[i - 1]!;
+        const cur = nodos[i]!;
         const minCentro = prev.centro + prev.ancho / 2 + GAP_MIN_PX + cur.ancho / 2;
         if (cur.centro < minCentro) cur.centro = minCentro;
       }
@@ -157,8 +159,8 @@ function EtiquetasEtapas({ etapas, formatoMonto }: EtiquetasEtapasProps) {
           nodos.forEach((n) => (n.centro -= exceso));
           // Re-verifica solapes de derecha a izquierda tras el retroceso
           for (let i = nodos.length - 2; i >= 0; i--) {
-            const next = nodos[i + 1];
-            const cur = nodos[i];
+            const next = nodos[i + 1]!;
+            const cur = nodos[i]!;
             const maxCentro = next.centro - next.ancho / 2 - GAP_MIN_PX - cur.ancho / 2;
             if (cur.centro > maxCentro) cur.centro = maxCentro;
           }

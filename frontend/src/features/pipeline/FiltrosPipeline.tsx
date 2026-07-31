@@ -25,7 +25,8 @@ interface FiltrosPipelineProps {
 // del día a día:
 //   - Tipo bien/servicio: alterna el universo.
 //   - Solo estancados: atajo a la vista de trabajo urgente.
-//   - Búsqueda por N° pedido: para saltar directo cuando conoces el número.
+//   - Búsqueda por N° de pedido o texto del motivo: el funcionario que no
+//     recuerda el número sí recuerda qué pidió ("cemento", "refrigerios").
 export function FiltrosPipeline({
   filtros,
   onChange,
@@ -101,13 +102,12 @@ export function FiltrosPipeline({
         />
         <Input
           type="search"
-          inputMode="numeric"
-          placeholder="N° de pedido"
+          placeholder="N° de pedido o descripción"
           value={filtros.busqueda}
           onChange={(e) =>
             onChange({ ...filtros, busqueda: e.target.value })
           }
-          aria-label="Buscar por número de pedido"
+          aria-label="Buscar por número de pedido o descripción"
           className="pl-8 h-9 text-sm"
         />
       </div>

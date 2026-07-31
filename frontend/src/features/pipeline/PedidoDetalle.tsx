@@ -107,6 +107,8 @@ export function PedidoDetalle({ nroPedido, tipoBien, tipoPedido }: PedidoDetalle
       <BreadcrumbVolver />
       <CabeceraPedido pedido={data} nroPedido={nroPedido} tipoBien={tipoBien} />
 
+      <ResumenRecorrido pedido={data} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <BloquePedido pedido={data} />
         <BloqueOrdenes ordenes={data.ordenes} />
@@ -284,6 +286,124 @@ function BotonRefrescar({
       ) : null}
       Actualizar desde SIGA
     </button>
+  );
+}
+
+// ─── Resumen del recorrido: dónde está, hace cuánto y qué sigue ──────────
+//
+// Es la primera respuesta de la pantalla. El funcionario que abre su pedido
+// quiere saber tres cosas antes que cualquier tabla: en qué fase está, cuánto
+// lleva ahí y cuál es el siguiente paso. El recorrido completo (16 etapas con
+// documentos) sigue abajo para quien necesita el detalle.
+
+const MACROFASES_ORDEN: { codigo: string; label: string }[] = [
+  { codigo: 'solicitud', label: 'Solicitud' },
+  { codigo: 'programacion', label: 'Programación' },
+  { codigo: 'certificacion', label: 'Certificación' },
+  { codigo: 'contratacion', label: 'Contratación' },
+  { codigo: 'ejecucion', label: 'Ejecución' },
+  { codigo: 'cierre', label: 'Cierre' },
+];
+
+function ResumenRecorrido({ pedido }: { pedido: PedidoDetalleType }) {
+  const idxActual = MACROFASES_ORDEN.findIndex(
+    (m) => m.codigo === pedido.macrofase_actual,
+  );
+  const fechaEtapa = fechaDeEtapaActual(pedido);
+  const dias = diasDesde(fechaEtapa);
+
+  // Siguiente paso: el primer evento del recorrido posterior a la etapa
+  // actual que aún no se alcanzó (el backend ya arma el timeline según el
+  // tipo de pedido, así que no hay que filtrar etapas de bienes/servicios).
+  const siguiente = pedido.timeline.find(
+    (e) => e.etapa_numero > pedido.etapa_actual_numero && !e.alcanzada,
+  );
+
+  const montoItems = pedido.items.reduce(
+    (acc, it) => acc + (it.valor_total ?? 0),
+    0,
+  );
+
+  return (
+    <SectionCard padding="md">
+      {/* Stepper de macrofases: hecho (verde) · actual (azul) · pendiente. */}
+      <ol className="flex flex-wrap items-center gap-y-2">
+        {MACROFASES_ORDEN.map((m, i) => {
+          const hecho = i < idxActual;
+          const actual = i === idxActual;
+          return (
+            <li key={m.codigo} className="flex items-center">
+              {i > 0 ? (
+                <span
+                  className={cn(
+                    'mx-1.5 h-px w-4 sm:w-6',
+                    i <= idxActual ? 'bg-secondary/60' : 'bg-border',
+                  )}
+                  aria-hidden="true"
+                />
+              ) : null}
+              <span
+                className={cn(
+                  'inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs',
+                  hecho && 'border-secondary/40 bg-secondary/10 text-foreground',
+                  actual && 'border-primary bg-primary/10 font-semibold text-primary',
+                  !hecho && !actual && 'border-border text-muted-foreground',
+                )}
+                aria-current={actual ? 'step' : undefined}
+              >
+                {hecho ? (
+                  <Check className="h-3 w-3 text-secondary" aria-hidden="true" />
+                ) : null}
+                {m.label}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+
+      {/* La respuesta en palabras: etapa, tiempo y siguiente paso. */}
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3 text-sm">
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Etapa actual
+          </p>
+          <p className="mt-0.5 font-medium text-foreground">
+            {pedido.etapa_actual_label}
+          </p>
+          {fechaEtapa ? (
+            <p className="text-xs text-muted-foreground">
+              desde el {formatFecha(fechaEtapa)}
+              {dias != null ? (
+                <span className="tabular-nums"> · hace {dias} días</span>
+              ) : null}
+            </p>
+          ) : null}
+        </div>
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Siguiente paso
+          </p>
+          <p className="mt-0.5 font-medium text-foreground">
+            {pedido.macrofase_actual === 'cierre'
+              ? 'Ninguno: el pedido está cerrado'
+              : siguiente?.etapa_label ?? 'Sin pasos pendientes registrados'}
+          </p>
+        </div>
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            Monto del pedido
+          </p>
+          <p className="mt-0.5 font-semibold tabular-nums text-foreground">
+            {montoItems > 0 ? formatearMoneda(montoItems) : 'Sin valorizar'}
+          </p>
+          {pedido.items.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {pedido.items.length} ítem{pedido.items.length === 1 ? '' : 's'}
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </SectionCard>
   );
 }
 

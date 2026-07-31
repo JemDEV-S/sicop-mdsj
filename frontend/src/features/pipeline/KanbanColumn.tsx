@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { formatearMoneda } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import PedidoCard from './PedidoCard';
 import type {
-  EtapaCodigo,
   EtapaConteo,
   Macrofase,
   PedidoCard as PedidoCardType,
@@ -12,9 +12,10 @@ import type {
 interface KanbanColumnProps {
   macrofase: Macrofase;
   macrofaseLabel: string;
-  conteo: number;
+  /** Pedidos visibles de esta macrofase (ya filtrados y sin los "por confirmar"). */
+  pedidos: PedidoCardType[];
+  /** Orden y labels de las etapas SIGA de la macrofase (del backend). */
   etapas: EtapaConteo[];
-  pedidosPorEtapa: Partial<Record<EtapaCodigo, PedidoCardType[]>>;
   estilo: EstiloMacrofase;
 }
 
@@ -25,39 +26,45 @@ export interface EstiloMacrofase {
 }
 
 // Cuántos pedidos rendereamos por columna antes de mostrar "Cargar más".
-// Con 1023 pedidos en cierre no podemos volcar todo al DOM (bloquea el
-// hilo principal y la scroll perf se rompe). Igual que en el widget del
-// dashboard, mostramos lo relevante y damos control explícito al usuario.
+// Con cientos de pedidos por columna no podemos volcar todo al DOM (bloquea
+// el hilo principal y la scroll perf se rompe).
 const PAGE_SIZE = 20;
 
 export function KanbanColumn({
   macrofase,
   macrofaseLabel,
-  conteo,
+  pedidos,
   etapas,
-  pedidosPorEtapa,
   estilo,
 }: KanbanColumnProps) {
-  // Aplanamos los pedidos de todas las etapas de la macrofase en una lista única,
-  // priorizando los estancados (para que aparezcan siempre visibles arriba).
-  const pedidos: PedidoCardType[] = etapas
-    .flatMap((e) => pedidosPorEtapa[e.etapa as EtapaCodigo] ?? [])
-    .sort((a, b) => {
-      // Estancados primero, luego por días descendente.
-      if (a.estancado !== b.estancado) return a.estancado ? -1 : 1;
-      return (b.dias_en_etapa ?? 0) - (a.dias_en_etapa ?? 0);
-    });
+  // Estancados primero, luego por días descendente: lo urgente arriba.
+  const ordenados = [...pedidos].sort((a, b) => {
+    if (a.estancado !== b.estancado) return a.estancado ? -1 : 1;
+    return (b.dias_en_etapa ?? 0) - (a.dias_en_etapa ?? 0);
+  });
 
-  const estancados = pedidos.filter((p) => p.estancado).length;
+  const estancados = ordenados.filter((p) => p.estancado).length;
+  const monto = ordenados.reduce((acc, p) => acc + (p.monto_total || 0), 0);
+
+  // Conteo por etapa desde los pedidos VISIBLES (coincide con lo que se ve),
+  // mostrando solo etapas con pedidos — una lista de ceros comunica "roto".
+  const porEtapa = new Map<string, number>();
+  for (const p of ordenados) {
+    porEtapa.set(p.etapa, (porEtapa.get(p.etapa) ?? 0) + 1);
+  }
+  const etapasVisibles = etapas
+    .map((e) => ({ ...e, conteo: porEtapa.get(e.etapa) ?? 0 }))
+    .filter((e) => e.conteo > 0);
+
   const [visibles, setVisibles] = useState(PAGE_SIZE);
   const [mostrarEtapas, setMostrarEtapas] = useState(false);
 
-  const mostrados = pedidos.slice(0, visibles);
-  const restantes = pedidos.length - mostrados.length;
+  const mostrados = ordenados.slice(0, visibles);
+  const restantes = ordenados.length - mostrados.length;
 
   return (
     <section
-      className="flex flex-col rounded-md border border-border bg-muted/30 min-h-[24rem]"
+      className="flex flex-col rounded-md border border-border bg-muted/30 min-h-[16rem]"
       aria-labelledby={`col-${macrofase}`}
     >
       {/* Barra superior identidad de la macrofase */}
@@ -77,9 +84,16 @@ export function KanbanColumn({
               estilo.chipClass,
             )}
           >
-            {conteo}
+            {ordenados.length}
           </span>
         </div>
+
+        {/* Monto agregado: cuánta plata está parada en esta fase. */}
+        {monto > 0 ? (
+          <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+            {formatearMoneda(monto, true)}
+          </p>
+        ) : null}
 
         {estancados > 0 ? (
           <p className="mt-1 text-[11px] text-destructive font-medium">
@@ -87,8 +101,8 @@ export function KanbanColumn({
           </p>
         ) : null}
 
-        {/* Drill-down opcional a las etapas SIGA (13/16) que componen la macrofase. */}
-        {etapas.length > 1 && conteo > 0 ? (
+        {/* Drill-down a las etapas SIGA con pedidos (las vacías no se listan). */}
+        {etapasVisibles.length > 1 ? (
           <button
             type="button"
             onClick={() => setMostrarEtapas((s) => !s)}
@@ -100,23 +114,18 @@ export function KanbanColumn({
             ) : (
               <ChevronRight className="w-3 h-3" aria-hidden="true" />
             )}
-            <span>Ver etapas</span>
+            <span>Ver etapas ({etapasVisibles.length})</span>
           </button>
         ) : null}
 
         {mostrarEtapas ? (
           <ul className="mt-1.5 space-y-0.5 border-l border-border/50 pl-2">
-            {etapas.map((e) => (
+            {etapasVisibles.map((e) => (
               <li
                 key={e.etapa}
                 className="flex items-center justify-between text-[11px] text-muted-foreground"
               >
-                <span className="truncate">
-                  <span className="tabular-nums mr-1 text-muted-foreground/70">
-                    [{e.etapa_numero}]
-                  </span>
-                  {e.etapa_label}
-                </span>
+                <span className="truncate">{e.etapa_label}</span>
                 <span className="tabular-nums font-medium ml-2">{e.conteo}</span>
               </li>
             ))}
@@ -124,7 +133,7 @@ export function KanbanColumn({
         ) : null}
       </header>
 
-      <div className="flex-1 p-2 flex flex-col gap-1.5 overflow-y-auto">
+      <div className="flex-1 p-2 flex flex-col gap-1.5 overflow-y-auto max-h-[70vh]">
         {mostrados.length === 0 ? (
           <p className="text-xs text-muted-foreground text-center py-6">
             Sin pedidos en esta fase.

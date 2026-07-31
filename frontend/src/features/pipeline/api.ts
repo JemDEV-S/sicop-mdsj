@@ -144,7 +144,7 @@ export function useResolucionesPedido({
 }
 
 /** Invalida todo lo que cambia al asociar o revocar: detalle, bolsa y lista. */
-function useInvalidarPedido(nroPedido: number, tipoBien: string) {
+function useInvalidarPedido() {
   const queryClient = useQueryClient();
   return () => {
     for (const key of ['detalle', 'bolsa', 'resoluciones']) {
@@ -158,7 +158,7 @@ function useInvalidarPedido(nroPedido: number, tipoBien: string) {
 
 export function useAsociarCcmn({ nroPedido, tipoBien, tipoPedido }: UseBolsaParams) {
   const ano = useContextoInterno((s) => s.añoActivo);
-  const invalidar = useInvalidarPedido(nroPedido, tipoBien);
+  const invalidar = useInvalidarPedido();
   return useMutation({
     mutationFn: async (params: { nroConsolid: number; nota?: string }) => {
       const { data } = await apiClient.post<Resolucion>(
@@ -183,7 +183,7 @@ export function useRefrescarPedido({
   tipoPedido,
 }: UseBolsaParams) {
   const ano = useContextoInterno((s) => s.añoActivo);
-  const invalidar = useInvalidarPedido(nroPedido, tipoBien);
+  const invalidar = useInvalidarPedido();
   return useMutation({
     mutationFn: async () => {
       const { data } = await apiClient.post<{
@@ -200,8 +200,8 @@ export function useRefrescarPedido({
   });
 }
 
-export function useRevocarCcmn({ nroPedido, tipoBien }: UseBolsaParams) {
-  const invalidar = useInvalidarPedido(nroPedido, tipoBien);
+export function useRevocarCcmn(_params: UseBolsaParams) {
+  const invalidar = useInvalidarPedido();
   return useMutation({
     mutationFn: async (resolucionId: string) => {
       await apiClient.delete(`/interno/pedidos/resoluciones/${resolucionId}`);
