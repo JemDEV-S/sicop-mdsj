@@ -310,9 +310,9 @@ CUADRO DE NECESIDADES → PAAC → PEDIDO → ORDEN DE COMPRA/SERVICIO
 
 | Campo | Descripción |
 |---|---|
-| `ANO_EJE` / `SEC_EJEC` / `NRO_PEDIDO` / `TIPO_BIEN` | PK |
+| `ANO_EJE` / `SEC_EJEC` / `TIPO_BIEN` / `TIPO_PEDIDO` / `NRO_PEDIDO` | **PK real** — `NRO_PEDIDO` solo NO es único (ver 10.2.1) |
 | `TIPO_BIEN` | `B` = Bien, `S` = Servicio |
-| `TIPO_PEDIDO` | `1` = pedido de almacén, `2` = compra/servicio directo |
+| `TIPO_PEDIDO` | `1` = atención de almacén, `2` = compra directa (ver 10.2.1) |
 | `CENTRO_COSTO` | Unidad solicitante |
 | `sec_func` | Meta presupuestal |
 | `ACT_PROY` | Proyecto/actividad |
@@ -321,6 +321,34 @@ CUADRO DE NECESIDADES → PAAC → PEDIDO → ORDEN DE COMPRA/SERVICIO
 | `MOTIVO_PEDIDO` | Justificación |
 | `NOMBRE_EMPLEADO` | Solicitante |
 | `FUENTE_FINANC` | Fuente |
+
+#### 10.2.1 `TIPO_PEDIDO` — dos objetos de negocio distintos bajo el mismo `NRO_PEDIDO`
+
+Medido en BD (bienes, 2026, `SEC_EJEC=300687`): SIGA reutiliza `NRO_PEDIDO` entre
+pedidos **sin relación entre sí** que solo se distinguen por `TIPO_PEDIDO`. Ej.:
+`NRO_PEDIDO=000003/B` tiene un `TIPO_PEDIDO='1'` (combustible para Infraestructura,
+CC `01.03.11.01`) y un `TIPO_PEDIDO='2'` (atención de la O/C N°4, CC `01.03.14.01`)
+— dos pedidos de fechas, motivos, metas y centros de costo distintos. Toda query
+que filtre solo por `NRO_PEDIDO+TIPO_BIEN` sin `TIPO_PEDIDO` mezcla sus ítems y
+órdenes (bug detectado en el detalle del pipeline, corregido en
+`pipeline_repo.obtener_pedido`).
+
+| `TIPO_PEDIDO` | Qué es | Evidencia (2026, bienes) |
+|---|---|---|
+| `'2'` | **Pedido de compra.** Único tipo que existe para servicios. Inicia el circuito completo: cuadro de necesidades → CCMN → cotización → cuadro de adquisición → orden. Es el único tipo que el pipeline de compras modela. | 0% de sus ítems tiene `NRO_PECOSA`; `MOTIVO_PEDIDO` describe una adquisición nueva ("ADQUISICION DE...") |
+| `'1'` | **Atención de almacén.** Solo bienes. El área pide que le despachen bienes YA comprados (de una O/C previa) — es un pedido-comprobante de salida (PECOSA), no una compra nueva. Nunca tiene bolsa/CCMN propio: no puede "avanzar" en el pipeline de adquisición. | 99.5% de sus ítems tiene `NRO_PECOSA` poblado; 0% tiene `SEC_CUA_MOD_SAL` (nunca entra a una bolsa); 98.8% de `MOTIVO_PEDIDO` empieza literalmente con "ATENCION DE PEDIDO A LA O/C N°..." |
+
+**Decisión de diseño (2026-07-31):** `siga.v_pipeline_pedido` filtra
+`tipo_pedido='2'` — los `TIPO_PEDIDO='1'` se excluyen del kanban de compras
+porque no son pedidos de compra y nunca podrían "avanzar" (mostrarían
+estancamiento perpetuo falso). El snapshot (`siga.pedidos`,
+`siga.pedido_items`) sigue trayéndolos sin filtrar: el dato no se descarta,
+solo se saca de la vista de compras.
+
+**Pendiente (fuera de alcance, abierto para un futuro módulo):** `TIPO_PEDIDO='1'`
+es información real de trazabilidad de almacén (qué se despachó, cuándo, contra
+qué orden) que hoy no se muestra en ninguna vista. Si se prioriza un módulo de
+almacén/kardex, esta es la fuente.
 
 **Detalle `SIG_DETALLE_PEDIDOS`** — 47,018 ítems:
 

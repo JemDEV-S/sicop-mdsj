@@ -58,7 +58,7 @@ export function UltimosPedidos({ pedidos }: UltimosPedidosProps) {
 }
 
 function FilaPedido({ pedido }: { pedido: PedidoCard }) {
-  const href = `/interno/pedidos/${pedido.nro_pedido}/${pedido.tipo_bien}?ano=${pedido.ano_eje}`;
+  const href = `/interno/pedidos/${pedido.nro_pedido}/${pedido.tipo_bien}/${pedido.tipo_pedido ?? ''}?ano=${pedido.ano_eje}`;
 
   return (
     <tr className="hover:bg-muted transition-colors">

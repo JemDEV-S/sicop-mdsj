@@ -198,6 +198,7 @@ def contexto_pedido_bolsa(
                    AND cmn.TIPO_BIEN = dp.TIPO_BIEN
                 WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
                   AND dp.TIPO_BIEN = :tipo AND dp.NRO_PEDIDO = :nro
+                  AND dp.TIPO_PEDIDO = :tipo_ped
                   AND dp.SEC_CUA_MOD_SAL IS NOT NULL
                 """
             ),
@@ -248,6 +249,13 @@ def obtener_bolsa(
     el: ordenar por proximidad de monto seria una recomendacion disfrazada, y
     ese metodo esta descartado en §2 -- pierde el CCMN correcto en 33 casos.
 
+    Solo TIPO_PEDIDO='2' (pedido de compra, ver diccionario §10.2.1): SIGA
+    reutiliza SEC_CUA_MOD_SAL en items de atencion de almacen (TIPO_PEDIDO='1')
+    que no tienen relacion con el circuito de compras de esta bolsa -- sin el
+    filtro aparecen como un "pedido" mas de la bolsa con motivo y CC ajenos
+    (caso medido: bolsa 8905 trae el pedido 16/TIPO_PEDIDO=1 mezclado con los
+    3 pedidos 834/694/16 de TIPO_PEDIDO=2 que si son de esta bolsa).
+
     Ref: doc de refactorizacion §8.2
     """
     params = {
@@ -282,9 +290,11 @@ def obtener_bolsa(
                 INNER JOIN SIG_PEDIDOS p
                     ON p.ANO_EJE = dp.ANO_EJE AND p.SEC_EJEC = dp.SEC_EJEC
                    AND p.TIPO_BIEN = dp.TIPO_BIEN AND p.NRO_PEDIDO = dp.NRO_PEDIDO
+                   AND p.TIPO_PEDIDO = dp.TIPO_PEDIDO
                 WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
                   AND dp.SEC_CUA_MOD_SAL = :bolsa
                   AND dp.TIPO_BIEN = :tipo
+                  AND dp.TIPO_PEDIDO = '2'
                   AND p.ESTADO IN ('0', '1', '7')
                 ORDER BY p.FECHA_PEDIDO DESC, p.NRO_PEDIDO DESC
                 """
@@ -422,15 +432,20 @@ def _flags_programacion(
 
 
 def obtener_pedido(
-    ano: int, nro_pedido: int, tipo_bien: str
+    ano: int, nro_pedido: int, tipo_bien: str, tipo_pedido: str
 ) -> dict[str, Any] | None:
     """Cabecera + items + orden(es) + cadena arriba + conformidades + almacen.
 
-    Igual que antes; el timeline lo arma el service a partir de estos datos.
+    `NRO_PEDIDO` solo NO es unico (§5 CLAUDE.md): SIGA reutiliza el mismo
+    numero para pedidos distintos que solo se distinguen por TIPO_PEDIDO (p.
+    ej. 000003/B tiene un pedido de compra TIPO_PEDIDO='2' y una atencion de
+    almacen TIPO_PEDIDO='1' sin relacion entre si). Toda query de aqui debe
+    filtrar por los 4 campos de la llave o mezcla items/ordenes de pedidos
+    distintos bajo una sola pantalla (caso medido: pedido 3/B).
     """
     params = {
         "ano": ano, "sec_ejec": settings.SEC_EJEC,
-        "nro": nro_pedido, "tipo": tipo_bien,
+        "nro": nro_pedido, "tipo": tipo_bien, "tipo_ped": tipo_pedido,
     }
     with get_connection() as conn:
         cab = conn.execute(
@@ -456,6 +471,7 @@ def obtener_pedido(
                    AND m.sec_func = p.sec_func
                 WHERE p.ANO_EJE = :ano AND p.SEC_EJEC = :sec_ejec
                   AND p.NRO_PEDIDO = :nro AND p.TIPO_BIEN = :tipo
+                  AND p.TIPO_PEDIDO = :tipo_ped
                 """
             ),
             params,
@@ -491,6 +507,7 @@ def obtener_pedido(
                 FROM SIG_DETALLE_PEDIDOS dp
                 WHERE dp.ANO_EJE = :ano AND dp.sec_ejec = :sec_ejec
                   AND dp.NRO_PEDIDO = :nro AND dp.TIPO_BIEN = :tipo
+                  AND dp.TIPO_PEDIDO = :tipo_ped
                 ORDER BY dp.SECUENCIA
                 """
             ),
@@ -523,8 +540,10 @@ def obtener_pedido(
                     INNER JOIN SIG_PEDIDOS p
                         ON p.ANO_EJE = dp.ANO_EJE AND p.SEC_EJEC = dp.SEC_EJEC
                        AND p.TIPO_BIEN = dp.TIPO_BIEN AND p.NRO_PEDIDO = dp.NRO_PEDIDO
+                       AND p.TIPO_PEDIDO = dp.TIPO_PEDIDO
                     WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
                       AND dp.TIPO_BIEN = :tipo AND dp.NRO_PEDIDO = :nro
+                      AND dp.TIPO_PEDIDO = :tipo_ped
                 ),
                 pecosa AS (
                     SELECT DISTINCT ma.NRO_ORDEN
@@ -574,6 +593,7 @@ def obtener_pedido(
                        AND cmn.TIPO_BIEN = dp.TIPO_BIEN
                     WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
                       AND dp.TIPO_BIEN = :tipo AND dp.NRO_PEDIDO = :nro
+                      AND dp.TIPO_PEDIDO = :tipo_ped
                       AND dp.SEC_CUA_MOD_SAL IS NOT NULL
                     GROUP BY dp.SEC_CUA_MOD_SAL
                     HAVING COUNT(DISTINCT cmn.NRO_CONSOLID) = 1
@@ -768,6 +788,7 @@ def obtener_pedido(
                            AND dp.NRO_PECOSA = ma.NRO_MOVIMTO
                         WHERE dp.ANO_EJE = :ano AND dp.SEC_EJEC = :sec_ejec
                           AND dp.NRO_PEDIDO = :nro AND dp.TIPO_BIEN = :tipo
+                          AND dp.TIPO_PEDIDO = :tipo_ped
                           AND dp.NRO_PECOSA > 0
                         ORDER BY ma.FECHA_MOVIMTO
                         """
@@ -779,7 +800,6 @@ def obtener_pedido(
     # Campos de la cascada de confianza: el timeline los necesita para saber
     # si las etapas 4-7 son de ESTE pedido o avance del grupo (§4). Sin esto
     # el detalle pintaria verdes ajenos, que es el bug que §7 describe.
-    tipo_pedido = str(cab["TIPO_PEDIDO"] or "").strip()
     ctx = contexto_pedido_bolsa(ano, tipo_bien, tipo_pedido, nro_pedido) or {}
     candidatos = frozenset(ctx.get("candidatos") or ())
 

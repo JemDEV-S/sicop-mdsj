@@ -14,17 +14,26 @@ interface UseDetalleParams {
   tipoBien: string;
 }
 
-export function useDetallePedido({ nroPedido, tipoBien }: UseDetalleParams) {
+interface UseDetalleConTipoParams extends UseDetalleParams {
+  tipoPedido: string;
+}
+
+export function useDetallePedido({
+  nroPedido,
+  tipoBien,
+  tipoPedido,
+}: UseDetalleConTipoParams) {
   const ano = useContextoInterno((s) => s.añoActivo);
   return useQuery({
-    queryKey: ['interno', 'pedido', 'detalle', ano, nroPedido, tipoBien],
+    queryKey: ['interno', 'pedido', 'detalle', ano, nroPedido, tipoBien, tipoPedido],
     queryFn: async () => {
       const { data } = await apiClient.get<PedidoDetalle>(
-        `/interno/pedidos/${nroPedido}/${tipoBien}`,
+        `/interno/pedidos/${nroPedido}/${tipoBien}/${tipoPedido}`,
         { params: { ano } },
       );
       return data;
     },
+    enabled: Boolean(tipoPedido),
     // El detalle es una foto momentánea del pedido; no refetch al focus.
     refetchOnWindowFocus: false,
   });

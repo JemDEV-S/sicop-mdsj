@@ -40,7 +40,7 @@ export function PedidoCard({ pedido }: PedidoCardProps) {
 
   return (
     <Link
-      to={`/interno/pedidos/${pedido.nro_pedido}/${pedido.tipo_bien}`}
+      to={`/interno/pedidos/${pedido.nro_pedido}/${pedido.tipo_bien}/${pedido.tipo_pedido ?? ''}`}
       className={cn(
         'block rounded-md border bg-card p-2.5 text-xs transition-colors',
         'hover:border-primary/50 hover:bg-muted/40',

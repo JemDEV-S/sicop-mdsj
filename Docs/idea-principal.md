@@ -1,4 +1,4 @@
-# Sistema de Transparencia y Gestión Presupuestal
+# Sistema de Transparencia y Gestión Presupuestal(sicop)
 
 ## Municipalidad Distrital de San Jerónimo — Cusco, Perú
 

@@ -34,12 +34,14 @@ import type {
 interface PedidoDetalleProps {
   nroPedido: number;
   tipoBien: string;
+  tipoPedido: string;
 }
 
-export function PedidoDetalle({ nroPedido, tipoBien }: PedidoDetalleProps) {
+export function PedidoDetalle({ nroPedido, tipoBien, tipoPedido }: PedidoDetalleProps) {
   const { data, isLoading, isError, error, refetch } = useDetallePedido({
     nroPedido,
     tipoBien,
+    tipoPedido,
   });
 
   if (isLoading) {

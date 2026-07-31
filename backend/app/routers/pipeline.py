@@ -139,11 +139,12 @@ def listar_pedidos(
 
 
 @pedidos_router.get(
-    "/{nro_pedido}/{tipo_bien}", response_model=PedidoDetalleResponse
+    "/{nro_pedido}/{tipo_bien}/{tipo_pedido}", response_model=PedidoDetalleResponse
 )
 def detalle_pedido(
     nro_pedido: int,
     tipo_bien: str,
+    tipo_pedido: str,
     ano: int | None = None,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -153,12 +154,12 @@ def detalle_pedido(
             status_code=400, detail="tipo_bien debe ser B (Bien) o S (Servicio)"
         )
     ficha = pipeline_repo.obtener_pedido(
-        ano or settings.ANO_VIGENTE, nro_pedido, tipo_bien
+        ano or settings.ANO_VIGENTE, nro_pedido, tipo_bien, tipo_pedido
     )
     if ficha is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"pedido {nro_pedido}/{tipo_bien} no encontrado",
+            detail=f"pedido {nro_pedido}/{tipo_bien}/{tipo_pedido} no encontrado",
         )
     # RN-04: si el usuario no es admin, verifica que el CC del pedido este permitido.
     if user.centros_permitidos is not None:
@@ -170,7 +171,6 @@ def detalle_pedido(
             )
     # Resolucion manual (Postgres): si existe, la cascada la prioriza y el
     # timeline marca las etapas 4-7 como `manual` en vez de `grupo`.
-    tipo_pedido = str(ficha.get("TIPO_PEDIDO") or "").strip()
     manuales = resolucion_ccmn_repo.resoluciones_de_pedido(
         db, ano=ano or settings.ANO_VIGENTE, sec_ejec=int(settings.SEC_EJEC),
         tipo_bien=tipo_bien, tipo_pedido=tipo_pedido, nro_pedido=nro_pedido,

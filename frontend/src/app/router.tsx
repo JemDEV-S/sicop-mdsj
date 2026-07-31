@@ -91,7 +91,7 @@ export const router = createBrowserRouter([
             }
           },
           {
-            path: 'pedidos/:nroPedido/:tipoBien',
+            path: 'pedidos/:nroPedido/:tipoBien/:tipoPedido',
             lazy: async () => {
               const { default: Pedido } = await import('../pages/interno/Pedido');
               return { Component: Pedido };
