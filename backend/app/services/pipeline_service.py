@@ -123,11 +123,22 @@ def confianza_match(fila: dict[str, Any]) -> str:
     if fila.get("ccmn_manual"):
         return "resuelto_manual"
 
-    if n_cand == 0:
-        return "sin_ccmn"
-
     if n_cand == 1:
         return "unico"
+
+    # Con 0 candidatos la bolsa no lleva a ningun CCMN; PERO una orden cuyo
+    # texto nombra a ESTE pedido si lo dice en duro (caso 69/S: la bolsa 8977
+    # no tiene fila en SIG_CUADRO_MODIFICADO_CMN, pero la O/S 73 declara
+    # "PEDIDO DE SERVICIO N°0069" y su cadena apunta al CCMN 2094). La
+    # declaracion de la orden es un hecho de SIGA, no un parecido: se acepta
+    # como `declarado` en vez de decir "sin CCMN" mientras la orden esta a la
+    # vista. Sin candidatos no hay con que "conflictuar", asi que no aplica.
+    if n_cand == 0:
+        if fila.get("ccmn_declarado_orden"):
+            return "declarado"
+        if fila.get("ccmn_declarado_cert"):
+            return "declarado_cert"
+        return "sin_ccmn"
 
     # Con N candidatos solo una fuente declarativa desambigua. Si declara un
     # CCMN que no esta entre los candidatos es un typo o un desfase: se marca
@@ -209,7 +220,11 @@ def _acotar_avance_a_ccmn(
     """
     objetivo: list[tuple[dict[str, Any], tuple[str, int]]] = []
     for fila in filas:
-        if int(fila.get("n_candidatos_ccmn") or 0) <= 1:
+        # Con candidato unico la bolsa YA es el CCMN: no hay nada que acotar.
+        # Con 0 candidatos (bolsa sin fila en SIG_CUADRO_MODIFICADO_CMN) pero
+        # CCMN declarado por la orden (caso 69/S), el avance de bolsa esta vacio
+        # y hay que traerlo del CCMN declarado; con >1 se acota al resuelto.
+        if int(fila.get("n_candidatos_ccmn") or 0) == 1:
             continue
         ccmn = (
             fila.get("ccmn_manual")

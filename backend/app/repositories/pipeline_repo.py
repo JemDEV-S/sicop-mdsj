@@ -396,8 +396,23 @@ def _flags_programacion(
         "nro": nro_pedido,
     }
     filtro_ccmn = ""
+    ccmn_directo = ""
     if ccmn is not None:
-        filtro_ccmn = "AND cmn.NRO_CONSOLID = :ccmn"
+        filtro_ccmn = "AND c.NRO_CONSOLID = :ccmn"
+        # Cuando el CCMN esta resuelto pero la bolsa del pedido no lo enlaza en
+        # SIG_CUADRO_MODIFICADO_CMN (caso 69/S: bolsa 8977 sin fila; el CCMN
+        # 2094 lo declara la orden y vive en la bolsa 8885), se siembra la
+        # cadena directamente desde ese CCMN. Asi las etapas 5-8 se ven aunque
+        # el puente bolsa->CCMN falte en SIGA.
+        ccmn_directo = """
+                    UNION
+                    SELECT pc0.NRO_CONSOLID, pc0.TIPO_BIEN,
+                           pc0.ANO_EJE AS ANNO_EJEC, pc0.SEC_EJEC,
+                           pc0.TIPO_CONSOLID
+                    FROM SIG_PAAC_CONSOLIDADO pc0
+                    WHERE pc0.ANO_EJE = :ano AND pc0.SEC_EJEC = :sec_ejec
+                      AND pc0.TIPO_BIEN = :tipo AND pc0.NRO_CONSOLID = :ccmn
+        """
         params["ccmn"] = int(ccmn)
     with get_connection() as conn:
         fila = conn.execute(
@@ -411,6 +426,19 @@ def _flags_programacion(
                       AND dp.TIPO_BIEN = :tipo AND dp.TIPO_PEDIDO = :tipo_ped
                       AND dp.NRO_PEDIDO = :nro
                       AND dp.SEC_CUA_MOD_SAL IS NOT NULL
+                ),
+                cmn AS (
+                    -- CCMN candidatos por la bolsa del pedido...
+                    SELECT c.NRO_CONSOLID, c.TIPO_BIEN, c.ANNO_EJEC, c.SEC_EJEC,
+                           c.TIPO_CONSOLID
+                    FROM det d
+                    JOIN SIG_CUADRO_MODIFICADO_CMN c
+                        ON c.SEC_EJEC = d.SEC_EJEC
+                       AND c.ANNO_EJEC = d.ANO_EJE
+                       AND c.SEC_CUA_MOD_SAL = d.SEC_CUA_MOD_SAL
+                       AND c.TIPO_BIEN = d.TIPO_BIEN
+                       {filtro_ccmn}
+                    {ccmn_directo}
                 )
                 SELECT
                     MAX(CASE WHEN cmn.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END) AS tiene_puente_paac,
@@ -428,13 +456,7 @@ def _flags_programacion(
                     MIN(sc.FECHA_REG)                                             AS fecha_cotizacion_prog,
                     MIN(ca.FECHA_AUTORIZ)                                         AS fecha_cuadro_prog,
                     MIN(cf.FECHA_REG)                                             AS fecha_certif_prog
-                FROM det d
-                LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
-                    ON cmn.SEC_EJEC = d.SEC_EJEC
-                   AND cmn.ANNO_EJEC = d.ANO_EJE
-                   AND cmn.SEC_CUA_MOD_SAL = d.SEC_CUA_MOD_SAL
-                   AND cmn.TIPO_BIEN = d.TIPO_BIEN
-                   {filtro_ccmn}
+                FROM cmn
                 LEFT JOIN SIG_PAAC_CONSOLIDADO pc
                     ON pc.ANO_EJE = cmn.ANNO_EJEC
                    AND pc.SEC_EJEC = cmn.SEC_EJEC

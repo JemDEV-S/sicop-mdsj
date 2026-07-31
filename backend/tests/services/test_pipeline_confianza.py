@@ -35,6 +35,20 @@ def test_sin_candidatos_es_sin_ccmn():
     assert confianza_match(_fila(n_candidatos_ccmn=0)) == "sin_ccmn"
 
 
+def test_sin_candidatos_pero_orden_declara_es_declarado():
+    """Caso 69/S: la bolsa no tiene fila en SIG_CUADRO_MODIFICADO_CMN (0
+    candidatos), pero la orden nombra el pedido en sus especificaciones y su
+    cadena apunta a un CCMN. La declaracion de la orden es un hecho de SIGA:
+    resuelve a `declarado` en vez de decir "sin CCMN"."""
+    fila = _fila(n_candidatos_ccmn=0, ccmn_declarado_orden=2094)
+    assert confianza_match(fila) == "declarado"
+
+
+def test_sin_candidatos_con_declaracion_de_certificacion():
+    fila = _fila(n_candidatos_ccmn=0, ccmn_declarado_cert=2094)
+    assert confianza_match(fila) == "declarado_cert"
+
+
 def test_un_candidato_es_unico():
     assert confianza_match(_fila(n_candidatos_ccmn=1)) == "unico"
 

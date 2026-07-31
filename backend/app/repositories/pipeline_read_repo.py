@@ -73,11 +73,21 @@ def _elegir_declarado(
 # La orden nombra el pedido en su concepto; su CCMN es siga.ordenes.nro_consolid
 # (cadena dura via certificacion_fase, ya poblado en el sync).
 
+# La orden nombra el pedido en su CONCEPTO o en las ESPECIFICACIONES del item.
+# 751 ordenes 2026 lo dicen SOLO en especificaciones ("SEGUN PEDIDO DE SERVICIO
+# N°0069"): sin mirar ambas, el kanban no resuelve el puente y discrepa del
+# detalle (caso 69/S). Se emiten dos filas por orden (una por texto) para que el
+# parser de Python las agrupe igual.
 _SQL_DECL_ORDEN = """
     SELECT o.tipo_bien, o.nro_consolid AS ccmn, o.concepto AS texto
     FROM siga.ordenes o
     WHERE o.ano_eje = :ano AND o.sec_ejec = :sec_ejec
       AND o.concepto IS NOT NULL AND o.nro_consolid IS NOT NULL
+    UNION ALL
+    SELECT o.tipo_bien, o.nro_consolid AS ccmn, o.especificaciones AS texto
+    FROM siga.ordenes o
+    WHERE o.ano_eje = :ano AND o.sec_ejec = :sec_ejec
+      AND o.especificaciones IS NOT NULL AND o.nro_consolid IS NOT NULL
 """
 
 

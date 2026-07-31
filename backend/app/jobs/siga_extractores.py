@@ -255,6 +255,7 @@ _ORDENES = Extractor(
         "nro_consolid", "nro_certifica", "exp_siga", "exp_siaf",
         "sec_func", "clasificador", "mes_cale",
         "proveedor", "proveedor_nombre", "proveedor_ruc", "concepto",
+        "especificaciones",
         "total_fact_soles", "estado", "estado_siaf", "fecha_orden", "fecha_reg",
         "flag_recep", "fecha_cierre",
     ),
@@ -264,6 +265,7 @@ _ORDENES = Extractor(
                o.PROVEEDOR, o.TOTAL_FACT_SOLES, o.ESTADO, o.ESTADO_SIAF,
                o.FECHA_ORDEN, o.FECHA_REG,
                CAST(o.CONCEPTO AS VARCHAR(2000)) AS CONCEPTO,
+               it.ESPECIFICACIONES,
                ca.NRO_CONS_PAAC AS NRO_CONSOLID,
                op.SEC_FUNC, op.CLASIFICADOR, op.MES_CALE,
                c.NOMBRE_PROV, c.NRO_RUC,
@@ -295,7 +297,13 @@ _ORDENES = Extractor(
                    -- Fecha de cierre = ultima recepcion, solo si TODOS los items
                    -- estan completos (ningun item con FLAG_RECEP <> '3').
                    CASE WHEN MIN(FLAG_RECEP) = '3'
-                        THEN MAX(FECHA_RECEP) END AS FECHA_CIERRE
+                        THEN MAX(FECHA_RECEP) END AS FECHA_CIERRE,
+                   -- Especificaciones del primer item: es donde la orden nombra
+                   -- el pedido ("SEGUN PEDIDO DE SERVICIO N°0069") en 751 ordenes
+                   -- que NO lo dicen en el CONCEPTO. Sin esto el kanban no
+                   -- resuelve el puente y discrepa del detalle (caso 69/S).
+                   CAST(MIN(CAST(ESPECIFICACIONES AS VARCHAR(2000))) AS VARCHAR(2000))
+                        AS ESPECIFICACIONES
             FROM SIG_ORDEN_ITEM
             WHERE ANO_EJE = :ano AND SEC_EJEC = :sec_ejec
             GROUP BY ANO_EJE, SEC_EJEC, TIPO_BIEN, NRO_ORDEN
@@ -312,6 +320,7 @@ _ORDENES = Extractor(
         "clasificador": _s(r["CLASIFICADOR"]), "mes_cale": _s(r["MES_CALE"]),
         "proveedor": _i(r["PROVEEDOR"]), "proveedor_nombre": _s(r["NOMBRE_PROV"]),
         "proveedor_ruc": _s(r["NRO_RUC"]), "concepto": _s(r["CONCEPTO"]),
+        "especificaciones": _s(r["ESPECIFICACIONES"]),
         "total_fact_soles": _f(r["TOTAL_FACT_SOLES"]), "estado": _s(r["ESTADO"]),
         "estado_siaf": _s(r["ESTADO_SIAF"]), "fecha_orden": r["FECHA_ORDEN"],
         "fecha_reg": r["FECHA_REG"],
