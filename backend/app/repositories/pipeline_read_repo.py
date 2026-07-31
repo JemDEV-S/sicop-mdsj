@@ -149,6 +149,45 @@ def _adjuntar_puente(
     fila["ccmn_manual"] = None
 
 
+# ─── Avance por CCMN individual (caso 286/B) ─────────────────────────────
+#
+# `v_bolsa_avance` agrega sobre TODOS los candidatos de la bolsa; cuando el
+# puente resuelve hacia un CCMN concreto, el avance atribuible es el de ESE
+# CCMN. El service lo usa para sobrescribir los campos bolsa_* de las filas
+# resueltas antes de clasificar.
+
+
+def avance_por_ccmn(
+    db: Session, ano: int, claves: list[tuple[str, int]]
+) -> dict[tuple[str, int], dict[str, Any]]:
+    """Avance de la cadena dura por (tipo_bien, nro_consolid) desde
+    `siga.v_ccmn_avance`."""
+    if not claves:
+        return {}
+    from sqlalchemy import bindparam
+
+    ccmns = sorted({int(c) for _, c in claves})
+    rows = db.execute(
+        text(
+            """
+            SELECT tipo_bien, nro_consolid, n_ordenes, ordenes_csv,
+                   fecha_consolid, fecha_cotizacion, fecha_cuadro, fecha_certificacion,
+                   fecha_orden, fecha_compromiso, fecha_ejecucion,
+                   fecha_despacho, fecha_devengado
+            FROM siga.v_ccmn_avance
+            WHERE ano_eje = :ano AND sec_ejec = :sec_ejec
+              AND nro_consolid IN :ccmns
+            """
+        ).bindparams(bindparam("ccmns", expanding=True)),
+        {"ano": ano, "sec_ejec": int(settings.SEC_EJEC), "ccmns": ccmns},
+    ).mappings()
+    out = {
+        ((r["tipo_bien"] or "").strip(), int(r["nro_consolid"])): dict(r)
+        for r in rows
+    }
+    return {k: v for k, v in out.items() if k in set(claves)}
+
+
 # ─── Cruce MEF por celda (§02.6) ─────────────────────────────────────────
 #
 # El devengado presupuestal es SIEMPRE del MEF (principio 1), nunca de SIGA. La

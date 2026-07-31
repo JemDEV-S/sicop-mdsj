@@ -414,8 +414,30 @@ function BloquePedido({ pedido }: { pedido: PedidoDetalleType }) {
     <SectionCard titulo="Pedido" icono={ClipboardList} padding="md">
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
         <FilaDato label="Fecha pedido" valor={formatFecha(pedido.fecha_pedido)} />
-        <FilaDato label="Aprobado" valor={formatFecha(pedido.fecha_aprob)} />
-        <FilaDato label="Atendido" valor={formatFecha(pedido.fecha_atenc)} />
+        {/* La cabecera de SIGA no registra estas fechas en pedidos de compra:
+            el backend las completa desde el seguimiento (VB Jefe / Atendido).
+            Cuando ni el seguimiento las tiene, se dice el estado con palabras
+            en vez de dejar una raya que parece un dato faltante del sistema. */}
+        <FilaDato
+          label="Aprobado"
+          valor={
+            pedido.fecha_aprob
+              ? formatFecha(pedido.fecha_aprob)
+              : pedido.estado_pedido === '1' || pedido.estado_pedido === '7'
+                ? 'Sí · SIGA no registra la fecha'
+                : 'Todavía no'
+          }
+        />
+        <FilaDato
+          label="Atendido"
+          valor={
+            pedido.fecha_atenc
+              ? formatFecha(pedido.fecha_atenc)
+              : pedido.estado_pedido === '7'
+                ? 'Sí · SIGA no registra la fecha'
+                : 'Todavía no'
+          }
+        />
         <FilaDato
           label="Meta"
           valor={
@@ -433,8 +455,18 @@ function BloquePedido({ pedido }: { pedido: PedidoDetalleType }) {
         />
         <FilaDato
           label="Fuente financ."
-          valor={pedido.fuente_financ ?? '—'}
-          mono
+          valor={
+            pedido.fuente_financ ? (
+              <>
+                <span className="font-mono text-muted-foreground mr-1">
+                  {pedido.fuente_financ}
+                </span>
+                <span>{pedido.fuente_financ_nombre ?? ''}</span>
+              </>
+            ) : (
+              '—'
+            )
+          }
         />
         <FilaDato label="Solicitante" valor={pedido.solicitante ?? '—'} />
         {pedido.motivo ? (

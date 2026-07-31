@@ -478,9 +478,14 @@ class PedidoDetalleResponse(BaseModel):
     fecha_pedido: date | None = None
     fecha_aprob: date | None = None
     fecha_atenc: date | None = None
+    # Fecha del VB del jefe (seguimiento SIGA): en los pedidos de compra es el
+    # hito real de aprobacion — el estado '2' del seguimiento nunca se alcanza.
+    fecha_vb_jefe: date | None = None
     motivo: str | None = None
     solicitante: str | None = None
     fuente_financ: str | None = None
+    # Nombre del catalogo FUENTE_FINANC (el codigo va en fuente_financ).
+    fuente_financ_nombre: str | None = None
 
     etapa_actual: str
     etapa_actual_numero: int

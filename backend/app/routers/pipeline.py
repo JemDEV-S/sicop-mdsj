@@ -153,8 +153,18 @@ def detalle_pedido(
         raise HTTPException(
             status_code=400, detail="tipo_bien debe ser B (Bien) o S (Servicio)"
         )
+    # Resolucion manual (Postgres) ANTES de armar la ficha: la cascada la
+    # prioriza, el timeline marca las etapas 4-7 como `manual` y el repo acota
+    # la cadena de programacion y las ordenes al CCMN resuelto.
+    manuales = resolucion_ccmn_repo.resoluciones_de_pedido(
+        db, ano=ano or settings.ANO_VIGENTE, sec_ejec=int(settings.SEC_EJEC),
+        tipo_bien=tipo_bien, tipo_pedido=tipo_pedido, nro_pedido=nro_pedido,
+    )
+    ccmn_manual = manuales[0]["nro_consolid"] if manuales else None
+
     ficha = pipeline_repo.obtener_pedido(
-        ano or settings.ANO_VIGENTE, nro_pedido, tipo_bien, tipo_pedido
+        ano or settings.ANO_VIGENTE, nro_pedido, tipo_bien, tipo_pedido,
+        ccmn_manual=ccmn_manual,
     )
     if ficha is None:
         raise HTTPException(
@@ -169,14 +179,6 @@ def detalle_pedido(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="pedido fuera del alcance del usuario",
             )
-    # Resolucion manual (Postgres): si existe, la cascada la prioriza y el
-    # timeline marca las etapas 4-7 como `manual` en vez de `grupo`.
-    manuales = resolucion_ccmn_repo.resoluciones_de_pedido(
-        db, ano=ano or settings.ANO_VIGENTE, sec_ejec=int(settings.SEC_EJEC),
-        tipo_bien=tipo_bien, tipo_pedido=tipo_pedido, nro_pedido=nro_pedido,
-    )
-    if manuales:
-        ficha["ccmn_manual"] = manuales[0]["nro_consolid"]
 
     mapping = {
         "ANO_EJE": "ano_eje", "SEC_EJEC": "sec_ejec",

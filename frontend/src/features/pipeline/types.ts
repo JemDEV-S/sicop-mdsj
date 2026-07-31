@@ -215,9 +215,13 @@ export interface PedidoDetalle {
   fecha_pedido: string | null;
   fecha_aprob: string | null;
   fecha_atenc: string | null;
+  /** VB del jefe (seguimiento SIGA): hito real de aprobación en pedidos de compra. */
+  fecha_vb_jefe: string | null;
   motivo: string | null;
   solicitante: string | null;
   fuente_financ: string | null;
+  /** Nombre del catálogo de fuentes (el código va en fuente_financ). */
+  fuente_financ_nombre: string | null;
 
   etapa_actual: EtapaCodigo;
   etapa_actual_numero: number;

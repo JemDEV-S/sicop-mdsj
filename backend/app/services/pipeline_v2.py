@@ -68,6 +68,10 @@ _ETAPAS_BOLSA: tuple[tuple[str, str], ...] = (
     ("bolsa_fecha_certificacion", ETAPA_CERTIFICACION),
     ("bolsa_fecha_cuadro", ETAPA_CUADRO_ADQUISICION),
     ("bolsa_fecha_cotizacion", ETAPA_COTIZACION),
+    # Cuadro consolidado / estudio de mercado (etapa 5): sin esta entrada un
+    # pedido cuyo CCMN existe pero aun no cotiza se quedaba en "cuadro de
+    # necesidades" en el kanban mientras el detalle mostraba la etapa 5.
+    ("bolsa_fecha_consolid", ETAPA_CCMN),
 )
 
 
@@ -78,6 +82,22 @@ def max_etapa_bolsa(fila: dict[str, Any]) -> tuple[str | None, date | None]:
         if f is not None:
             return etapa, f
     return None, None
+
+
+def aplicar_avance_ccmn(fila: dict[str, Any], avance: dict[str, Any]) -> None:
+    """Sobrescribe el avance de bolsa de la fila con el del CCMN resuelto.
+
+    En una bolsa compartida las columnas `bolsa_*` agregan sobre TODOS los
+    candidatos; si el puente resuelve hacia un CCMN concreto, atribuirle al
+    pedido el avance agregado es heredar hitos de OTRO candidato (caso 286/B:
+    asociado al 2530 sin orden, aparecia en "orden emitida" por la O/C del
+    3472). `avance` es una fila de `siga.v_ccmn_avance`.
+    """
+    fila["bolsa_n_ordenes"] = int(avance.get("n_ordenes") or 0)
+    fila["bolsa_ordenes_csv"] = avance.get("ordenes_csv")
+    for hito in ("consolid", "cotizacion", "cuadro", "certificacion", "orden",
+                 "compromiso", "ejecucion", "despacho", "devengado"):
+        fila[f"bolsa_fecha_{hito}"] = avance.get(f"fecha_{hito}")
 
 
 def avance_bolsa(fila: dict[str, Any]) -> dict[str, Any]:
@@ -164,6 +184,7 @@ def fechas_alcanzadas(fila: dict[str, Any], confianza: str) -> dict[str, date]:
         _set(ETAPA_CUADRO_NECESIDAD, fila.get("fecha_aprob") or fila.get("fecha_pedido"))
 
     if confianza in CONFIANZA_RESUELTA:
+        _set(ETAPA_CCMN, fila.get("bolsa_fecha_consolid"))
         _set(ETAPA_COTIZACION, fila.get("bolsa_fecha_cotizacion"))
         _set(ETAPA_CUADRO_ADQUISICION, fila.get("bolsa_fecha_cuadro"))
         _set(ETAPA_CERTIFICACION, fila.get("bolsa_fecha_certificacion"))

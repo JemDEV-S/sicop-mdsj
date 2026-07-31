@@ -367,9 +367,10 @@ def obtener_bolsa(
 
 
 def _flags_programacion(
-    ano: int, tipo_bien: str, tipo_pedido: str, nro_pedido: int
+    ano: int, tipo_bien: str, tipo_pedido: str, nro_pedido: int,
+    ccmn: int | None = None,
 ) -> dict[str, Any]:
-    """Presencia de las etapas 4-7 mirando la cadena del CCMN hacia arriba.
+    """Presencia y FECHAS de las etapas 4-7 mirando la cadena del CCMN.
 
     Mismos joins que los CTE del kanban (bolsa -> CCMN -> PAAC -> cotizacion ->
     cuadro de adquisicion). Devuelve los flags que `construir_timeline` usa para
@@ -379,18 +380,29 @@ def _flags_programacion(
     Sin esto el detalle solo veia la cadena hacia abajo desde la orden, y un
     pedido detenido en el estudio de mercado se mostraba en "cuadro necesidad"
     (caso 311/S).
+
+    `ccmn`: cuando el puente pedido<->CCMN esta resuelto (manual, declarado o
+    candidato unico), acota la cadena a ESE cuadro consolidado. Sin el filtro,
+    el MAX() responde "¿ALGUN candidato de la bolsa llego a la etapa?" y un
+    pedido asociado a un CCMN detenido hereda el avance de otro candidato
+    (caso 286/B: asociado al 2530 sin cotizacion, mostraba la cotizacion y el
+    cuadro del 3472).
     """
-    params = {
+    params: dict[str, Any] = {
         "ano": ano,
         "sec_ejec": settings.SEC_EJEC,
         "tipo": tipo_bien,
         "tipo_ped": tipo_pedido,
         "nro": nro_pedido,
     }
+    filtro_ccmn = ""
+    if ccmn is not None:
+        filtro_ccmn = "AND cmn.NRO_CONSOLID = :ccmn"
+        params["ccmn"] = int(ccmn)
     with get_connection() as conn:
         fila = conn.execute(
             text(
-                """
+                f"""
                 WITH det AS (
                     SELECT DISTINCT dp.SEC_CUA_MOD_SAL, dp.TIPO_BIEN,
                            dp.ANO_EJE, dp.SEC_EJEC
@@ -407,13 +419,18 @@ def _flags_programacion(
                     MAX(CASE WHEN ca.SEC_CUADRO IS NOT NULL THEN 1 ELSE 0 END)    AS tiene_cuadro_adq,
                     MIN(pc.NRO_CONSOLID)                                          AS nro_consolid,
                     MIN(pc.NRO_EST_MDO)                                           AS nro_est_mdo,
-                    MIN(ca.SEC_CUADRO)                                            AS sec_cuadro_prog
+                    MIN(ca.SEC_CUADRO)                                            AS sec_cuadro_prog,
+                    -- Fechas de la cadena: primera vez que se alcanzo cada hito.
+                    MIN(pc.FECHA_CONS)                                            AS fecha_consolid,
+                    MIN(sc.FECHA_REG)                                             AS fecha_cotizacion_prog,
+                    MIN(ca.FECHA_AUTORIZ)                                         AS fecha_cuadro_prog
                 FROM det d
                 LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
                     ON cmn.SEC_EJEC = d.SEC_EJEC
                    AND cmn.ANNO_EJEC = d.ANO_EJE
                    AND cmn.SEC_CUA_MOD_SAL = d.SEC_CUA_MOD_SAL
                    AND cmn.TIPO_BIEN = d.TIPO_BIEN
+                   {filtro_ccmn}
                 LEFT JOIN SIG_PAAC_CONSOLIDADO pc
                     ON pc.ANO_EJE = cmn.ANNO_EJEC
                    AND pc.SEC_EJEC = cmn.SEC_EJEC
@@ -440,12 +457,51 @@ def _flags_programacion(
             "tiene_puente_paac": 0, "tiene_ccmn": 0,
             "tiene_cotizacion": 0, "tiene_cuadro_adq": 0,
             "nro_consolid": None, "nro_est_mdo": None, "sec_cuadro_prog": None,
+            "fecha_consolid": None, "fecha_cotizacion_prog": None,
+            "fecha_cuadro_prog": None,
         }
     return dict(fila)
 
 
+def _fechas_seguimiento(
+    conn: Any, params: dict[str, Any]
+) -> dict[str, Any]:
+    """Fechas del flujo administrativo del pedido (SIG_SEGUIMIENTO).
+
+    La cabecera de SIG_PEDIDOS trae FECHA_APROB/FECHA_ATENC en NULL en el
+    100% de los pedidos de compra 2026 (diagnostico_sesion6/08); las fechas
+    reales viven en el seguimiento. Ojo: los pedidos de compra ('2') nunca
+    llegan al estado '2' (Aprobado) del seguimiento — su hito de aprobacion
+    es el VB del jefe (estado '1', 100% con fecha).
+    """
+    filas = conn.execute(
+        text(
+            """
+            SELECT se.ESTADO_SEGUIMIENTO AS estado, MIN(se.FECHA_ESTADO) AS fecha
+            FROM SIG_SEGUIMIENTO s
+            JOIN SIG_SEGUIMIENTO_ESTADO se
+                ON se.ANO_EJE = s.ANO_EJE AND se.SEC_EJEC = s.SEC_EJEC
+               AND se.TIPO_TRANSACCION = s.TIPO_TRANSACCION
+               AND se.NRO_ORIGEN = s.NRO_ORIGEN
+            WHERE s.ANO_EJE = :ano AND s.SEC_EJEC = :sec_ejec
+              AND s.TIPO_BIEN = :tipo AND s.TIPO_PEDIDO = :tipo_ped
+              AND TRY_CAST(s.NRO_PEDIDO AS INT) = :nro
+            GROUP BY se.ESTADO_SEGUIMIENTO
+            """
+        ),
+        params,
+    ).mappings().all()
+    por_estado = {(f["estado"] or "").strip(): f["fecha"] for f in filas}
+    return {
+        "fecha_vb_jefe": por_estado.get("1"),
+        "fecha_aprob_seg": por_estado.get("2"),
+        "fecha_atendido_seg": por_estado.get("8"),
+    }
+
+
 def obtener_pedido(
-    ano: int, nro_pedido: int, tipo_bien: str, tipo_pedido: str
+    ano: int, nro_pedido: int, tipo_bien: str, tipo_pedido: str,
+    ccmn_manual: int | None = None,
 ) -> dict[str, Any] | None:
     """Cabecera + items + orden(es) + cadena arriba + conformidades + almacen.
 
@@ -455,10 +511,29 @@ def obtener_pedido(
     almacen TIPO_PEDIDO='1' sin relacion entre si). Toda query de aqui debe
     filtrar por los 4 campos de la llave o mezcla items/ordenes de pedidos
     distintos bajo una sola pantalla (caso medido: pedido 3/B).
+
+    `ccmn_manual` (resolucion de Postgres, la inyecta el router) participa en
+    la atribucion: si el puente resuelve (manual > declarado > unico), la
+    cadena de programacion y las ordenes se acotan a ESE CCMN.
     """
-    params = {
+    # Contexto de bolsa ANTES de las queries: la cascada decide a que CCMN se
+    # acota la cadena (manual > declarado > candidato unico). Sin resolver, se
+    # mira la bolsa completa y el timeline marca el avance como "del grupo".
+    ctx = contexto_pedido_bolsa(ano, tipo_bien, tipo_pedido, nro_pedido)
+    if ctx is None:
+        return None
+    candidatos = frozenset(ctx.get("candidatos") or ())
+    ccmn_resuelto = (
+        ccmn_manual
+        or ctx.get("ccmn_declarado_orden")
+        or ctx.get("ccmn_declarado_cert")
+        or (next(iter(candidatos)) if len(candidatos) == 1 else None)
+    )
+
+    params: dict[str, Any] = {
         "ano": ano, "sec_ejec": settings.SEC_EJEC,
         "nro": nro_pedido, "tipo": tipo_bien, "tipo_ped": tipo_pedido,
+        "ccmn_res": int(ccmn_resuelto) if ccmn_resuelto is not None else None,
     }
     with get_connection() as conn:
         cab = conn.execute(
@@ -471,8 +546,24 @@ def obtener_pedido(
                     p.ESTADO                         AS estado_pedido,
                     p.FECHA_PEDIDO, p.FECHA_APROB, p.FECHA_ATENC,
                     LTRIM(RTRIM(CAST(p.MOTIVO_PEDIDO AS VARCHAR(500)))) AS motivo,
-                    LTRIM(RTRIM(p.NOMBRE_EMPLEADO))  AS solicitante,
-                    LTRIM(RTRIM(p.FUENTE_FINANC))    AS fuente_financ,
+                    -- NOMBRE_EMPLEADO viene NULL en el 100% de los pedidos
+                    -- 2026; el solicitante real se resuelve por el codigo
+                    -- EMPLEADO contra el maestro de personal (100% cruza).
+                    COALESCE(
+                        NULLIF(LTRIM(RTRIM(p.NOMBRE_EMPLEADO)), ''),
+                        NULLIF(LTRIM(RTRIM(CONCAT(
+                            LTRIM(RTRIM(pe.nombres)), ' ',
+                            LTRIM(RTRIM(pe.apellido_paterno)), ' ',
+                            LTRIM(RTRIM(pe.apellido_materno))
+                        ))), '')
+                    )                                AS solicitante,
+                    -- FUENTE_FINANC (texto) viene NULL; el codigo real esta
+                    -- en fuente_fto (100% poblado) y su nombre en el catalogo.
+                    COALESCE(
+                        NULLIF(LTRIM(RTRIM(p.FUENTE_FINANC)), ''),
+                        LTRIM(RTRIM(p.fuente_fto))
+                    )                                AS fuente_financ,
+                    LTRIM(RTRIM(ff.NOMBRE))          AS fuente_financ_nombre,
                     LTRIM(RTRIM(cc.NOMBRE_DEPEND))   AS centro_costo_nombre,
                     LTRIM(RTRIM(m.nombre))           AS nombre_meta
                 FROM SIG_PEDIDOS p
@@ -482,6 +573,17 @@ def obtener_pedido(
                 LEFT JOIN META m
                     ON m.ano_eje = p.ANO_EJE AND m.sec_ejec = p.SEC_EJEC
                    AND m.sec_func = p.sec_func
+                OUTER APPLY (
+                    SELECT TOP 1 x.nombres, x.apellido_paterno, x.apellido_materno
+                    FROM SIG_PERSONAL x
+                    WHERE x.SEC_EJEC = p.SEC_EJEC AND x.empleado = p.EMPLEADO
+                ) pe
+                OUTER APPLY (
+                    SELECT TOP 1 f.NOMBRE
+                    FROM FUENTE_FINANC f
+                    WHERE f.ANO_EJE = p.ANO_EJE
+                      AND f.FUENTE_FINANC = LTRIM(RTRIM(p.fuente_fto))
+                ) ff
                 WHERE p.ANO_EJE = :ano AND p.SEC_EJEC = :sec_ejec
                   AND p.NRO_PEDIDO = :nro AND p.TIPO_BIEN = :tipo
                   AND p.TIPO_PEDIDO = :tipo_ped
@@ -492,6 +594,8 @@ def obtener_pedido(
 
         if cab is None:
             return None
+
+        seguimiento = _fechas_seguimiento(conn, params)
 
         items = conn.execute(
             text(
@@ -621,11 +725,28 @@ def obtener_pedido(
                         ON o.ANO_EJE = :ano AND o.SEC_EJEC = :sec_ejec
                        AND o.TIPO_BIEN = :tipo AND o.SEC_CUADRO = ca.SEC_CUADRO
                 ),
+                -- Misma cadena dura (CCMN -> cuadro adq. -> orden), pero para
+                -- el CCMN que la cascada atribuyo a ESTE pedido (manual,
+                -- declarado o unico). Es lo que permite atribuir la O/C de un
+                -- BIEN igual que la O/S de un servicio: la orden trae
+                -- SEC_CUADRO en el 100% de los casos (diag. sesion6/08-E) y
+                -- el cuadro nombra su CCMN via NRO_CONS_PAAC.
+                cadena_resuelta AS (
+                    SELECT DISTINCT o.NRO_ORDEN
+                    FROM SIG_CUADRO_ADQUISICION ca
+                    JOIN SIG_ORDEN_ADQUISICION o
+                        ON o.ANO_EJE = :ano AND o.SEC_EJEC = :sec_ejec
+                       AND o.TIPO_BIEN = :tipo AND o.SEC_CUADRO = ca.SEC_CUADRO
+                    WHERE :ccmn_res IS NOT NULL
+                      AND ca.ANO_EJE = :ano AND ca.SEC_EJEC = :sec_ejec
+                      AND ca.TIPO_BIEN = :tipo AND ca.NRO_CONS_PAAC = :ccmn_res
+                ),
                 todas AS (
                     SELECT NRO_ORDEN, 'pecosa' AS metodo FROM pecosa
                     UNION SELECT NRO_ORDEN, 'composite' FROM composite
                     UNION SELECT NRO_ORDEN, 'declarado' FROM declarado
                     UNION SELECT NRO_ORDEN, 'cadena_ccmn' FROM cadena_ccmn
+                    UNION SELECT NRO_ORDEN, 'cadena_ccmn' FROM cadena_resuelta
                 )
                 SELECT
                     o.NRO_ORDEN, o.TIPO_BIEN,
@@ -662,6 +783,20 @@ def obtener_pedido(
         ).mappings().all()
 
         ordenes_list = [dict(o) for o in ordenes]
+
+        # Con el puente resuelto, las ordenes atribuibles son las de la cadena
+        # del CCMN resuelto mas las con evidencia dura de ESTE pedido (pecosa
+        # del item o NRO_ORDEN declarado en el item). El match composite es
+        # evidencia de la BOLSA, no del pedido: en una bolsa compartida trae
+        # las ordenes de los demas candidatos (caso 286/B: asociado al 2530
+        # sin orden, el composite mostraria la O/C 618 del 3472).
+        if ccmn_resuelto is not None:
+            def _atribuible(o: dict[str, Any]) -> bool:
+                if o.get("NRO_CONS_PAAC") is not None:
+                    return int(o["NRO_CONS_PAAC"]) == int(ccmn_resuelto)
+                metodos = (o.get("match_metodos") or "").split(",")
+                return "pecosa" in metodos or "declarado" in metodos
+            ordenes_list = [o for o in ordenes_list if _atribuible(o)]
 
         cadena_ids = {
             "sec_cuadros": sorted({o["SEC_CUADRO"] for o in ordenes_list if o.get("SEC_CUADRO")}),
@@ -830,28 +965,39 @@ def obtener_pedido(
                 )
             movimientos_almacen = list(unicos.values())
 
-    # Campos de la cascada de confianza: el timeline los necesita para saber
-    # si las etapas 4-7 son de ESTE pedido o avance del grupo (§4). Sin esto
-    # el detalle pintaria verdes ajenos, que es el bug que §7 describe.
-    ctx = contexto_pedido_bolsa(ano, tipo_bien, tipo_pedido, nro_pedido) or {}
-    candidatos = frozenset(ctx.get("candidatos") or ())
-
     # Etapas 4-7 (programacion): solo se ven por la cadena del CCMN, y este
     # `obtener_pedido` construye la cadena hacia abajo DESDE la orden. Un pedido
     # que llego al estudio de mercado pero no tiene orden aun no traeria ninguna
     # de estas etapas, y el detalle se cortaba en "cuadro de necesidad" aunque
     # el estudio de mercado ya existiera (caso 311/S). Estos flags miran la
-    # cadena hacia ARRIBA, igual que el kanban, para que el detalle coincida.
-    prog = _flags_programacion(ano, tipo_bien, tipo_pedido, nro_pedido)
+    # cadena hacia ARRIBA, igual que el kanban, y se acotan al CCMN resuelto
+    # cuando el puente resuelve.
+    prog = _flags_programacion(
+        ano, tipo_bien, tipo_pedido, nro_pedido, ccmn=ccmn_resuelto
+    )
+
+    # Fechas de aprobacion/atencion: la cabecera viene NULL en el 100% de los
+    # pedidos de compra; se completan desde el seguimiento. El VB del jefe solo
+    # cuenta como aprobacion si la cabecera ya dice aprobado/cerrado.
+    estado_cab = str(cab["estado_pedido"] or "").strip()
+    fecha_aprob = cab["FECHA_APROB"]
+    if fecha_aprob is None and estado_cab in ("1", "7"):
+        fecha_aprob = (
+            seguimiento.get("fecha_aprob_seg") or seguimiento.get("fecha_vb_jefe")
+        )
+    fecha_atenc = cab["FECHA_ATENC"] or seguimiento.get("fecha_atendido_seg")
 
     return {
         **dict(cab),
         **prog,
+        **seguimiento,
+        "FECHA_APROB": fecha_aprob,
+        "FECHA_ATENC": fecha_atenc,
         "n_candidatos_ccmn": len(candidatos),
         "ccmn_candidatos": candidatos,
         "ccmn_declarado_orden": ctx.get("ccmn_declarado_orden"),
         "ccmn_declarado_cert": ctx.get("ccmn_declarado_cert"),
-        "ccmn_manual": None,  # lo inyecta el router desde Postgres
+        "ccmn_manual": ccmn_manual,
         "sec_cua_mod_sal": (ctx.get("bolsas") or [None])[0],
         "items": [dict(i) for i in items],
         "ordenes": ordenes_list,

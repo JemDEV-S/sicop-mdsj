@@ -298,6 +298,62 @@ Programación genuina: ~225 (106 sin CCMN + 90 en cotización + ~29 tempranos).
 
 ---
 
+## 5.3 Cerrado (2026-07-31, sesión 7): atribución por CCMN resuelto + campos de cabecera
+
+Tres reportes del usuario sobre el caso **286/B** (asociado manualmente al
+cuadro consolidado 2530), resueltos y verificados contra SIGA
+(`backend/scripts/diagnostico_sesion6/08-09`):
+
+**(a) La resolución manual no acotaba el avance mostrado.** La bolsa del 286/B
+tiene 2 candidatos: el 2530 (detenido en el consolidado, sin cotización ni
+orden) y el 3472 (cadena completa hasta la O/C 618). Tras asociar al 2530:
+
+- El detalle marcaba cotización y cuadro de adquisición como alcanzados
+  ("manual", verde) porque `_flags_programacion` usaba `MAX()` sobre TODOS los
+  candidatos. Fix: `_flags_programacion(..., ccmn=)` filtra por el CCMN
+  resuelto (manual > declarado > único) y ahora devuelve también las FECHAS de
+  la cadena (`FECHA_CONS`, cotización, `FECHA_AUTORIZ`), que el timeline usa
+  en las etapas 4-7.
+- El kanban clasificaba con las columnas `bolsa_*` (agregado de la bolsa) y
+  ponía al 286/B en "orden emitida" con la O/C 618 ajena. Fix: nueva vista
+  `siga.v_ccmn_avance` (cadena por CCMN individual, migración `c9d4e5f6a7b1`)
+  + `pipeline_service._acotar_avance_a_ccmn` que sobrescribe el avance de los
+  pedidos resueltos en bolsas compartidas (`pipeline_v2.aplicar_avance_ccmn`,
+  puro y testeado).
+- Ambas vistas exponen ahora `fecha_consolid` y `_ETAPAS_BOLSA` incluye la
+  etapa 5: kanban y detalle dicen lo mismo ("Estudio de mercado" para 286/B).
+  La alerta roja que le queda es honesta: su CCMN 2530 no se mueve desde marzo.
+
+**(b) "¿La O/C de un bien se puede atribuir como la O/S de un servicio?" SÍ.**
+La cadena `CCMN → SIG_CUADRO_ADQUISICION (NRO_CONS_PAAC) → SIG_ORDEN_ADQUISICION
+(SEC_CUADRO)` es FK dura y está poblada al 100% en B y S (08-E). Lo que en
+bienes casi nunca existe es la *declaración* en texto (el concepto de la O/C
+rara vez nombra el pedido), así que el eslabón pedido→CCMN se resuelve por
+cascada o a mano — pero una vez resuelto, la orden es determinista. Implementado:
+CTE `cadena_resuelta` en `obtener_pedido` + filtro de órdenes atribuibles
+(las del CCMN resuelto + las con evidencia dura del pedido: pecosa o
+`NRO_ORDEN` declarado en el item; el match composite solo es evidencia de bolsa).
+
+**(c) Aprobado / atendido / fuente / solicitante vacíos.** La cabecera de
+`SIG_PEDIDOS` trae `FECHA_APROB`, `FECHA_ATENC`, `NOMBRE_EMPLEADO` y
+`FUENTE_FINANC` en NULL en el **100%** de los pedidos de compra 2026 (08-B).
+Fuentes reales, verificadas:
+
+| Campo | Fuente real | Cobertura |
+|---|---|---|
+| Solicitante | `EMPLEADO` → `SIG_PERSONAL` (nombres + apellidos) | 100% |
+| Fuente financ. | `SIG_PEDIDOS.fuente_fto` (código) + catálogo `FUENTE_FINANC` | 100% |
+| Aprobado | Seguimiento estado '1' **VB Jefe** (los pedidos '2' nunca llegan al estado '2' "Aprobado"; el VB solo cuenta si la cabecera ya dice aprobado/cerrado) | 100% de los aprobados |
+| Atendido | Seguimiento estado '8' cuando existe; si no, sin fecha (la UI lo dice con palabras) | parcial |
+
+Aplicado en el detalle (joins en `obtener_pedido` + `_fechas_seguimiento`), en
+el snapshot (extractor `_PEDIDOS` con `OUTER APPLY` a personal y `fuente_fto`;
+requiere re-sync) y en `v_pipeline_pedido` (COALESCE de `fecha_aprob` desde
+`siga.seguimiento_estados`). Campos nuevos del response: `fecha_vb_jefe`,
+`fuente_financ_nombre`.
+
+---
+
 ## 6. Trabajos de coherencia priorizados (el objetivo de la sesión)
 
 Orden sugerido; cada uno **verifica el dato contra SIGA antes de tocar la vista**.

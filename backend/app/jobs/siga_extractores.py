@@ -84,13 +84,35 @@ _PEDIDOS = Extractor(
         "motivo", "solicitante", "fuente_financ", "fecha_reg",
     ),
     _sql_base="""
-        SELECT ANO_EJE, SEC_EJEC, TIPO_BIEN, TIPO_PEDIDO, NRO_PEDIDO,
-               CENTRO_COSTO, sec_func, ESTADO, ACT_PROY,
-               FECHA_PEDIDO, FECHA_APROB, FECHA_ATENC,
-               CAST(MOTIVO_PEDIDO AS VARCHAR(2000)) AS MOTIVO,
-               NOMBRE_EMPLEADO AS SOLICITANTE, FUENTE_FINANC, FECHA_REG
-        FROM SIG_PEDIDOS
-        WHERE ANO_EJE = :ano AND SEC_EJEC = :sec_ejec
+        SELECT p.ANO_EJE, p.SEC_EJEC, p.TIPO_BIEN, p.TIPO_PEDIDO, p.NRO_PEDIDO,
+               p.CENTRO_COSTO, p.sec_func, p.ESTADO, p.ACT_PROY,
+               p.FECHA_PEDIDO, p.FECHA_APROB, p.FECHA_ATENC,
+               CAST(p.MOTIVO_PEDIDO AS VARCHAR(2000)) AS MOTIVO,
+               -- NOMBRE_EMPLEADO viene NULL en el 100% de los pedidos 2026;
+               -- el solicitante real se resuelve por el codigo EMPLEADO contra
+               -- el maestro de personal (100% cruza, diagnostico_sesion6/09).
+               COALESCE(
+                   NULLIF(LTRIM(RTRIM(p.NOMBRE_EMPLEADO)), ''),
+                   NULLIF(LTRIM(RTRIM(CONCAT(
+                       LTRIM(RTRIM(pe.nombres)), ' ',
+                       LTRIM(RTRIM(pe.apellido_paterno)), ' ',
+                       LTRIM(RTRIM(pe.apellido_materno))
+                   ))), '')
+               ) AS SOLICITANTE,
+               -- FUENTE_FINANC (texto) viene NULL; el codigo real (catalogo
+               -- MEF: 09=RDR, 18=Canon...) esta en fuente_fto, 100% poblado.
+               COALESCE(
+                   NULLIF(LTRIM(RTRIM(p.FUENTE_FINANC)), ''),
+                   LTRIM(RTRIM(p.fuente_fto))
+               ) AS FUENTE_FINANC,
+               p.FECHA_REG
+        FROM SIG_PEDIDOS p
+        OUTER APPLY (
+            SELECT TOP 1 x.nombres, x.apellido_paterno, x.apellido_materno
+            FROM SIG_PERSONAL x
+            WHERE x.SEC_EJEC = p.SEC_EJEC AND x.empleado = p.EMPLEADO
+        ) pe
+        WHERE p.ANO_EJE = :ano AND p.SEC_EJEC = :sec_ejec
     """,
     mapear=lambda r: {
         "ano_eje": _i(r["ANO_EJE"]), "sec_ejec": _i(r["SEC_EJEC"]),

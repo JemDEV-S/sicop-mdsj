@@ -12,6 +12,7 @@ from datetime import date
 
 from app.services import pipeline_v2
 from app.schemas.pipeline import (
+    ETAPA_CCMN,
     ETAPA_CIERRE,
     ETAPA_CUADRO_NECESIDAD,
     ETAPA_DESPACHO_PECOSA,
@@ -104,6 +105,42 @@ def test_avance_bolsa_lista_ordenes():
     assert ab["n_ordenes"] == 3
     assert [o["nro_orden"] for o in ab["ordenes"]] == [132, 155, 802]
     assert ab["max_etapa"] == ETAPA_DEVENGADO
+
+
+# ─── Avance acotado al CCMN resuelto (caso 286/B) ────────────────────────
+
+
+def test_aplicar_avance_ccmn_sobrescribe_bolsa():
+    """El pedido resuelto hacia un CCMN detenido NO hereda la orden de otro
+    candidato de la bolsa: el avance mostrado pasa a ser el de SU CCMN."""
+    f = _fila(
+        tipo_bien="B", n_candidatos_ccmn=2, ccmn_candidatos_csv="2530,3472",
+        ccmn_manual=2530,
+        # Agregado de la bolsa: incluye la O/C 618 del candidato 3472.
+        bolsa_n_ordenes=1, bolsa_ordenes_csv="618",
+        bolsa_fecha_consolid=date(2026, 3, 2),
+        bolsa_fecha_cotizacion=date(2026, 5, 29),
+        bolsa_fecha_cuadro=date(2026, 6, 3),
+        bolsa_fecha_orden=date(2026, 6, 3),
+    )
+    # Cadena real del CCMN 2530: solo llego al consolidado.
+    pipeline_v2.aplicar_avance_ccmn(f, {
+        "n_ordenes": 0, "ordenes_csv": None,
+        "fecha_consolid": date(2026, 3, 2),
+    })
+    etapa, fecha = pipeline_v2.clasificar_etapa(f, "resuelto_manual")
+    assert etapa == ETAPA_CCMN
+    assert fecha == date(2026, 3, 2)
+    assert pipeline_v2.avance_bolsa(f)["n_ordenes"] == 0
+    assert pipeline_v2.identificadores(f, "resuelto_manual")["orden"] is None
+
+
+def test_consolidado_clasifica_etapa_5():
+    """Con fecha de consolidado y puente resuelto, la etapa es estudio de
+    mercado (5), no cuadro de necesidades (3) — coherencia con el detalle."""
+    f = _fila(bolsa_fecha_consolid=date(2026, 3, 2))
+    etapa, _ = pipeline_v2.clasificar_etapa(f, "unico")
+    assert etapa == ETAPA_CCMN
 
 
 # ─── Alertas honestas ────────────────────────────────────────────────────

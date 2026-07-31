@@ -196,6 +196,51 @@ def _aplicar_resoluciones_manuales(
         fila["ccmn_manual_todos"] = list(ccmns)
 
 
+def _acotar_avance_a_ccmn(
+    db: Session, filas: list[dict[str, Any]], *, ano: int
+) -> None:
+    """En bolsas compartidas, acota el avance de los pedidos RESUELTOS a su CCMN.
+
+    Las columnas `bolsa_*` de la vista agregan sobre todos los candidatos;
+    para un pedido con puente resuelto (manual o declarado) el avance
+    atribuible es el de SU cuadro consolidado. Con candidato unico no hay nada
+    que acotar (bolsa == CCMN). Igual que las resoluciones manuales, esto es
+    referencial: si la consulta falla se degrada al avance de bolsa.
+    """
+    objetivo: list[tuple[dict[str, Any], tuple[str, int]]] = []
+    for fila in filas:
+        if int(fila.get("n_candidatos_ccmn") or 0) <= 1:
+            continue
+        ccmn = (
+            fila.get("ccmn_manual")
+            or fila.get("ccmn_declarado_orden")
+            or fila.get("ccmn_declarado_cert")
+        )
+        if ccmn is None:
+            continue
+        clave = ((fila.get("tipo_bien") or "").strip(), int(ccmn))
+        objetivo.append((fila, clave))
+    if not objetivo:
+        return
+
+    try:
+        avances = pipeline_read_repo.avance_por_ccmn(
+            db, ano, sorted({c for _, c in objetivo})
+        )
+    except Exception:  # noqa: BLE001 — degradar, no romper el kanban
+        logger.warning(
+            "No se pudo leer siga.v_ccmn_avance; los pedidos resueltos "
+            "muestran el avance agregado de su bolsa",
+            exc_info=True,
+        )
+        return
+
+    for fila, clave in objetivo:
+        avance = avances.get(clave)
+        if avance is not None:
+            pipeline_v2.aplicar_avance_ccmn(fila, avance)
+
+
 # ─── API publica del servicio ─────────────────────────────────────────────
 
 
@@ -222,6 +267,7 @@ def clasificar_pedidos(
     """
     filas = pipeline_read_repo.pipeline_pedidos(db, ano, centros)
     _aplicar_resoluciones_manuales(db, filas, ano=ano)
+    _acotar_avance_a_ccmn(db, filas, ano=ano)
     dias_fallback, por_macrofase = _cargar_umbrales(db)
     hoy = date.today()
     sinc = _sincronizado_hasta(db)
@@ -332,9 +378,23 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
     es_bien = tipo_bien == "B"
 
     fecha_pedido = _to_dt(ficha.get("FECHA_PEDIDO") or ficha.get("fecha_pedido"))
-    fecha_aprob = _to_dt(ficha.get("FECHA_APROB") or ficha.get("fecha_aprob"))
-    fecha_atenc = _to_dt(ficha.get("FECHA_ATENC") or ficha.get("fecha_atenc"))
     estado_pedido = str(ficha.get("estado_pedido") or ficha.get("ESTADO") or "").strip()
+
+    # FECHA_APROB/FECHA_ATENC de la cabecera vienen NULL en el 100% de los
+    # pedidos de compra 2026: la fecha real vive en el seguimiento. Para los
+    # pedidos '2' el hito de aprobacion es el VB del jefe (estado '1'); el
+    # estado '2' (Aprobado) solo lo alcanzan otros tipos de pedido. El
+    # fallback solo aplica si la cabecera dice aprobado/cerrado, para no
+    # marcar aprobado un pedido aun en proceso con VB dado.
+    fecha_aprob = _to_dt(ficha.get("FECHA_APROB") or ficha.get("fecha_aprob"))
+    if fecha_aprob is None and estado_pedido in ("1", "7"):
+        fecha_aprob = _to_dt(
+            ficha.get("fecha_aprob_seg") or ficha.get("fecha_vb_jefe")
+        )
+    fecha_atenc = _to_dt(
+        ficha.get("FECHA_ATENC") or ficha.get("fecha_atenc")
+        or ficha.get("fecha_atendido_seg")
+    )
 
     ordenes = ficha.get("ordenes", []) or []
     cuadros = ficha.get("cuadros", []) or []
@@ -578,13 +638,23 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
          "La necesidad se incluyo en un cuadro de necesidades.",
          docs=_docs(("Cuadro necesidades", bolsa)))
     # Etapas 4-7: se ven por la cadena del CCMN -> estado por la cascada.
-    _add(ETAPA_PUENTE_PAAC, None, tiene_puente_paac,
+    # Fechas de la cadena de programacion (las devuelve `_flags_programacion`,
+    # acotadas al CCMN resuelto cuando el puente resuelve).
+    fecha_consolid = _to_dt(ficha.get("fecha_consolid"))
+    fecha_cotiz = _to_dt(ficha.get("fecha_cotizacion_prog"))
+    if fecha_cuadro is None:
+        # Sin orden todavia, el cuadro de adquisicion no aparece en `cuadros`
+        # (que se construye hacia abajo desde la orden); la fecha viene de la
+        # cadena del CCMN hacia arriba.
+        fecha_cuadro = _to_dt(ficha.get("fecha_cuadro_prog"))
+
+    _add(ETAPA_PUENTE_PAAC, fecha_consolid, tiene_puente_paac,
          "La necesidad entro a la programacion anual (PAAC).", via_ccmn=True,
          docs=_docs(("Cuadro consolidado", ccmn)))
-    _add(ETAPA_CCMN, None, tiene_ccmn_prog,
+    _add(ETAPA_CCMN, fecha_consolid, tiene_ccmn_prog,
          "Se hizo el estudio de mercado del requerimiento.", via_ccmn=True,
          docs=docs_estudio)
-    _add(ETAPA_COTIZACION, None, tiene_cotizacion,
+    _add(ETAPA_COTIZACION, fecha_cotiz, tiene_cotizacion,
          "Se solicitaron cotizaciones a proveedores.", via_ccmn=True,
          docs=_docs(("Cuadro consolidado", ccmn)))
     _add(ETAPA_CUADRO_ADQUISICION, fecha_cuadro, tiene_cuadro_adq,
