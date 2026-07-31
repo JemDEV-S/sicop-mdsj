@@ -1,7 +1,9 @@
+import * as React from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   ChevronLeft,
   ClipboardList,
   Loader2,
@@ -17,10 +19,12 @@ import { ErrorState } from '@/components/layout/ErrorState';
 import Timeline, { type HitoTimeline } from '@/components/Timeline';
 import { formatearMoneda, formatFecha } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
-import { useDetallePedido } from './api';
+import { useBolsaPedido, useDetallePedido, useRefrescarPedido } from './api';
 import { Anotaciones } from './Anotaciones';
 import { BolsaPedido } from './BolsaPedido';
+import { CopyChip } from './pipeline-ui';
 import type {
+  CandidatoCCMN,
   ItemPedido,
   OrdenAsociada,
   PedidoDetalle as PedidoDetalleType,
@@ -90,10 +94,16 @@ export function PedidoDetalle({ nroPedido, tipoBien }: PedidoDetalleProps) {
     );
   }
 
+  // El cuadro de necesidades (CCMN) determina las etapas de programación del
+  // recorrido, así que va ANTES del recorrido, no después. Cuando el pedido
+  // ya está resuelto la bolsa arranca plegada — es contexto opcional; cuando
+  // es ambiguo se muestra abierta, porque es justo lo que hay que resolver.
+  const resuelto = esNivelResuelto(data.confianza_ccmn);
+
   return (
     <div className="space-y-6">
       <BreadcrumbVolver />
-      <CabeceraPedido pedido={data} />
+      <CabeceraPedido pedido={data} nroPedido={nroPedido} tipoBien={tipoBien} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <BloquePedido pedido={data} />
@@ -102,21 +112,33 @@ export function PedidoDetalle({ nroPedido, tipoBien }: PedidoDetalleProps) {
 
       {data.items.length > 0 ? <BloqueItems items={data.items} /> : null}
 
-      <BloqueTimeline eventos={data.timeline} pedido={data} />
-
-      {/* La bolsa: dónde vive la ambigüedad. Se muestra después del recorrido
-          porque es el contexto que explica por qué hay etapas en ámbar. */}
+      {/* Cuadro de necesidades: el contexto que explica el recorrido. Va antes
+          del recorrido porque lo determina. */}
       {data.tipo_pedido ? (
         <BolsaPedido
           nroPedido={data.nro_pedido}
           tipoBien={data.tipo_bien}
           tipoPedido={data.tipo_pedido}
           confianza={data.confianza_ccmn}
+          plegableInicial={resuelto}
         />
       ) : null}
 
+      <BloqueTimeline eventos={data.timeline} pedido={data} />
+
       <Anotaciones nroPedido={nroPedido} tipoBien={tipoBien} />
     </div>
+  );
+}
+
+// Niveles donde el cuadro atribuido es de este pedido: la bolsa es entonces
+// contexto opcional y puede arrancar plegada. `ambiguo`/`conflicto` no.
+function esNivelResuelto(nivel: PedidoDetalleType['confianza_ccmn']): boolean {
+  return (
+    nivel === 'unico' ||
+    nivel === 'declarado' ||
+    nivel === 'declarado_cert' ||
+    nivel === 'resuelto_manual'
   );
 }
 
@@ -134,44 +156,78 @@ function BreadcrumbVolver() {
 
 // ─── Cabecera con estado actual ──────────────────────────────────────────
 
-function CabeceraPedido({ pedido }: { pedido: PedidoDetalleType }) {
+function CabeceraPedido({
+  pedido,
+  nroPedido,
+  tipoBien,
+}: {
+  pedido: PedidoDetalleType;
+  nroPedido: number;
+  tipoBien: string;
+}) {
   const IconoTipo = pedido.tipo_bien === 'B' ? Package : Wrench;
   const tipoLabel = pedido.tipo_bien === 'B' ? 'Bien' : 'Servicio';
   const esCierre = pedido.macrofase_actual === 'cierre';
-  const diasEnEtapa = diasDesde(fechaDeEtapaActual(pedido));
-  const estancado = !esCierre && diasEnEtapa != null && diasEnEtapa > 15;
+
+  // Identificadores (§03.2 bloque 1): los 3 IDs con copiar. La orden/SIAF solo
+  // se atribuyen cuando el puente está resuelto; si no, se muestran las del
+  // expediente en el bloque de órdenes, no aquí.
+  const idPedido = `${pedido.nro_pedido}-${pedido.ano_eje}/${pedido.tipo_bien}`;
+  const ordenAtribuida =
+    pedido.ccmn_atribuido != null
+      ? pedido.ordenes.find((o) => o.nro_certifica != null) ?? pedido.ordenes[0]
+      : undefined;
+  const prefijoOrden = pedido.tipo_bien === 'S' ? 'O/S' : 'O/C';
 
   return (
     <PageHeader
       titulo={`Pedido N° ${pedido.nro_pedido}-${pedido.ano_eje}`}
       descripcion={
-        <span className="inline-flex items-center gap-2 flex-wrap">
-          <span className="inline-flex items-center gap-1">
-            <IconoTipo className="w-4 h-4" aria-hidden="true" />
-            {tipoLabel}
-          </span>
-          {pedido.centro_costo_nombre ? (
-            <>
-              <span className="text-muted-foreground/50">·</span>
-              <span className="inline-flex items-center gap-1">
-                <MapPin className="w-4 h-4" aria-hidden="true" />
-                <span>
-                  {pedido.centro_costo_nombre}
-                  {pedido.centro_costo ? (
-                    <span className="text-muted-foreground/70 font-mono ml-1">
-                      ({pedido.centro_costo})
-                    </span>
-                  ) : null}
+        <div className="flex flex-col gap-2">
+          <span className="inline-flex items-center gap-2 flex-wrap">
+            <span className="inline-flex items-center gap-1">
+              <IconoTipo className="w-4 h-4" aria-hidden="true" />
+              {tipoLabel}
+            </span>
+            {pedido.centro_costo_nombre ? (
+              <>
+                <span className="text-muted-foreground/50">·</span>
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="w-4 h-4" aria-hidden="true" />
+                  <span>
+                    {pedido.centro_costo_nombre}
+                    {pedido.centro_costo ? (
+                      <span className="text-muted-foreground/70 font-mono ml-1">
+                        ({pedido.centro_costo})
+                      </span>
+                    ) : null}
+                  </span>
                 </span>
-              </span>
-            </>
-          ) : pedido.centro_costo ? (
-            <>
-              <span className="text-muted-foreground/50">·</span>
-              <span className="font-mono">{pedido.centro_costo}</span>
-            </>
-          ) : null}
-        </span>
+              </>
+            ) : pedido.centro_costo ? (
+              <>
+                <span className="text-muted-foreground/50">·</span>
+                <span className="font-mono">{pedido.centro_costo}</span>
+              </>
+            ) : null}
+          </span>
+          {/* Fila de identificadores con copiar-al-clic (§00 principio 2) */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <CopyChip valor={idPedido} />
+            {ordenAtribuida ? (
+              <CopyChip valor={`${prefijoOrden} ${ordenAtribuida.nro_orden}`} />
+            ) : null}
+            {ordenAtribuida?.exp_siaf != null ? (
+              <CopyChip
+                etiqueta="SIAF"
+                valor={String(ordenAtribuida.exp_siaf)}
+              />
+            ) : null}
+            {ordenAtribuida?.nro_certifica != null ? (
+              <CopyChip etiqueta="CCP" valor={String(ordenAtribuida.nro_certifica)} />
+            ) : null}
+          </div>
+        </div>
       }
       acciones={
         <div className="flex items-center gap-2">
@@ -191,18 +247,41 @@ function CabeceraPedido({ pedido }: { pedido: PedidoDetalleType }) {
             </span>
             <span>{pedido.etapa_actual_label}</span>
           </span>
-          {estancado ? (
-            <span
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium border border-destructive/50 bg-destructive/10 text-destructive"
-              title={`${diasEnEtapa} días en esta etapa`}
-            >
-              <AlertTriangle className="w-3.5 h-3.5" aria-hidden="true" />
-              Estancado
-            </span>
-          ) : null}
+          <BotonRefrescar
+            nroPedido={nroPedido}
+            tipoBien={tipoBien}
+            tipoPedido={pedido.tipo_pedido ?? ''}
+          />
         </div>
       }
     />
+  );
+}
+
+// Botón "Actualizar desde SIGA" (§01.3): sincroniza solo este pedido.
+function BotonRefrescar({
+  nroPedido,
+  tipoBien,
+  tipoPedido,
+}: {
+  nroPedido: number;
+  tipoBien: string;
+  tipoPedido: string;
+}) {
+  const refrescar = useRefrescarPedido({ nroPedido, tipoBien, tipoPedido });
+  if (!tipoPedido) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => refrescar.mutate()}
+      disabled={refrescar.isPending}
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:border-primary/50 disabled:opacity-60"
+    >
+      {refrescar.isPending ? (
+        <Loader2 className="w-3.5 h-3.5 animate-spin" aria-hidden="true" />
+      ) : null}
+      Actualizar desde SIGA
+    </button>
   );
 }
 
@@ -515,7 +594,162 @@ function BloqueTimeline({
     >
       {enGrupo > 0 ? <AvisoAvanceDelGrupo pedido={pedido} /> : null}
       <Timeline hitos={hitos} />
+
+      {/* Cuando el pedido es ambiguo, el recorrido de arriba dice la verdad
+          (esto es tuyo, esto es del grupo). El comparador de abajo deja mirar
+          el recorrido de CADA cuadro candidato por separado, para elegir con
+          criterio — sin que ninguno se muestre como "el" recorrido del pedido. */}
+      {enGrupo > 0 ? <ComparadorCandidatos pedido={pedido} /> : null}
     </SectionCard>
+  );
+}
+
+/**
+ * Comparador de cuadros candidatos.
+ *
+ * Cuando la bolsa agrupa varios pedidos, cada cuadro consolidado (CCMN) tiene
+ * su propio recorrido. Aquí el funcionario elige un candidato y ve HASTA DÓNDE
+ * llegó ESE cuadro y con qué números — para comparar candidatos entre sí.
+ *
+ * Distinción crítica (§2, §7 del doc): esto NO es el recorrido del pedido y no
+ * se pinta como tal. Es el recorrido del cuadro elegido, rotulado como
+ * candidato. El sistema nunca dice cuál es el correcto; solo muestra los datos
+ * de cada uno para que un humano decida. No se ordena ni sugiere por monto ni
+ * fecha (ambos métodos están medidos y descartados).
+ */
+function ComparadorCandidatos({ pedido }: { pedido: PedidoDetalleType }) {
+  const { data, isLoading } = useBolsaPedido({
+    nroPedido: pedido.nro_pedido,
+    tipoBien: pedido.tipo_bien,
+    tipoPedido: pedido.tipo_pedido ?? '',
+    habilitado: Boolean(pedido.tipo_pedido),
+  });
+
+  const candidatos = data?.candidatos ?? [];
+  const [sel, setSel] = React.useState<number | null>(null);
+
+  // Por defecto muestra el cuadro que la cascada atribuye, si lo hay. Es el
+  // punto de partida honesto: lo que el sistema cree, no una adivinanza nueva.
+  React.useEffect(() => {
+    if (sel != null) return;
+    const primero = candidatos[0];
+    if (pedido.ccmn_atribuido != null) {
+      setSel(pedido.ccmn_atribuido);
+    } else if (primero) {
+      setSel(primero.nro_consolid);
+    }
+  }, [candidatos, pedido.ccmn_atribuido, sel]);
+
+  if (isLoading || candidatos.length < 2) return null;
+
+  const elegido = candidatos.find((c) => c.nro_consolid === sel) ?? null;
+
+  return (
+    <div className="mt-6 border-t border-border pt-4">
+      <h3 className="text-sm font-medium text-foreground">
+        Comparar cuadros candidatos
+      </h3>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Cada cuadro tiene su propio recorrido. Elegí uno para ver hasta dónde
+        llegó y con qué números. Esto es el recorrido del cuadro, no el de este
+        pedido: SIGA no registra cuál corresponde.
+      </p>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {candidatos.map((c) => (
+          <ChipCandidato
+            key={c.nro_consolid}
+            candidato={c}
+            atribuido={c.nro_consolid === pedido.ccmn_atribuido}
+            seleccionado={c.nro_consolid === sel}
+            onSeleccionar={() => setSel(c.nro_consolid)}
+          />
+        ))}
+      </div>
+
+      {elegido ? <FlujoCandidato candidato={elegido} /> : null}
+    </div>
+  );
+}
+
+function ChipCandidato({
+  candidato,
+  atribuido,
+  seleccionado,
+  onSeleccionar,
+}: {
+  candidato: CandidatoCCMN;
+  atribuido: boolean;
+  seleccionado: boolean;
+  onSeleccionar: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSeleccionar}
+      aria-pressed={seleccionado}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+        seleccionado
+          ? 'border-primary bg-primary/5 text-foreground'
+          : 'border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40',
+      )}
+    >
+      <span className="font-medium">Cuadro {candidato.nro_consolid}</span>
+      <span className="tabular-nums text-xs">
+        {formatearMoneda(candidato.valor_plan)}
+      </span>
+      {atribuido ? (
+        <span className="inline-flex items-center gap-0.5 text-xs font-medium text-primary">
+          <Check className="w-3 h-3" aria-hidden="true" />
+          el más probable
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+/**
+ * Recorrido propio de un cuadro candidato: los pasos que alcanzó y sus números.
+ * Los pasos no alcanzados se muestran atenuados para que se vea dónde se detuvo.
+ */
+function FlujoCandidato({ candidato }: { candidato: CandidatoCCMN }) {
+  return (
+    <div className="mt-3 rounded-md border border-border bg-muted/20 p-3">
+      <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
+        <span className="text-sm font-medium">
+          Recorrido del cuadro {candidato.nro_consolid}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          consolidado {formatFecha(candidato.fecha_cons)}
+        </span>
+      </div>
+      <ol className="flex flex-wrap items-center gap-x-1 gap-y-2">
+        {candidato.flujo.map((h, i) => (
+          <li key={h.codigo} className="flex items-center gap-1">
+            {i > 0 ? (
+              <span className="text-muted-foreground/40" aria-hidden="true">
+                ›
+              </span>
+            ) : null}
+            <span
+              className={cn(
+                'text-xs rounded px-1.5 py-0.5',
+                h.alcanzado
+                  ? 'bg-secondary/10 text-foreground'
+                  : 'bg-transparent text-muted-foreground/50',
+              )}
+            >
+              <span>{h.label}</span>
+              {h.numero ? (
+                <span className="ml-1 font-mono tabular-nums">{h.numero}</span>
+              ) : null}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

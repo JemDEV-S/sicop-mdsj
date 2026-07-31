@@ -167,6 +167,30 @@ export function useAsociarCcmn({ nroPedido, tipoBien, tipoPedido }: UseBolsaPara
   });
 }
 
+/** Refresca UN pedido desde SIGA (§01.3) e invalida su detalle/bolsa. */
+export function useRefrescarPedido({
+  nroPedido,
+  tipoBien,
+  tipoPedido,
+}: UseBolsaParams) {
+  const ano = useContextoInterno((s) => s.añoActivo);
+  const invalidar = useInvalidarPedido(nroPedido, tipoBien);
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await apiClient.post<{
+        refrescado: boolean;
+        total: number;
+      }>(
+        `/interno/pedidos/${nroPedido}/${tipoBien}/${tipoPedido}/refrescar`,
+        null,
+        { params: { ano } },
+      );
+      return data;
+    },
+    onSuccess: invalidar,
+  });
+}
+
 export function useRevocarCcmn({ nroPedido, tipoBien }: UseBolsaParams) {
   const invalidar = useInvalidarPedido(nroPedido, tipoBien);
   return useMutation({
