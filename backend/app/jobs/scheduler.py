@@ -21,9 +21,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
+from app.jobs.reconciliacion_siga import reconciliacion_siga
 from app.jobs.revisar_resoluciones_ccmn import revisar_resoluciones_obsoletas
 from app.jobs.sync_invierte import sync_invierte
 from app.jobs.sync_siaf import sync_siaf
+from app.jobs.sync_siga_pipeline import sync_siga_pipeline, sync_siga_seguimiento
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,30 @@ def _ejecutar_encadenado_siaf_invierte() -> None:
         logger.exception("scheduler: revisar_resoluciones_obsoletas FALLO")
 
 
+def _ejecutar_sync_siga() -> None:
+    """Snapshot SIGA -> Postgres: pipeline + seguimiento (§01.3).
+
+    Timeout corto y salto silencioso si SIGA esta ocupado: max_instances=1 +
+    coalesce en el trigger ya evitan solapes; aqui solo se registra el fallo y
+    la proxima corrida lo reintenta — nunca se encola presion sobre SIGA.
+    """
+    try:
+        sync_siga_pipeline()
+    except Exception:
+        logger.exception("scheduler: sync_siga_pipeline FALLO (reintenta al ciclo)")
+    try:
+        sync_siga_seguimiento()
+    except Exception:
+        logger.exception("scheduler: sync_siga_seguimiento FALLO (reintenta al ciclo)")
+
+
+def _ejecutar_reconciliacion_siga() -> None:
+    try:
+        reconciliacion_siga()
+    except Exception:
+        logger.exception("scheduler: reconciliacion_siga FALLO")
+
+
 def iniciar_scheduler() -> BackgroundScheduler:
     """Instancia y arranca el scheduler si aun no existe."""
     global _scheduler
@@ -84,11 +110,49 @@ def iniciar_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+
+    # Snapshot SIGA cada N min en horario laboral (07-18h) + 1 vez de noche.
+    # jitter reparte el arranque para no golpear SIGA en el minuto exacto.
+    _scheduler.add_job(
+        _ejecutar_sync_siga,
+        trigger=CronTrigger(
+            hour=f"{settings.SYNC_SIGA_HORA_INICIO}-{settings.SYNC_SIGA_HORA_FIN}",
+            minute=f"*/{settings.SYNC_SIGA_INTERVALO_MIN}",
+            jitter=60,
+        ),
+        id="sync_siga_laboral",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    _scheduler.add_job(
+        _ejecutar_sync_siga,
+        trigger=CronTrigger(hour=22, minute=0, jitter=60),
+        id="sync_siga_nocturno",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # Reconciliacion nocturna: conteos y recargas si difieren.
+    _scheduler.add_job(
+        _ejecutar_reconciliacion_siga,
+        trigger=CronTrigger(
+            hour=settings.RECONCILIACION_SIGA_HOUR,
+            minute=settings.RECONCILIACION_SIGA_MINUTE,
+        ),
+        id="reconciliacion_siga",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     _scheduler.start()
     logger.info(
-        "scheduler iniciado (SIAF+Invierte @%02d:%02d America/Lima)",
-        settings.SYNC_SIAF_HOUR,
-        settings.SYNC_SIAF_MINUTE,
+        "scheduler iniciado (SIAF+Invierte @%02d:%02d · SIGA cada %dmin %02d-%02dh "
+        "America/Lima)",
+        settings.SYNC_SIAF_HOUR, settings.SYNC_SIAF_MINUTE,
+        settings.SYNC_SIGA_INTERVALO_MIN,
+        settings.SYNC_SIGA_HORA_INICIO, settings.SYNC_SIGA_HORA_FIN,
     )
     return _scheduler
 
@@ -148,6 +212,23 @@ def trigger_revisar_resoluciones(ano: int | None = None) -> str:
         "revisar_resoluciones",
         lambda: revisar_resoluciones_obsoletas(ano=ano),
     )
+
+
+def trigger_sync_siga(ano: int | None = None) -> str:
+    def _run() -> Any:
+        r_pipe = sync_siga_pipeline(ano=ano)
+        r_seg = sync_siga_seguimiento(ano=ano)
+        return {
+            "pipeline": r_pipe.tablas,
+            "seguimiento": r_seg.tablas,
+            "total": r_pipe.total + r_seg.total,
+        }
+
+    return _wrap_run("sync_siga_pipeline", _run)
+
+
+def trigger_reconciliacion_siga(ano: int | None = None) -> str:
+    return _wrap_run("reconciliacion_siga", lambda: reconciliacion_siga(ano=ano))
 
 
 def obtener_run(job_id: str) -> JobRun | None:

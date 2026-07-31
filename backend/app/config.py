@@ -114,6 +114,16 @@ class Settings(BaseSettings):
     SYNC_SIAF_HOUR: int = 3
     SYNC_SIAF_MINUTE: int = 0
 
+    # Snapshot SIGA (Guia Pipeline v2 §01.3): cada N minutos en horario laboral,
+    # 1 corrida nocturna fuera de ese rango. La reconciliacion corre de madrugada.
+    SYNC_SIGA_INTERVALO_MIN: int = 30
+    SYNC_SIGA_HORA_INICIO: int = 7    # inclusive
+    SYNC_SIGA_HORA_FIN: int = 18      # inclusive
+    RECONCILIACION_SIGA_HOUR: int = 2
+    RECONCILIACION_SIGA_MINUTE: int = 30
+    # Rate-limit del refresh puntual de un documento desde el detalle (§01.3).
+    REFRESH_PUNTUAL_COOLDOWN_SEG: int = 10
+
 
 @lru_cache
 def get_settings() -> Settings:
