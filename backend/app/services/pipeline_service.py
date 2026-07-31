@@ -358,9 +358,16 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
     )
     fecha_certif = _to_dt(fecha_certif) if fecha_certif else None
 
+    # FECHA_CUADRO viene NULL en el 97% de los cuadros 2026; el hito real de
+    # "cuadro autorizado" es FECHA_AUTORIZ (100% poblada, = FECHA_COMPRA en el
+    # 99%). Misma regla que el extractor del kanban (diagnostico_sesion6).
     fecha_cuadro = min(
-        (c.get("FECHA_CUADRO") or c.get("fecha_cuadro") for c in cuadros
-         if c.get("FECHA_CUADRO") or c.get("fecha_cuadro")),
+        (c.get("FECHA_AUTORIZ") or c.get("fecha_autoriz")
+         or c.get("FECHA_COMPRA") or c.get("fecha_compra")
+         or c.get("FECHA_CUADRO") or c.get("fecha_cuadro") for c in cuadros
+         if c.get("FECHA_AUTORIZ") or c.get("fecha_autoriz")
+         or c.get("FECHA_COMPRA") or c.get("fecha_compra")
+         or c.get("FECHA_CUADRO") or c.get("fecha_cuadro")),
         default=None,
     )
     fecha_cuadro = _to_dt(fecha_cuadro) if fecha_cuadro else None

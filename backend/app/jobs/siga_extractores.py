@@ -197,8 +197,12 @@ _EXPEDIENTES_CCMN = Extractor(
         ) cot ON cot.ANO_EJE = pc.ANO_EJE AND cot.SEC_EJEC = pc.SEC_EJEC
              AND cot.tipo_bien = pc.TIPO_BIEN AND cot.NRO_CONSOLID = pc.NRO_CONSOLID
         LEFT JOIN (
+            -- FECHA_CUADRO real esta poblada en solo el 3% de las filas 2026;
+            -- el hito "cuadro autorizado" es FECHA_AUTORIZ (100% poblada,
+            -- = FECHA_COMPRA en el 99%). MIN = primera vez que se alcanzo
+            -- (diagnostico_sesion6/01-02).
             SELECT ANO_EJE, SEC_EJEC, TIPO_BIEN, NRO_CONS_PAAC,
-                   MIN(SEC_CUADRO) AS SEC_CUADRO, MAX(FECHA_CUADRO) AS FECHA_CUADRO
+                   MIN(SEC_CUADRO) AS SEC_CUADRO, MIN(FECHA_AUTORIZ) AS FECHA_CUADRO
             FROM SIG_CUADRO_ADQUISICION
             WHERE ANO_EJE = :ano AND SEC_EJEC = :sec_ejec
             GROUP BY ANO_EJE, SEC_EJEC, TIPO_BIEN, NRO_CONS_PAAC

@@ -211,6 +211,93 @@ conformidad el 2026-03-12. Resultado v2 esperado: **sin alerta roja**, etapa
 
 ---
 
+## 5.1 Cerrado (2026-07-31): el detalle mezclaba pedidos por `TIPO_PEDIDO`
+
+**Síntoma reportado:** el detalle del pedido `3/B` mostraba 2 órdenes sin
+relación entre sí (una de bebidas hidratantes, otra de diésel), y el cuadro de
+necesidades 8985 mostraba "2 pedidos" con motivos distintos bajo el mismo
+número.
+
+**Causa raíz (confirmada contra SIGA, ver diccionario §10.2.1):**
+`NRO_PEDIDO=000003/B` son en realidad **dos pedidos sin relación**: un
+`TIPO_PEDIDO='2'` (compra de combustible, CC `01.03.11.01`) y un
+`TIPO_PEDIDO='1'` (atención de almacén contra la O/C N°4, CC `01.03.14.01`).
+`pipeline_repo.obtener_pedido` (cabecera, items, la CTE `det` de órdenes, y
+`movimientos_almacen`) filtraba solo por `NRO_PEDIDO+TIPO_BIEN`, sin
+`TIPO_PEDIDO` — mezclaba items/órdenes de ambos pedidos en una sola pantalla.
+
+**Fix aplicado:**
+- `pipeline_repo.obtener_pedido(ano, nro_pedido, tipo_bien, tipo_pedido)` ahora
+  filtra las 4 queries por la llave completa.
+- Ruta cambiada a `GET /interno/pedidos/{nro_pedido}/{tipo_bien}/{tipo_pedido}`
+  (mismo patrón que bolsa/resoluciones/refrescar).
+- Frontend: `PedidoCard`, `UltimosPedidos`, `useDetallePedido` y la ruta del
+  router (`pedidos/:nroPedido/:tipoBien/:tipoPedido`) pasan `tipo_pedido`.
+- **`siga.v_pipeline_pedido` ahora filtra `tipo_pedido='2'`** (migración
+  `f3c9d1a2b4e6`): `TIPO_PEDIDO='1'` es una atención de almacén (PECOSA), no
+  un pedido de compra — 99.5% de sus ítems tiene `NRO_PECOSA`, 0% tiene bolsa
+  propia (`SEC_CUA_MOD_SAL`), así que nunca podía "avanzar" en el pipeline de
+  adquisición y aparecía como falsamente estancado en el kanban. El snapshot
+  sigue trayendo el dato sin filtrar (`siga.pedidos`, `siga.pedido_items`);
+  solo se excluyó de la vista de compras. Queda **pendiente y documentado**
+  como fuente para un futuro módulo de trazabilidad de almacén — no
+  implementado, fuera de alcance de esta sesión.
+
+Si tocas `obtener_pedido`, `v_pipeline_pedido`, o cualquier query nueva sobre
+`SIG_PEDIDOS`/`SIG_DETALLE_PEDIDOS`, **filtra siempre por los 4 campos de la
+llave** (`ANO_EJE+SEC_EJEC+TIPO_BIEN+TIPO_PEDIDO+NRO_PEDIDO`), nunca solo 3.
+
+---
+
+## 5.2 Cerrado (2026-07-31, sesión 6): fechas de subfases mal mapeadas
+
+Auditoría completa de las fechas de subfase contra SIGA (scripts en
+`backend/scripts/diagnostico_sesion6/`). Tres hallazgos, dos fixes y una
+limitación documentada:
+
+**(a) "Cuadro de adquisición" nunca se marcaba alcanzado.**
+`SIG_CUADRO_ADQUISICION.FECHA_CUADRO` está poblada en solo 44/1473 filas (3%)
+en 2026, y cuando existe viene *antes* de la autorización (39/44): es una
+fecha temprana opcional, no el hito. El hito real es **`FECHA_AUTORIZ`**
+(100% poblada, `= FECHA_COMPRA` en el 99%, `= FECHA_NRO_CUADRO` en el 99.9%).
+Fix: el extractor `_EXPEDIENTES_CCMN` toma `MIN(FECHA_AUTORIZ)` como
+`fecha_cuadro` (MIN = primera vez alcanzada; 1443/1454 CCMN tienen un solo
+cuadro). El detalle (`pipeline_service._construir_timeline`) usa la misma
+regla. Cobertura post-fix: 100% de las bolsas con orden tienen fecha de
+cuadro (antes 3%).
+
+**(b) Los bienes nunca llegaban a ejecución/despacho** (611 órdenes de bienes
+con ejecución=0). La conformidad (`SIG_MOVIM_CONFOR_SERVICIO`) es solo de
+servicios, y la pecosa se buscaba en los items del pedido de compra ('2'),
+que nunca la tienen (vive en los pedidos de atención '1'). Fix (migración
+`a7e5f8c1d2b9`):
+- **Recepción (ejecución):** la entrada de almacén (`TIPO_MOVIMTO='I'`)
+  referencia `NRO_ORDEN` en el 100% de sus filas → llave dura, cubre 572/632
+  órdenes de bienes.
+- **Despacho (pecosa):** puente declarativo — el pedido '1' nombra la O/C en
+  su motivo (`ATENCION DE PEDIDO A LA O/C N°570`, 531/576 casos) y sus items
+  cruzan con la salida de almacén al 99.4%. Nueva columna
+  `bolsa_fecha_despacho` en `v_bolsa_avance`/`v_pipeline_pedido`, nueva
+  entrada en `_ETAPAS_BOLSA` (service v2).
+
+**(c) Devengado de bienes: NO existe en SIGA local** (limitación real, no
+bug). `SIG_EXP_SIGA_DOCU` solo trae operaciones CP/N y `ESTADO_SIAF='2'` está
+en el 99.7% de las órdenes (no discrimina). El devengado autoritativo es MEF
+(regla 1). Queda "sin dato": la etapa devengado solo se marca en servicios
+(vía `ESTADO_DEVENG` de la conformidad).
+
+**Distribución post-fix (2026, 1782 pedidos de compra vivos):** solicitud 11,
+programación 880, certificación 29, contratación 131, ejecución 731. El
+volumen de programación NO es atraso real: 655 de los 880 son pedidos
+`ambiguo` cuya bolsa ya avanzó (la mayoría hasta orden/devengado) pero el
+puente pedido↔CCMN no resuelve — solo 15 de los 681 ambiguos son nombrados
+por el concepto de alguna orden, así que la resolución automática no da más;
+el resto es resolución manual (ya implementada) o rediseño de la UI para
+mostrarlos como "avance por confirmar" en vez de inflar programación.
+Programación genuina: ~225 (106 sin CCMN + 90 en cotización + ~29 tempranos).
+
+---
+
 ## 6. Trabajos de coherencia priorizados (el objetivo de la sesión)
 
 Orden sugerido; cada uno **verifica el dato contra SIGA antes de tocar la vista**.

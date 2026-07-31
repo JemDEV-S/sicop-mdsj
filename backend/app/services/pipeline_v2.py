@@ -61,6 +61,7 @@ def _d(v: Any) -> date | None:
 # La bolsa "alcanzo" la etapa mas avanzada que tenga fecha.
 _ETAPAS_BOLSA: tuple[tuple[str, str], ...] = (
     ("bolsa_fecha_devengado", ETAPA_DEVENGADO),
+    ("bolsa_fecha_despacho", ETAPA_DESPACHO_PECOSA),
     ("bolsa_fecha_ejecucion", ETAPA_EJECUCION),
     ("bolsa_fecha_compromiso", ETAPA_COMPROMISO_SIAF),
     ("bolsa_fecha_orden", ETAPA_ORDEN_EMITIDA),
@@ -169,6 +170,7 @@ def fechas_alcanzadas(fila: dict[str, Any], confianza: str) -> dict[str, date]:
         _set(ETAPA_ORDEN_EMITIDA, fila.get("bolsa_fecha_orden"))
         _set(ETAPA_COMPROMISO_SIAF, fila.get("bolsa_fecha_compromiso"))
         _set(ETAPA_EJECUCION, fila.get("bolsa_fecha_ejecucion"))
+        _set(ETAPA_DESPACHO_PECOSA, fila.get("bolsa_fecha_despacho"))
         _set(ETAPA_DEVENGADO, fila.get("bolsa_fecha_devengado"))
 
     tipo_bien = (fila.get("tipo_bien") or "").strip()

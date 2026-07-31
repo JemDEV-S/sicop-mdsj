@@ -1,0 +1,14 @@
+(a) pedidos con orden en bolsa: 1517
+    cotiz         1418  (93.5%)
+    cuadro        1517  (100.0%)
+    certif        1517  (100.0%)
+    compromiso    1515  (99.9%)
+    ejecucion      757  (49.9%)
+    devengado      757  (49.9%)
+    tipo B: n=611 compromiso=610 ejecucion=0 devengado=0 ingreso=0 pecosa=0
+    tipo S: n=906 compromiso=905 ejecucion=757 devengado=757 ingreso=0 pecosa=0
+
+(b) ordenes: {'ordenes': 1473, 'concepto_nombra_pedido': 590, 'nombra_y_tiene_ccmn': 590}
+
+(c) ambiguo=681, con orden en bolsa=655
+    ambiguo nombrados por algun concepto de orden: 15
