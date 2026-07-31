@@ -468,7 +468,12 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         for i in items
     )
     tiene_orden = bool(ordenes)
-    tiene_certif = bool(certificaciones)
+    # La certificacion (CCP) puede verse por la orden ya emitida (cadena hacia
+    # abajo, `certificaciones`) o por la cadena del CCMN (`_flags_programacion`,
+    # llave NRO_CONSOLID): un pedido con CCP emitido pero sin orden todavia
+    # (caso 228/S) se veia en estudio de mercado mientras el kanban ya lo
+    # clasificaba en certificacion. Cualquiera de las dos cuenta.
+    tiene_certif = bool(certificaciones) or bool(ficha.get("tiene_certif"))
 
     # Etapas 4-7: presencia por la cadena del CCMN (bolsa -> CCMN -> PAAC ->
     # cotizacion -> cuadro adq.), no por `cuadros`/`certificaciones`, que solo
@@ -674,6 +679,17 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         # cadena del CCMN hacia arriba.
         fecha_cuadro = _to_dt(ficha.get("fecha_cuadro_prog"))
 
+    # Certificacion sin orden: la fecha y el CCP vienen de la cadena del CCMN
+    # (SIG_CERTIFICACION_FASE) cuando no hay orden que la traiga hacia abajo.
+    certif_via_ccmn = not certificaciones and bool(ficha.get("tiene_certif"))
+    if fecha_certif is None:
+        fecha_certif = _to_dt(ficha.get("fecha_certif_prog"))
+    if not docs_cert:
+        docs_cert = _docs(
+            ("CCP", ficha.get("nro_certifica_prog")),
+            ("Certif. SIAF", ficha.get("nro_certifica_siaf_prog")),
+        )
+
     _add(ETAPA_PUENTE_PAAC, fecha_consolid, tiene_puente_paac,
          "La necesidad entro a la programacion anual (PAAC).", via_ccmn=True,
          docs=_docs(("Cuadro consolidado", ccmn)))
@@ -686,7 +702,8 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
     _add(ETAPA_CUADRO_ADQUISICION, fecha_cuadro, tiene_cuadro_adq,
          "Se elaboro el cuadro de adquisicion.", via_ccmn=True, docs=docs_cuadro)
     _add(ETAPA_CERTIFICACION, fecha_certif, tiene_certif,
-         "Se certifico el presupuesto (CCP).", docs=docs_cert)
+         "Se certifico el presupuesto (CCP).", via_ccmn=certif_via_ccmn,
+         docs=docs_cert)
     _add(ETAPA_ORDEN_EMITIDA, fecha_orden, tiene_orden,
          "Se emitio la orden de compra o de servicio.", docs=docs_orden)
     _add(ETAPA_COMPROMISO_SIAF, fecha_exp, tiene_compromiso,

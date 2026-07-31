@@ -417,13 +417,17 @@ def _flags_programacion(
                     MAX(CASE WHEN pc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)  AS tiene_ccmn,
                     MAX(CASE WHEN sc.NRO_CONSOLID IS NOT NULL THEN 1 ELSE 0 END)  AS tiene_cotizacion,
                     MAX(CASE WHEN ca.SEC_CUADRO IS NOT NULL THEN 1 ELSE 0 END)    AS tiene_cuadro_adq,
+                    MAX(CASE WHEN cf.NRO_CERTIFICA IS NOT NULL THEN 1 ELSE 0 END) AS tiene_certif,
                     MIN(pc.NRO_CONSOLID)                                          AS nro_consolid,
                     MIN(pc.NRO_EST_MDO)                                           AS nro_est_mdo,
                     MIN(ca.SEC_CUADRO)                                            AS sec_cuadro_prog,
+                    MIN(cf.NRO_CERTIFICA)                                         AS nro_certifica_prog,
+                    MIN(cf.NRO_CERTIFICA_SIAF)                                    AS nro_certifica_siaf_prog,
                     -- Fechas de la cadena: primera vez que se alcanzo cada hito.
                     MIN(pc.FECHA_CONS)                                            AS fecha_consolid,
                     MIN(sc.FECHA_REG)                                             AS fecha_cotizacion_prog,
-                    MIN(ca.FECHA_AUTORIZ)                                         AS fecha_cuadro_prog
+                    MIN(ca.FECHA_AUTORIZ)                                         AS fecha_cuadro_prog,
+                    MIN(cf.FECHA_REG)                                             AS fecha_certif_prog
                 FROM det d
                 LEFT JOIN SIG_CUADRO_MODIFICADO_CMN cmn
                     ON cmn.SEC_EJEC = d.SEC_EJEC
@@ -447,6 +451,16 @@ def _flags_programacion(
                    AND ca.SEC_EJEC = cmn.SEC_EJEC
                    AND ca.TIPO_BIEN = cmn.TIPO_BIEN
                    AND ca.NRO_CONS_PAAC = cmn.NRO_CONSOLID
+                -- Certificacion (CCP) del CCMN, INDEPENDIENTE de la orden:
+                -- SIG_CERTIFICACION_FASE lleva NRO_CONSOLID en duro. Un pedido
+                -- puede tener CCP emitido sin orden todavia (caso 228/S); sin
+                -- esto el detalle lo dejaba en estudio de mercado mientras el
+                -- kanban ya lo clasificaba en certificacion (v_bolsa_avance usa
+                -- la misma llave).
+                LEFT JOIN SIG_CERTIFICACION_FASE cf
+                    ON cf.ANO_EJE = cmn.ANNO_EJEC
+                   AND cf.SEC_EJEC = cmn.SEC_EJEC
+                   AND cf.NRO_CONSOLID = cmn.NRO_CONSOLID
                 """
             ),
             params,
@@ -455,10 +469,11 @@ def _flags_programacion(
     if fila is None:
         return {
             "tiene_puente_paac": 0, "tiene_ccmn": 0,
-            "tiene_cotizacion": 0, "tiene_cuadro_adq": 0,
+            "tiene_cotizacion": 0, "tiene_cuadro_adq": 0, "tiene_certif": 0,
             "nro_consolid": None, "nro_est_mdo": None, "sec_cuadro_prog": None,
+            "nro_certifica_prog": None, "nro_certifica_siaf_prog": None,
             "fecha_consolid": None, "fecha_cotizacion_prog": None,
-            "fecha_cuadro_prog": None,
+            "fecha_cuadro_prog": None, "fecha_certif_prog": None,
         }
     return dict(fila)
 
