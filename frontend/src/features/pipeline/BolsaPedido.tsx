@@ -1,5 +1,13 @@
 import * as React from 'react';
-import { AlertTriangle, Check, Link2, Loader2, Unlink } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Link2,
+  Loader2,
+  Unlink,
+} from 'lucide-react';
 import { SectionCard } from '@/components/layout/SectionCard';
 import { cn } from '@/lib/utils';
 import { formatFecha } from '@/lib/formatters';
@@ -40,6 +48,13 @@ interface BolsaPedidoProps {
   /** Nivel que la cascada automática asigna al pedido que se está viendo. */
   confianza: NivelConfianza | null;
   puedeAsociar?: boolean;
+  /**
+   * Arranca plegada, mostrando solo el cuadro atribuido y su nivel de
+   * confianza. Se usa cuando el pedido ya está resuelto (único/declarado/
+   * manual): la bolsa es entonces contexto opcional, no lo que hay que
+   * mirar. Cuando el pedido es ambiguo se pasa `false` y se muestra abierta.
+   */
+  plegableInicial?: boolean;
 }
 
 const MONEDA = new Intl.NumberFormat('es-PE', {
@@ -72,6 +87,7 @@ export function BolsaPedido({
   tipoPedido,
   confianza,
   puedeAsociar = true,
+  plegableInicial = false,
 }: BolsaPedidoProps) {
   const params = { nroPedido, tipoBien, tipoPedido };
   const { data, isLoading } = useBolsaPedido(params);
@@ -84,6 +100,9 @@ export function BolsaPedido({
   const [pedidoSel, setPedidoSel] = React.useState<number | null>(nroPedido);
   const [ccmnSel, setCcmnSel] = React.useState<number | null>(null);
   const [nota, setNota] = React.useState('');
+  // Cuando el pedido ya está resuelto la bolsa es contexto opcional: arranca
+  // plegada para no competir con el recorrido, que es lo que importa.
+  const [abierta, setAbierta] = React.useState(!plegableInicial);
 
   if (isLoading) {
     return (
@@ -108,16 +127,41 @@ export function BolsaPedido({
   const puedeConfirmar =
     pedidoSel != null && ccmnSel != null && pedidoSel === nroPedido;
 
+  const descripcion = varios
+    ? `Este cuadro agrupa ${data.pedidos.length} pedidos y ${data.candidatos.length} cuadros consolidados. SIGA no registra cuál corresponde a cada pedido.`
+    : 'Este cuadro corresponde solo a este pedido.';
+
   return (
     <SectionCard
       titulo={`Cuadro de necesidades ${data.sec_cua_mod_sal}`}
-      descripcion={
-        varios
-          ? `Este cuadro agrupa ${data.pedidos.length} pedidos y ${data.candidatos.length} cuadros consolidados. SIGA no registra cuál corresponde a cada pedido.`
-          : `Este cuadro corresponde solo a este pedido.`
+      accion={
+        plegableInicial ? (
+          <button
+            type="button"
+            onClick={() => setAbierta((v) => !v)}
+            aria-expanded={abierta}
+            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            {abierta ? (
+              <>
+                <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                Ocultar
+              </>
+            ) : (
+              <>
+                <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+                Ver cuadro completo
+              </>
+            )}
+          </button>
+        ) : undefined
       }
       padding="md"
     >
+      <p className="text-sm text-muted-foreground -mt-1 mb-4">{descripcion}</p>
+
+      {!abierta ? null : (
+      <>
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_1fr] gap-4 lg:gap-3">
         {/* ── Extremo izquierdo: pedidos ── */}
         <div>
@@ -187,6 +231,9 @@ export function BolsaPedido({
         </div>
       </div>
 
+      {/* Leyenda del grafo (§03.3, §04): color + texto, nunca color solo. */}
+      <LeyendaGrafo />
+
       {/* ── Barra de acción ── */}
       {puedeAsociar && varios ? (
         <BarraAsociar
@@ -208,8 +255,12 @@ export function BolsaPedido({
           }}
         />
       ) : null}
+      </>
+      )}
 
-      {/* ── Asociaciones vigentes ── */}
+      {/* ── Asociaciones vigentes ──
+          Se muestran siempre, también con la bolsa plegada: son el resumen de
+          lo declarado para este pedido. */}
       {activas.length > 0 ? (
         <ListaResoluciones
           titulo="Asociaciones declaradas para este pedido"
@@ -251,6 +302,29 @@ function EncabezadoColumna({
     <div className="flex items-baseline justify-between gap-2 mb-2">
       <h4 className="text-sm font-medium text-foreground">{titulo}</h4>
       <span className="text-xs text-muted-foreground">{ayuda}</span>
+    </div>
+  );
+}
+
+// Leyenda de la vista de bolsa (§03.3): explica qué significa cada estado de un
+// cuadro consolidado. Color + texto (§04) para quienes no distinguen color.
+function LeyendaGrafo() {
+  const items: Array<{ clase: string; texto: string }> = [
+    { clase: 'bg-secondary', texto: 'Asociado a este pedido' },
+    { clase: 'bg-primary', texto: 'Seleccionado ahora' },
+    { clase: 'bg-border', texto: 'Candidato sin asociar' },
+  ];
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      {items.map((it) => (
+        <span key={it.texto} className="inline-flex items-center gap-1.5">
+          <span
+            className={cn('inline-block h-2.5 w-2.5 rounded-sm', it.clase)}
+            aria-hidden="true"
+          />
+          {it.texto}
+        </span>
+      ))}
     </div>
   );
 }
@@ -367,27 +441,41 @@ function TarjetaCcmn({
           ) : null}
         </div>
 
-        {/* Recorrido propio del cuadro: hasta dónde llegó y con qué números.
-            Es lo que permite comparar candidatos entre sí. */}
+        {/* Recorrido propio (cadena dura) del cuadro: cotización → cuadro →
+            O/S → CCP → conformidad, con sus números y fechas. Es lo que deja
+            VER que "este CCMN ya es la O/S 132" antes de asociar (§03.3). El
+            paso de la orden se resalta: es el hecho que el funcionario busca. */}
         {alcanzados.length > 0 ? (
           <ol className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1">
-            {alcanzados.map((h, i) => (
-              <li key={h.codigo} className="flex items-center gap-1">
-                {i > 0 ? (
-                  <span className="text-muted-foreground/40" aria-hidden="true">
-                    ›
-                  </span>
-                ) : null}
-                <span className="text-[11px] rounded bg-muted px-1.5 py-0.5">
-                  <span className="text-muted-foreground">{h.label}</span>
-                  {h.numero ? (
-                    <span className="ml-1 font-mono tabular-nums">
-                      {h.numero}
+            {alcanzados.map((h, i) => {
+              const esOrden = h.codigo === 'orden';
+              return (
+                <li key={h.codigo} className="flex items-center gap-1">
+                  {i > 0 ? (
+                    <span className="text-muted-foreground/40" aria-hidden="true">
+                      ›
                     </span>
                   ) : null}
-                </span>
-              </li>
-            ))}
+                  <span
+                    className={cn(
+                      'text-[11px] rounded px-1.5 py-0.5',
+                      esOrden
+                        ? 'bg-secondary/15 text-secondary-foreground font-medium'
+                        : 'bg-muted',
+                    )}
+                  >
+                    <span
+                      className={esOrden ? 'text-foreground' : 'text-muted-foreground'}
+                    >
+                      {h.label}
+                    </span>
+                    {h.numero ? (
+                      <span className="ml-1 font-mono tabular-nums">{h.numero}</span>
+                    ) : null}
+                  </span>
+                </li>
+              );
+            })}
           </ol>
         ) : null}
       </button>
