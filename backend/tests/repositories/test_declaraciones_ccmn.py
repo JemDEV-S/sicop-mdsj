@@ -44,30 +44,50 @@ def test_segun_contrato_se_descarta():
 # ─── Eleccion del declarado contra los candidatos de la bolsa ────────────
 
 
+# El conjunto de declaraciones es de tuplas (ccmn, meta_de_la_orden). meta=None
+# significa "meta desconocida" -> no filtra (comportamiento conservador).
+
+
 def test_declarado_dentro_de_candidatos():
-    decl = {("S", 232): {2266}}
+    decl = {("S", 232): {(2266, None)}}
     assert _elegir_declarado(decl, "S", 232, frozenset({2266, 2281, 3532})) == 2266
 
 
 def test_declarado_fuera_de_candidatos_se_devuelve_para_marcar_conflicto():
     """No se silencia: la cascada lo convierte en `conflicto` (19 casos reales)."""
-    decl = {("S", 458): {2688}}
+    decl = {("S", 458): {(2688, None)}}
     assert _elegir_declarado(decl, "S", 458, frozenset({2817})) == 2688
 
 
 def test_varios_declarados_dentro_de_candidatos_no_desambigua():
     """Elegir uno seria el 'ganador por parecido' que la cascada evita (§2)."""
-    decl = {("S", 232): {2266, 2281}}
+    decl = {("S", 232): {(2266, None), (2281, None)}}
     assert _elegir_declarado(decl, "S", 232, frozenset({2266, 2281, 3532})) is None
 
 
 def test_prefiere_el_candidato_cuando_hay_ruido_fuera_de_la_bolsa():
-    decl = {("S", 232): {2266, 9999}}
+    decl = {("S", 232): {(2266, None), (9999, None)}}
     assert _elegir_declarado(decl, "S", 232, frozenset({2266, 2281})) == 2266
 
 
 def test_sin_declaracion_devuelve_none():
     assert _elegir_declarado({}, "S", 232, frozenset({2266})) is None
+
+
+def test_declaracion_de_otra_meta_se_descarta():
+    """Caso O/S 73 -> pedido 69: la orden declara el pedido en texto pero es de
+    OTRA meta (73 vs 83). Con la meta del pedido, se descarta el typo."""
+    # La orden que declara el 69 es meta 73; el pedido 69 es meta 83.
+    decl = {("S", 69): {(2094, 73)}}
+    assert _elegir_declarado(decl, "S", 69, frozenset({2094}), sec_func=83) is None
+    # Si la meta coincide, si resuelve.
+    assert _elegir_declarado(decl, "S", 69, frozenset({2094}), sec_func=73) == 2094
+
+
+def test_meta_desconocida_no_filtra():
+    """Sin meta de la orden (p.ej. declaracion de certificacion), no se filtra."""
+    decl = {("S", 232): {(2266, None)}}
+    assert _elegir_declarado(decl, "S", 232, frozenset({2266}), sec_func=999) == 2266
 
 
 # ─── Agrupacion desde filas crudas ───────────────────────────────────────
@@ -77,12 +97,12 @@ def test_agrupar_separa_por_tipo_bien():
     """El numero de pedido se repite entre B y S: agrupar sin TIPO_BIEN
     mezclaria declaraciones de pedidos distintos (§6, 446 colisiones)."""
     filas = [
-        {"TIPO_BIEN": "S", "ccmn": 2266, "texto": "PEDIDO 232"},
-        {"TIPO_BIEN": "B", "ccmn": 5000, "texto": "PEDIDO 232"},
+        {"TIPO_BIEN": "S", "ccmn": 2266, "meta_orden": 100, "texto": "PEDIDO 232"},
+        {"TIPO_BIEN": "B", "ccmn": 5000, "meta_orden": 200, "texto": "PEDIDO 232"},
     ]
     out = _agrupar_declaraciones(filas)
-    assert out[("S", 232)] == {2266}
-    assert out[("B", 232)] == {5000}
+    assert out[("S", 232)] == {(2266, 100)}
+    assert out[("B", 232)] == {(5000, 200)}
 
 
 def test_agrupar_ignora_filas_sin_pedido_o_sin_ccmn():

@@ -40,33 +40,58 @@ def parsear_nro_pedido(texto: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _agrupar_declaraciones(rows: Any) -> dict[tuple[str, int], set[int]]:
-    """(tipo_bien, nro_pedido) -> conjunto de CCMN que lo declaran."""
-    out: dict[tuple[str, int], set[int]] = defaultdict(set)
+def _agrupar_declaraciones(rows: Any) -> dict[tuple[str, int], set[tuple[int, int | None]]]:
+    """(tipo_bien, nro_pedido) -> conjunto de (CCMN, meta_de_la_orden).
+
+    Se guarda la meta (SEC_FUNC) de la orden que declara: una declaracion de
+    texto solo es fiable si la orden es de la MISMA meta que el pedido. El texto
+    lo escribe logistica a mano y a veces trae un nº de pedido equivocado (caso
+    O/S 73 declara "PEDIDO N°0069" pero la orden es meta 73 y el pedido 69 es
+    meta 83 — servicios distintos). El cruce por meta descarta esos typos.
+    """
+    out: dict[tuple[str, int], set[tuple[int, int | None]]] = defaultdict(set)
     for r in rows:
         ped = parsear_nro_pedido(r["texto"])
         if ped is None or r["ccmn"] is None:
             continue
-        out[((r["tipo_bien"] or "").strip(), ped)].add(int(r["ccmn"]))
+        meta = int(r["meta_orden"]) if r.get("meta_orden") is not None else None
+        out[((r["tipo_bien"] or "").strip(), ped)].add((int(r["ccmn"]), meta))
     return out
 
 
 def _elegir_declarado(
-    declaraciones: dict[tuple[str, int], set[int]],
+    declaraciones: dict[tuple[str, int], set[tuple[int, int | None]]],
     tipo_bien: str,
     nro_pedido: int,
     candidatos: frozenset[int],
+    sec_func: int | None = None,
 ) -> int | None:
-    """CCMN declarado inequivoco para el pedido, o None."""
+    """CCMN declarado inequivoco para el pedido, o None.
+
+    Filtra por meta: solo cuentan las declaraciones de ordenes cuya meta
+    coincide con la del pedido (`sec_func`). Asi un typo en el texto de la orden
+    (declara un pedido de OTRA meta) no arrastra al pedido a un CCMN ajeno.
+    Si no se conoce la meta del pedido o de la orden, no se filtra (se degrada
+    al comportamiento anterior, conservador).
+    """
     decl = declaraciones.get((tipo_bien, nro_pedido))
     if not decl:
         return None
-    dentro = decl & candidatos
+    # Descarta las declaraciones de otra meta (typo de logistica).
+    if sec_func is not None:
+        decl = {
+            (ccmn, meta) for (ccmn, meta) in decl
+            if meta is None or meta == int(sec_func)
+        }
+        if not decl:
+            return None
+    ccmns = {ccmn for (ccmn, _meta) in decl}
+    dentro = ccmns & candidatos
     if len(dentro) == 1:
         return next(iter(dentro))
     if dentro:
         return None
-    return next(iter(decl)) if len(decl) == 1 else None
+    return next(iter(ccmns)) if len(ccmns) == 1 else None
 
 
 # ─── Declaraciones desde el snapshot (concepto de orden -> CCMN) ─────────
@@ -79,12 +104,14 @@ def _elegir_declarado(
 # detalle (caso 69/S). Se emiten dos filas por orden (una por texto) para que el
 # parser de Python las agrupe igual.
 _SQL_DECL_ORDEN = """
-    SELECT o.tipo_bien, o.nro_consolid AS ccmn, o.concepto AS texto
+    SELECT o.tipo_bien, o.nro_consolid AS ccmn, o.sec_func AS meta_orden,
+           o.concepto AS texto
     FROM siga.ordenes o
     WHERE o.ano_eje = :ano AND o.sec_ejec = :sec_ejec
       AND o.concepto IS NOT NULL AND o.nro_consolid IS NOT NULL
     UNION ALL
-    SELECT o.tipo_bien, o.nro_consolid AS ccmn, o.especificaciones AS texto
+    SELECT o.tipo_bien, o.nro_consolid AS ccmn, o.sec_func AS meta_orden,
+           o.especificaciones AS texto
     FROM siga.ordenes o
     WHERE o.ano_eje = :ano AND o.sec_ejec = :sec_ejec
       AND o.especificaciones IS NOT NULL AND o.nro_consolid IS NOT NULL
@@ -137,7 +164,8 @@ def pipeline_pedidos(
 
 
 def _adjuntar_puente(
-    fila: dict[str, Any], declaraciones: dict[tuple[str, int], set[int]]
+    fila: dict[str, Any],
+    declaraciones: dict[tuple[str, int], set[tuple[int, int | None]]],
 ) -> None:
     """Añade a la fila los insumos de la cascada del puente (candidatos, declarados).
 
@@ -145,13 +173,15 @@ def _adjuntar_puente(
     """
     tipo_bien = (fila.get("tipo_bien") or "").strip()
     nro_pedido = int(fila["nro_pedido"])
+    sec_func = fila.get("sec_func")
     csv = fila.get("ccmn_candidatos_csv")
     candidatos = frozenset(
         int(x) for x in csv.split(",") if x.strip()
     ) if csv else frozenset()
     fila["ccmn_candidatos"] = candidatos
     fila["ccmn_declarado_orden"] = _elegir_declarado(
-        declaraciones, tipo_bien, nro_pedido, candidatos
+        declaraciones, tipo_bien, nro_pedido, candidatos,
+        int(sec_func) if sec_func is not None else None,
     )
     # `declarado_cert` se fusiono en la fuente de orden (§02.5): el concepto de
     # la orden es la fuente unica. Se deja el campo por compatibilidad de cascada.

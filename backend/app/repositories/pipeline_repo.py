@@ -74,45 +74,63 @@ def parsear_nro_pedido(texto: str | None) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def _agrupar_declaraciones(rows: Any) -> dict[tuple[str, int], set[int]]:
-    """(tipo_bien, nro_pedido) -> conjunto de CCMN que lo declaran.
+def _agrupar_declaraciones(rows: Any) -> dict[tuple[str, int], set[tuple[int, int | None]]]:
+    """(tipo_bien, nro_pedido) -> conjunto de (CCMN, meta_de_la_orden).
 
     Se guarda el conjunto y no un ganador: si dos CCMN declaran el mismo
     pedido, elegir uno seria exactamente el "ganador por parecido" que la
-    cascada existe para evitar.
+    cascada existe para evitar. La meta (SEC_FUNC) de la orden que declara deja
+    descartar los typos: el texto lo escribe logistica y a veces trae un nº de
+    pedido de OTRA meta (O/S 73 declara "PEDIDO N°0069" siendo meta 73, y el
+    pedido 69 es meta 83). Sin fila de meta (cert), se guarda None (no filtra).
     """
-    out: dict[tuple[str, int], set[int]] = defaultdict(set)
+    out: dict[tuple[str, int], set[tuple[int, int | None]]] = defaultdict(set)
     for r in rows:
         ped = parsear_nro_pedido(r["texto"])
         if ped is None or r["ccmn"] is None:
             continue
-        out[((r["TIPO_BIEN"] or "").strip(), ped)].add(int(r["ccmn"]))
+        meta = r.get("meta_orden") if hasattr(r, "get") else None
+        try:
+            meta = int(meta) if meta is not None else None
+        except (TypeError, ValueError):
+            meta = None
+        out[((r["TIPO_BIEN"] or "").strip(), ped)].add((int(r["ccmn"]), meta))
     return out
 
 
 def _elegir_declarado(
-    declaraciones: dict[tuple[str, int], set[int]],
+    declaraciones: dict[tuple[str, int], set[tuple[int, int | None]]],
     tipo_bien: str,
     nro_pedido: int,
     candidatos: frozenset[int],
+    sec_func: int | None = None,
 ) -> int | None:
     """CCMN declarado para el pedido, si la declaracion es inequivoca.
 
-    Con varios CCMN declarando el mismo pedido se prefiere el que este entre
-    los candidatos de la bolsa. Si queda mas de uno, se devuelve None: la
-    fuente no desambigua y el pedido sigue `ambiguo`. Si el unico declarado
-    esta FUERA de los candidatos se devuelve igual, para que la cascada lo
-    marque `conflicto` en vez de silenciarlo.
+    Filtra por meta: solo cuentan las declaraciones de ordenes cuya meta
+    coincide con la del pedido (`sec_func`) — descarta el typo de logistica que
+    apunta a un pedido de otra meta. Con varios CCMN declarando el mismo pedido
+    se prefiere el que este entre los candidatos de la bolsa. Si queda mas de
+    uno, None (no desambigua). Si el unico declarado esta FUERA de los
+    candidatos se devuelve igual, para que la cascada lo marque `conflicto`.
     """
     decl = declaraciones.get((tipo_bien, nro_pedido))
     if not decl:
         return None
-    dentro = decl & candidatos
+    if sec_func is not None:
+        decl = {
+            (ccmn, meta) for (ccmn, meta) in decl
+            if meta is None or meta == int(sec_func)
+        }
+        if not decl:
+            return None
+    ccmns = {ccmn for (ccmn, _meta) in decl}
+    dentro = ccmns & candidatos
     if len(dentro) == 1:
         return next(iter(dentro))
     if dentro:
         return None  # varios candidatos declarados: no desambigua
-    return next(iter(decl)) if len(decl) == 1 else None
+    return next(iter(ccmns)) if len(ccmns) == 1 else None
 
 
 
@@ -130,6 +148,7 @@ _SQL_DECL_ORDEN = """
 SELECT
     o.TIPO_BIEN,
     ca.NRO_CONS_PAAC                            AS ccmn,
+    op.SEC_FUNC                                 AS meta_orden,
     CAST(oi.ESPECIFICACIONES AS VARCHAR(2000))  AS texto
 FROM SIG_ORDEN_ADQUISICION o
 JOIN SIG_CUADRO_ADQUISICION ca
@@ -142,6 +161,13 @@ JOIN SIG_ORDEN_ITEM oi
    AND oi.SEC_EJEC = o.SEC_EJEC
    AND oi.TIPO_BIEN = o.TIPO_BIEN
    AND oi.NRO_ORDEN = o.NRO_ORDEN
+LEFT JOIN (
+    SELECT ANO_EJE, SEC_EJEC, TIPO_BIEN, NRO_ORDEN, MIN(SEC_FUNC) AS SEC_FUNC
+    FROM SIG_ORDEN_PRESUPUESTO
+    WHERE ANO_EJE = :ano AND SEC_EJEC = :sec_ejec
+    GROUP BY ANO_EJE, SEC_EJEC, TIPO_BIEN, NRO_ORDEN
+) op ON op.ANO_EJE = o.ANO_EJE AND op.SEC_EJEC = o.SEC_EJEC
+    AND op.TIPO_BIEN = o.TIPO_BIEN AND op.NRO_ORDEN = o.NRO_ORDEN
 WHERE o.ANO_EJE = :ano AND o.SEC_EJEC = :sec_ejec
   AND oi.ESPECIFICACIONES IS NOT NULL
 """
@@ -233,16 +259,21 @@ def contexto_pedido_bolsa(
             conn.execute(text(_SQL_DECL_CERT), p_decl).mappings().all()
         )
 
+    # La meta del pedido (SEC_FUNC): descarta las declaraciones de ordenes de
+    # otra meta (typo del texto de logistica, caso O/S 73 -> pedido 69).
+    sec_func_ped = cab["sec_func"]
+    sec_func_ped = int(sec_func_ped) if sec_func_ped is not None else None
+
     return {
         **dict(cab),
         "centro_costo": (cab["CENTRO_COSTO"] or "").strip(),
         "bolsas": bolsas,
         "candidatos": candidatos,
         "ccmn_declarado_orden": _elegir_declarado(
-            decl_orden, tipo_bien, nro_pedido, cand_set
+            decl_orden, tipo_bien, nro_pedido, cand_set, sec_func_ped
         ),
         "ccmn_declarado_cert": _elegir_declarado(
-            decl_cert, tipo_bien, nro_pedido, cand_set
+            decl_cert, tipo_bien, nro_pedido, cand_set, sec_func_ped
         ),
     }
 
