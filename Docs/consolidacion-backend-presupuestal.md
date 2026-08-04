@@ -269,27 +269,38 @@ CLAUDE.md "Cómo trabajar").
 11. **Test:** para una meta testigo, `devengado` del consolidado == el que
     muestra el widget de saldos == el del snapshot MEF. Los tres cuadran.
 
-### Iteración 4 — Proveedores y contratos (coherencia menor)
+### Iteración 4 — Proveedores y contratos (coherencia menor) ✅ HECHA [2026-08-04]
 
-12. **Contratos por vencer** (§1.5): decidir referencia temporal (§4) y aplicar.
-13. **Revisión de consistencia proveedores↔contratos↔órdenes**: verificar que
-    el `monto_acumulado` del proveedor (SUM de órdenes) y el `VALOR_SOLES` de
-    sus contratos no se presenten como si fueran lo mismo en el frontend
-    futuro. Documentar la diferencia (orden ≠ contrato) para T-53.
+> **Estado:** implementada y verificada contra la BD real.
+>
+> **Corrección al §1.5:** el diagnóstico asumía que el widget saldría vacío en
+> desarrollo. Verificado en BD: el backup **2026 sí tiene contratos vigentes**
+> (FECHA_FINAL hasta 2026-12-31 → hoy 2026-08-04 da 5 por vencer). El widget
+> **no** sale vacío en 2026. El riesgo real es estructural y aparece en **años
+> pasados** (2023-2025): sus fechas ya pasaron frente a `GETDATE()`, así que
+> "por vencer del 2024" daba 0 — engañoso.
+>
+> 12. **Contratos por vencer** — `contratos_por_vencer` acepta
+>     `fecha_referencia` opcional (default = hoy del servidor; producción sin
+>     cambios). En desarrollo/años pasados se pasa la fecha del corte del backup
+>     y la ventana vuelve a tener sentido. El endpoint expone el override.
+>     Verificado: `fecha_referencia=2024-05-01` recupera 2 contratos del 2024
+>     que antes salían en 0. 3 tests nuevos.
+> 13. **orden ≠ contrato** — documentado en los schemas (`ProveedorPublicoItem.
+>     monto_acumulado` = ejecución de órdenes; `ContratoItem.valor_soles` =
+>     compromiso marco), con `Field(description=...)` que aparece en el OpenAPI
+>     para guiar al frontend T-53. No sumar ni equiparar ambos.
 
 ---
 
-## 4. Decisiones abiertas antes de tocar código
+## 4. Decisiones tomadas (todas resueltas)
 
-1. **Referencia temporal de "contratos por vencer" sobre backup** (§1.5):
-   ¿parametrizamos una `fecha_referencia` (default hoy, override en dev al corte
-   del backup), o documentamos que en dev el widget puede salir vacío y punto?
-2. **Materializar la vista**: ¿`VIEW` normal o `MATERIALIZED VIEW`? Con 9.249
-   filas la vista normal es instantánea; se propone **VIEW normal** y se escala
-   a materializada solo si el volumen multi-año lo pide.
-3. **Nombre de columnas duales en la API**: ¿`pim_mef`/`pim_siga` explícitos, o
-   `pim` (MEF, oficial) + `pim_operativo` (SIGA)? Se propone **sufijos
-   explícitos** (`_mef`/`_siga`) para que el frontend no adivine la fuente.
+1. **Referencia temporal de "contratos por vencer"** (§1.5): ✅ **parametrizada**
+   (`fecha_referencia`, default = hoy). Ver Iteración 4.
+2. **Materializar la vista**: ✅ **VIEW normal** — con 9.249 filas es instantánea.
+   Se escalará a materializada solo si el volumen multi-año lo exige.
+3. **Nombre de columnas duales**: ✅ **sufijos explícitos** (`_mef`) para que el
+   frontend no adivine la fuente. Aplicado en saldos y cruce.
 
 ---
 
@@ -306,12 +317,16 @@ El backend está listo para el frontend cuando:
 - [x] Tests unitarios verdes en las tres iteraciones críticas (1, 2, 3).
 - [x] Ningún endpoint presupuestal lee ya `MNTO_ACUM_DEVGDO_SIGA` (saldos, cruce
       y pipeline convergen en la vista única).
+- [x] Contratos por vencer no depende del reloj del servidor (fecha_referencia).
+- [x] orden ≠ contrato documentado en schemas/OpenAPI.
 
-Falta solo la Iteración 4 (proveedores/contratos, coherencia menor) para cerrar
-el documento completo.
+**✅ CONSOLIDACIÓN COMPLETA [2026-08-04].** Las 4 iteraciones ejecutadas y
+verificadas contra la BD real. El backend presupuestal es coherente y
+consistente: un mismo concepto significa lo mismo en saldos, cruce, pipeline y
+portal público. Se puede arrancar el frontend (T-48 → T-51 → T-53) sobre datos
+que ya cuadran entre sí.
 
-Cumplido esto, se arranca el frontend (T-48 → T-51 → T-53) sobre datos que ya
-son coherentes entre sí.
+Commits: Iter.1 `0b54272` · Iter.2 `b3508bf` · Iter.3 `4945272` · Iter.4 (este).
 
 ---
 

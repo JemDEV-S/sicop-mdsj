@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.config import settings
@@ -95,8 +97,18 @@ alertas_router = APIRouter(prefix="/interno/alertas", tags=["interno-alertas"])
 def contratos_por_vencer(
     dias: int = Query(30, ge=1, le=365),
     limit: int = Query(100, ge=1, le=500),
+    fecha_referencia: date | None = Query(
+        None,
+        description=(
+            "Fecha 'hoy' contra la que se mide el vencimiento. Por defecto la "
+            "actual del servidor. En desarrollo sobre el backup del SIGA se "
+            "puede fijar una fecha del corte para que la ventana tenga sentido."
+        ),
+    ),
     _: CurrentUser = Depends(get_current_user),
 ) -> list[ContratoPorVencerItem]:
     _ = settings  # keep import
-    filas = contratos_repo.contratos_por_vencer(dias=dias, limit=limit)
+    filas = contratos_repo.contratos_por_vencer(
+        dias=dias, limit=limit, fecha_referencia=fecha_referencia
+    )
     return [ContratoPorVencerItem.model_validate(_norm(f)) for f in filas]

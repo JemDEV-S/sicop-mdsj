@@ -5,6 +5,7 @@ HU-20: alerta de contratos por vencer — `FECHA_FINAL - hoy <= Y dias` (default
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from sqlalchemy import text
@@ -93,10 +94,25 @@ def contar_contratos(
 
 
 def contratos_por_vencer(
-    dias: int = 30, limit: int = 100
+    dias: int = 30,
+    limit: int = 100,
+    *,
+    fecha_referencia: date | None = None,
 ) -> list[dict[str, Any]]:
-    """Contratos cuya FECHA_FINAL cae dentro de los proximos `dias`."""
-    sql = """
+    """Contratos cuya FECHA_FINAL cae dentro de los proximos `dias`.
+
+    `fecha_referencia` es el "hoy" contra el que se mide la ventana de
+    vencimiento. Por defecto es la fecha actual del servidor (comportamiento de
+    producción). En desarrollo sobre el backup del SIGA —cuyos datos no son de
+    tiempo real— se puede pasar una fecha del corte del backup para que la
+    ventana tenga sentido (los contratos de años pasados ya vencieron respecto
+    a hoy). Ver memoria `project-datos-backup-no-tiempo-real`.
+
+    `dias_restantes` se calcula también contra `fecha_referencia`.
+    """
+    # Referencia parametrizable: bind si viene, GETDATE() si no (una sola rama SQL).
+    ref_sql = ":fref" if fecha_referencia is not None else "CAST(GETDATE() AS DATE)"
+    sql = f"""
         SELECT TOP (:limit)
             c.ANO_EJE, c.NRO_CONTRATO, c.SEC_CONTRATO, c.TIPO_CONTRATO, c.TIPO_BIEN,
             LTRIM(RTRIM(p.NRO_RUC))     AS proveedor_ruc,
@@ -105,20 +121,22 @@ def contratos_por_vencer(
             c.VALOR_SOLES,
             LTRIM(RTRIM(CAST(c.OBJETO AS VARCHAR(500)))) AS objeto,
             LTRIM(RTRIM(c.ESTADO)) AS estado,
-            DATEDIFF(day, GETDATE(), c.FECHA_FINAL) AS dias_restantes
+            DATEDIFF(day, {ref_sql}, c.FECHA_FINAL) AS dias_restantes
         FROM SIG_CONTRATOS c
         LEFT JOIN SIG_CONTRATISTAS p ON p.PROVEEDOR = c.PROVEEDOR
         WHERE c.SEC_EJEC = :sec_ejec
           AND c.FECHA_FINAL IS NOT NULL
-          AND c.FECHA_FINAL >= CAST(GETDATE() AS DATE)
-          AND c.FECHA_FINAL <= DATEADD(day, :dias, CAST(GETDATE() AS DATE))
+          AND c.FECHA_FINAL >= {ref_sql}
+          AND c.FECHA_FINAL <= DATEADD(day, :dias, {ref_sql})
         ORDER BY c.FECHA_FINAL ASC
     """
+    params: dict[str, Any] = {
+        "sec_ejec": settings.SEC_EJEC, "dias": dias, "limit": limit,
+    }
+    if fecha_referencia is not None:
+        params["fref"] = fecha_referencia
     with get_connection() as conn:
-        rows = conn.execute(
-            text(sql),
-            {"sec_ejec": settings.SEC_EJEC, "dias": dias, "limit": limit},
-        ).mappings().all()
+        rows = conn.execute(text(sql), params).mappings().all()
     return [dict(r) for r in rows]
 
 

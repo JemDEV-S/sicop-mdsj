@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 def _to_str(v):
@@ -23,6 +23,15 @@ def _to_date(v):
 
 
 class ProveedorPublicoItem(BaseModel):
+    """Proveedor con el resumen de sus ÓRDENES en el año.
+
+    Ojo (orden ≠ contrato): `monto_acumulado` es la suma de lo facturado en sus
+    órdenes de compra/servicio — es EJECUCIÓN real. No confundir con el valor de
+    sus contratos (`ContratoItem.valor_soles`), que es un compromiso marco y
+    puede no haberse ejecutado aún. Un proveedor puede tener órdenes sin contrato
+    (compra directa) y contratos sin ejecutar.
+    """
+
     ruc: str | None = None
     nombre: str | None = None
     tipo_persona: str | None = None
@@ -30,7 +39,13 @@ class ProveedorPublicoItem(BaseModel):
     flag_mype: str | None = None
     flag_rnp: str | None = None
     flag_consorcio: str | None = None
-    monto_acumulado: float | None = None
+    monto_acumulado: float | None = Field(
+        None,
+        description=(
+            "SUMA facturada en sus ÓRDENES del año (ejecución real). NO es el "
+            "valor de sus contratos."
+        ),
+    )
     nro_ordenes: int = 0
 
 
@@ -78,6 +93,14 @@ class OrdenProveedor(BaseModel):
 
 
 class ContratoItem(BaseModel):
+    """Contrato (SIG_CONTRATOS): acuerdo marco con un proveedor.
+
+    Ojo (contrato ≠ orden): `valor_soles` es el valor del CONTRATO (compromiso
+    marco pactado), distinto de lo efectivamente ejecutado, que se refleja en las
+    órdenes del proveedor (`ProveedorPublicoItem.monto_acumulado`). No sumar
+    ambos ni presentarlos como equivalentes.
+    """
+
     ano_eje: int
     sec_ejec: str
     tipo_contrato: str | None = None
@@ -89,7 +112,13 @@ class ContratoItem(BaseModel):
     fecha_inicial: date | None = None
     fecha_final: date | None = None
     fecha_cese: date | None = None
-    valor_soles: float | None = None
+    valor_soles: float | None = Field(
+        None,
+        description=(
+            "Valor del CONTRATO (compromiso marco pactado). NO es lo ejecutado "
+            "— eso está en las órdenes del proveedor."
+        ),
+    )
     objeto: str | None = None
     tipo_compra: str | None = None
     modal_compra: str | None = None
