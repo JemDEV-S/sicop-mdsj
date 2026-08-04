@@ -239,7 +239,7 @@ Smoke test manual: arrancar `npm run dev`, entrar como funcionario semilla, reco
 - [ ] **T-52** · Breadcrumbs / drill-down
 
 ### Etapa E — Complementos
-- [ ] **T-53** · Proveedores internos + contratos por vencer
+- [x] **T-53** · Proveedores internos + contratos por vencer — directorio + perfil + contratos con alerta de vencimientos — [2026-08-04]
 - [ ] **T-54** · Gestión de usuarios
 - [ ] **T-55** · Configuración de umbrales
 
@@ -316,6 +316,24 @@ Registro de decisiones no triviales que afectan a más de una pantalla o al sist
 **Alternativas descartadas:** cuáles y por qué
 **Impacto:** qué archivos/pantallas se ven afectadas
 ```
+
+### [2026-08-04] · T-53 Proveedores + contratos: tres pantallas, orden ≠ contrato en toda la UI (Etapa E)
+
+**Contexto:** T-53 cubre HU-19 (directorio + perfil de proveedor con historial) y HU-20 (alerta de contratos por vencer). El backend consolidado dejó dos precisiones que la UI debe respetar: (a) **orden ≠ contrato** — `monto_acumulado` del proveedor = ejecución de órdenes, `valor_soles` del contrato = compromiso marco; no sumarlos; (b) contratos por vencer mide contra `fecha_referencia` sobre un **backup** (el rezago no es bug). Además el endpoint de **detalle** de proveedor (`/{ruc}`) devuelve `monto_acumulado: null` y `nro_ordenes: 0` (no agrega); el dato real está en `/{ruc}/ordenes`.
+
+**Decisión:** tres pantallas en un feature aislado `features/provint/` (interno, sin acoplar al público `features/proveedores`):
+- **Directorio** (`/interno/proveedores`): lista con contacto (email/teléfono) + ejecución por órdenes, búsqueda por nombre/RUC con **debounce 350ms** y paginación backend; enlace al perfil.
+- **Perfil** (`/interno/proveedores/:ruc`): identidad + flags (MYPE/RNP/Consorcio) + contacto; **KPIs calculados en cliente desde `/ordenes`** (el detalle trae null) — monto ejecutado, órdenes vigentes (excluye anuladas `estado='4'`), última orden; tabla de órdenes (chip "Devengado" si `estado_siaf='2'`, "Anulada" si `estado='4'`) y tabla de contratos del proveedor (valor marco, etiquetado como tal).
+- **Contratos** (`/interno/contratos`): arriba la **alerta de contratos por vencer** (HU-20) con semáforo de **urgencia** (rojo ≤7 días, ámbar ≤15 — es urgencia de UI, no un umbral de negocio configurado, se rotula así); abajo el listado completo paginado. Cada contrato enlaza al perfil de su proveedor.
+- **orden ≠ contrato** se hace explícito en las etiquetas ("Ejecutado (órdenes)" vs. "Valor (marco)") y en tooltips; nunca se suman.
+- **Datos sobre backup:** el hook `useContratosPorVencer` envía `fecha_referencia={año}-06-30` cuando el año activo NO es el vigente (2026), para que la ventana tenga sentido en años pasados del backup; para 2026 usa el "hoy" del servidor. Verificado: 2024-06-30 recupera 3 contratos que con `GETDATE()` daban 0.
+
+**Alternativas descartadas:**
+- Confiar en `monto_acumulado`/`nro_ordenes` del detalle → vienen null/0; se calcula desde las órdenes (fuente real).
+- Etiquetar códigos `objeto`/`estado` de contrato con nombres → no hay diccionario autoritativo verificado; se muestran como vienen o se omiten, sin inventar significados (solo `estado='4'` orden = anulada y `estado_siaf='2'` = devengado están verificados).
+- Contratos filtrados por CC → los contratos SIGA no están amarrados a CC (§5.2); son transversales, se documenta en la pantalla.
+
+**Impacto:** nuevo feature `features/provint/` (`types`, `api`, `lib`, `secciones/TablaDirectorio`), tres páginas nuevas (`Proveedores`, `PerfilProveedor`, `Contratos`), router (`/interno/proveedores` + `/proveedores/:ruc` + `/contratos` lazy; se elimina el stub de contratos y proveedores). Reutiliza las reglas de identidad de persona del directorio público. Export de proveedores/contratos no se abordó (fuera del alcance del mockup T-53, que no lo pide); el reporte `contratos` existe en backend para cuando se quiera añadir.
 
 ### [2026-08-04] · T-51 Cruce: acordeón de 4 paneles según la respuesta real, no el mockup (Etapa D)
 

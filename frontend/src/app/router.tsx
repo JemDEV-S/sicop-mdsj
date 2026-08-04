@@ -102,7 +102,10 @@ export const router = createBrowserRouter([
           },
           {
             path: 'contratos',
-            element: <div>Contratos (Stub · T-53)</div>
+            lazy: async () => {
+              const { default: Contratos } = await import('../pages/interno/Contratos');
+              return { Component: Contratos };
+            }
           },
           {
             path: 'cruce',
@@ -110,7 +113,17 @@ export const router = createBrowserRouter([
           },
           {
             path: 'proveedores',
-            element: <div>Directorio interno de proveedores (Stub · T-53)</div>
+            lazy: async () => {
+              const { default: Proveedores } = await import('../pages/interno/Proveedores');
+              return { Component: Proveedores };
+            }
+          },
+          {
+            path: 'proveedores/:ruc',
+            lazy: async () => {
+              const { default: PerfilProveedor } = await import('../pages/interno/PerfilProveedor');
+              return { Component: PerfilProveedor };
+            }
           },
           {
             path: 'cruce/expediente-siaf/:exp',
