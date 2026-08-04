@@ -142,11 +142,32 @@ class MetaCabecera(BaseModel):
 
 
 class PresupuestoMeta(BaseModel):
+    """Presupuesto consolidado de una meta: SIGA operativo + MEF oficial.
+
+    - Bloque SIGA (`pim`, `certificado`, `comprometido`, `saldo_disponible`):
+      fases PREVIAS al devengado, desde SIG_TECHO_PRESUPUESTO. No incluye un
+      "devengado" SIGA (la columna está vacía en esta muni).
+    - Bloque MEF (`*_mef`): el número oficial que ve el ciudadano; `devengado_mef`
+      es el devengado REAL. `null` si la meta no cruza con el snapshot MEF.
+    - `porcentaje_devengado`: sobre el devengado MEF real (`null` si no cruza).
+    """
+
+    # Bloque SIGA operativo
     pia: float = 0
     pim: float = 0
     certificado: float = 0
-    devengado: float = 0
+    comprometido: float = 0
     saldo_disponible: float = 0
+
+    # Bloque MEF (oficial). None si la meta no está en el snapshot MEF.
+    pim_mef: float | None = None
+    certificado_mef: float | None = None
+    comprometido_mef: float | None = None
+    devengado_mef: float | None = None
+    girado_mef: float | None = None
+    saldo_disponible_mef: float | None = None
+
+    porcentaje_devengado: float | None = None
 
 
 class CertificacionItem(BaseModel):

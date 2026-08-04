@@ -244,22 +244,18 @@ def devengado_mef_por_sec_func(
 ) -> dict[int, float]:
     """Devengado MEF acumulado del año por SEC_FUNC (suma de meses > 0).
 
-    Regla de agregacion SIAF (CLAUDE.md §5): la ejecucion son flujos mensuales,
-    el total anual es SUM de los meses > 0. PIA/PIM viven en mes 0 y no se suman.
-    """
-    if not sec_funcs:
-        return {}
-    from sqlalchemy import bindparam
+    Delega en `ejecucion_mef_repo.ejecucion_por_meta` (vista
+    `siaf.v_ejecucion_meta_anual`) para que exista **una sola definición** de
+    "devengado MEF" en todo el backend — saldos, cruce y pipeline la comparten
+    (Docs/consolidacion-backend-presupuestal.md §1.3, convergencia de rutas).
 
-    rows = db.execute(
-        text(
-            """
-            SELECT sec_func, COALESCE(SUM(monto_devengado), 0) AS dev
-            FROM siaf.ejecucion_presupuestal
-            WHERE ano_eje = :ano AND mes_eje > 0 AND sec_func IN :sfs
-            GROUP BY sec_func
-            """
-        ).bindparams(bindparam("sfs", expanding=True)),
-        {"ano": ano, "sfs": sec_funcs},
-    ).all()
-    return {int(r[0]): float(r[1]) for r in rows}
+    Mantiene la firma `dict[sec_func, float]` que el pipeline ya consume; extrae
+    solo el devengado. Verificado equivalente al centavo con la query directa
+    que reemplaza.
+    """
+    from app.repositories import ejecucion_mef_repo
+
+    por_meta = ejecucion_mef_repo.ejecucion_por_meta(
+        db, ano=ano, sec_funcs=sec_funcs
+    )
+    return {sf: float(v["devengado"]) for sf, v in por_meta.items()}

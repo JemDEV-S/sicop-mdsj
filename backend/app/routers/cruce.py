@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.database import get_db
 from app.repositories import cruce_repo
 from app.schemas.cruce import (
     AfectacionItem,
+    CertificacionItem,
     ConformidadItem,
     ConsolidadoMetaResponse,
     CruceExpedienteResponse,
@@ -15,9 +18,9 @@ from app.schemas.cruce import (
     OrdenCruceItem,
     PedidoOrigenItem,
     PresupuestoMeta,
-    CertificacionItem,
 )
 from app.security.deps import CurrentUser, get_current_user
+from app.services import cruce_service
 
 router = APIRouter(prefix="/interno/cruce", tags=["interno-cruce"])
 
@@ -100,10 +103,12 @@ def consolidado_meta(
     sec_func: int,
     ano: int | None = None,
     user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> ConsolidadoMetaResponse:
-    resultado = cruce_repo.consolidado_por_meta(
-        ano or settings.ANO_VIGENTE,
-        sec_func,
+    resultado = cruce_service.consolidado_por_meta(
+        db,
+        ano=ano or settings.ANO_VIGENTE,
+        sec_func=sec_func,
         centros=user.centros_permitidos,
     )
     if resultado is None:

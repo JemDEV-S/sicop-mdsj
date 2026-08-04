@@ -185,16 +185,19 @@ def consolidado_por_meta(
         if meta is None:
             return None
 
-        # Saldo consolidado por meta
+        # Presupuesto SIGA operativo por meta. Solo fases PREVIAS (certificado,
+        # comprometido) con su nombre propio. El devengado real (MEF) lo adjunta
+        # el service desde la vista v_ejecucion_meta_anual — NO usamos
+        # MNTO_ACUM_DEVGDO_SIGA (columna vacía en esta muni, daba devengado=0).
         presupuesto = conn.execute(
             text(
                 f"""
                 SELECT
-                    SUM(COALESCE(t.PPTO_PIA, 0))              AS pia,
-                    SUM(COALESCE(t.PPTO_MODIF, 0))            AS pim,
-                    SUM(COALESCE(t.mnto_acum_cert, 0))        AS certificado,
-                    SUM(COALESCE(t.MNTO_ACUM_DEVGDO_SIGA, 0)) AS devengado,
-                    SUM(COALESCE(t.PPTO_DISP_SIAF, 0))        AS saldo_disponible
+                    SUM(COALESCE(t.PPTO_PIA, 0))       AS pia,
+                    SUM(COALESCE(t.PPTO_MODIF, 0))     AS pim,
+                    SUM(COALESCE(t.mnto_acum_cert, 0)) AS certificado,
+                    SUM(COALESCE(t.mnto_acum_coma, 0)) AS comprometido,
+                    SUM(COALESCE(t.PPTO_DISP_SIAF, 0)) AS saldo_disponible
                 FROM SIG_TECHO_PRESUPUESTO t
                 WHERE t.ANO_EJE = :ano AND t.SEC_EJEC = :sec_ejec
                   AND t.sec_func = :sec_func{where_cc}

@@ -239,7 +239,25 @@ CLAUDE.md "Cómo trabajar").
 8. **Test:** decisor con CC ve bloque MEF ≠ null; suma de filas MEF == bloque
    MEF del resumen para el mismo alcance.
 
-### Iteración 3 — Cruce alineado con MEF
+### Iteración 3 — Cruce alineado con MEF ✅ HECHA [2026-08-04]
+
+> **Estado:** implementada y verificada contra la BD real.
+> - `cruce_repo.consolidado_por_meta`: el bloque `presupuesto` deja de usar
+>   `MNTO_ACUM_DEVGDO_SIGA` (daba devengado=0); expone cert + comprometido SIGA
+>   con nombre propio.
+> - Nuevo `cruce_service.consolidado_por_meta`: adjunta el devengado MEF real
+>   desde la vista (Iter.1); % sobre `devengado_mef/pim_mef`. El router pasa a
+>   usar el service (con `db`).
+> - `PresupuestoMeta` schema: dual explícito (SIGA + `*_mef`), % nullable.
+> - **Convergencia (§1.3):** `pipeline_read_repo.devengado_mef_por_sec_func`
+>   ahora **delega en `ejecucion_por_meta`** (firma `dict[sec_func,float]`
+>   intacta). Se elimina la 3.ª copia del SUM de devengado; verificado
+>   equivalente al centavo (20 metas, 0 diferencias). 37 tests de pipeline
+>   siguen verdes.
+> - **Coherencia probada en BD (criterio §1.1):** para la meta 129,
+>   `cruce.devengado_mef == saldos.devengado_mef == snapshot.devengado ==
+>   2,423,595.91` y `% = 44.87%` en los tres. Los tres módulos cuadran.
+> - 4 tests de cruce_service nuevos + suite sin regresiones nuevas.
 
 9. **`cruce_repo.consolidado_por_meta`**: el bloque `presupuesto` deja de leer
    `MNTO_ACUM_DEVGDO_SIGA` (§1.1). Pasa a:
@@ -279,12 +297,18 @@ CLAUDE.md "Cómo trabajar").
 
 El backend está listo para el frontend cuando:
 
-- [ ] `siaf.v_ejecucion_meta_anual` existe y `ejecucion_por_meta` la consume.
-- [ ] Una meta testigo muestra el **mismo devengado** en saldos, cruce y MEF.
-- [ ] Un decisor con filtro de CC recibe bloque MEF no nulo.
-- [ ] El semáforo de saldos evalúa el mismo % en fila y en resumen.
-- [ ] Tests unitarios verdes en las tres iteraciones críticas (1, 2, 3).
-- [ ] Ningún endpoint presupuestal lee ya `MNTO_ACUM_DEVGDO_SIGA`.
+- [x] `siaf.v_ejecucion_meta_anual` existe y `ejecucion_por_meta` la consume.
+- [x] Una meta testigo muestra el **mismo devengado** en saldos, cruce y MEF
+      (meta 129 = S/ 2,423,595.91 en los tres).
+- [x] Un decisor con filtro de CC recibe bloque MEF no nulo.
+- [x] El semáforo de saldos evalúa el mismo % (devengado_mef/pim_mef) en fila y
+      en resumen.
+- [x] Tests unitarios verdes en las tres iteraciones críticas (1, 2, 3).
+- [x] Ningún endpoint presupuestal lee ya `MNTO_ACUM_DEVGDO_SIGA` (saldos, cruce
+      y pipeline convergen en la vista única).
+
+Falta solo la Iteración 4 (proveedores/contratos, coherencia menor) para cerrar
+el documento completo.
 
 Cumplido esto, se arranca el frontend (T-48 → T-51 → T-53) sobre datos que ya
 son coherentes entre sí.
