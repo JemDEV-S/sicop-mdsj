@@ -235,7 +235,7 @@ Smoke test manual: arrancar `npm run dev`, entrar como funcionario semilla, reco
 
 ### Etapa D — Cruce SIAF-SIGA
 - [ ] **T-50** · Buscador EXP_SIAF
-- [ ] **T-51** · Vista consolidada meta
+- [x] **T-51** · Vista consolidada meta — acordeón (presupuesto dual + órdenes + certificaciones + pedidos) — [2026-08-04]
 - [ ] **T-52** · Breadcrumbs / drill-down
 
 ### Etapa E — Complementos
@@ -293,6 +293,14 @@ Durante el rediseño del interno es **muy probable** que aparezcan cosas para co
 **Impacto en frontend:** `npm run build` (y por tanto el checklist §3.4 "typecheck limpio") fallaba en cualquier tarea. El campo no se lee en ningún sitio (`WidgetSaldos` usa `mef.devengado`, otro objeto).
 **Fix aplicado:** se eliminó la línea muerta `devengado: 0` (1 línea, mismo commit, regla §8 "trivial"). `tsc -b` vuelve a pasar en verde.
 
+### [2026-08-04] · No hay reporte de export para el consolidado de meta · No bloqueante · Abierto
+
+**Detectado en:** T-51 (Vista consolidada por meta) · acción "Exportar" del mockup HU-13 (AC-13.4).
+**Qué pasa:** ningún reporte de `backend/app/exportar/reportes.py` exporta **una sola meta** con su detalle. `ejecucion_detalle` no filtra por `sec_func` (exportaría todas las metas del alcance) y `saldos` agrega por meta sin el detalle de órdenes/certificaciones/pedidos. No existe un reporte `consolidado_meta`.
+**Impacto en frontend:** la exportación del consolidado se **difirió** (no se pinta el botón). Wire-arlo a `ejecucion_detalle` daría un archivo con alcance equivocado (todas las metas) — preferible no exportar a exportar algo engañoso (regla §8 "no inventar").
+**Propuesta de fix (chat backend):** crear un reporte `consolidado_meta` que reciba `{ano, sec_func}` y arme hojas/tablas de: presupuesto dual (SIGA + MEF), órdenes, certificaciones y pedidos de la meta (reutilizando `cruce_service.consolidado_por_meta`). Al existir, el botón Exportar de T-51 se activa con `descargar*` análogo a T-48.
+**Docs a revisar:** `Docs/consolidacion-backend-presupuestal.md` §3 (Iteración 3, `cruce_service.consolidado_por_meta`).
+
 ---
 
 ---
@@ -308,6 +316,25 @@ Registro de decisiones no triviales que afectan a más de una pantalla o al sist
 **Alternativas descartadas:** cuáles y por qué
 **Impacto:** qué archivos/pantallas se ven afectadas
 ```
+
+### [2026-08-04] · T-51 Cruce: acordeón de 4 paneles según la respuesta real, no el mockup (Etapa D)
+
+**Contexto:** el mockup de HU-13 lista los paneles **Presupuesto · Órdenes · Certificaciones · Conformidades · Pedidos** (5), con semáforo y export. Pero el endpoint consolidado ya construido `GET /interno/cruce/meta/{sec_func}` (`ConsolidadoMetaResponse`) devuelve exactamente **4 bloques: `presupuesto` (dual) · `ordenes` · `certificaciones` · `pedidos`**. No hay array `conformidades` en esta respuesta (la conformidad vive por-orden vía `estado_siaf='2'`, y el array `conformidades` solo existe en el otro endpoint, el de `/expediente-siaf`). Además el `presupuesto` **no trae un `semaforo` pre-calculado** (a diferencia de `/saldos`).
+
+**Decisión:** la pantalla replica la respuesta real (fuente de verdad):
+- **Acordeón de 4 paneles** (Presupuesto abierto por defecto — §1.1; el resto colapsados, y deshabilitados si vienen vacíos). La conformidad se muestra **dentro** del panel de Órdenes como estado por fila (chip "Devengado" cuando `estado_siaf='2'`, "Anulada" cuando `estado='4'`), no como panel propio.
+- **Presupuesto dual** igual que T-48: tabla SIGA operativo | MEF oficial recorriendo la cadena Certif→Compr→Deveng→Girado. SIGA no tiene devengado/girado a nivel meta → "—" (no se inventa ni se renombra cert/compr como devengado).
+- **Semáforo derivado en cliente** con los MISMOS umbrales del backend (`sistema.umbrales_semaforos` módulo saldos: verde ≥90 / amarillo ≥60 / rojo <60 sobre `devengado_mef/pim_mef`). Verificado coherente en BD: meta 129 = 44.87% → 'rojo' en cruce **y** en saldos (mismo color, mismo número).
+- **Entrada**: por ahora el enlace "Ver cruce" de cada meta en Saldos (SEC_FUNC en la URL). El buscador EXP_SIAF (T-50) es otra puerta de entrada, pendiente.
+- **Export diferido**: no hay reporte backend para una sola meta (ver §5.2). Se omite el botón en vez de exportar un archivo con alcance equivocado.
+- **Componente nuevo** `components/layout/Acordeon.tsx` (accesible: `button` + `aria-expanded`/`aria-controls`, `role="region"`), reutilizable en futuras vistas de detalle largas.
+
+**Alternativas descartadas:**
+- Panel separado "Conformidades" del mockup → ese array no existe en la respuesta del endpoint de meta; fabricarlo sería inventar datos.
+- Pedir el semáforo al backend → el endpoint de cruce no lo expone; replicar los umbrales en cliente da el mismo resultado y evita un cambio de backend por ahora.
+- Diccionarios completos de estados de orden/pedido → solo `estado='4'` (anulada) y `estado_siaf='2'` (devengado) están verificados como autoritativos; el resto se muestra como código, sin inventar significados.
+
+**Impacto:** nuevo feature `features/cruce/` (`types`, `api`, `lib`, `secciones/{PresupuestoMeta,TablasCruce}`), nueva página `pages/interno/CruceMeta.tsx`, nuevo `components/layout/Acordeon.tsx`, router (`/interno/cruce/meta/:secFunc` lazy). Reutiliza `SemaforoSaldo` de `features/saldos`. El patrón dual + acordeón queda listo para T-50 (buscador → mismo consolidado por EXP) y T-52 (breadcrumbs, ya prefigurados en el header de esta página).
 
 ### [2026-08-04] · T-48 Saldos: tabla dual por meta, no por clasificador (Etapa C · paso 1)
 

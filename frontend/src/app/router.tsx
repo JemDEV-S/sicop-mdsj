@@ -117,10 +117,13 @@ export const router = createBrowserRouter([
             element: <div>Buscador EXP_SIAF (Stub · T-50)</div>
           },
           {
-            // Destino del enlace "Ver cruce" de cada meta en Saldos (T-48).
-            // Pantalla real en T-51 (vista consolidada por meta).
+            // Vista consolidada por meta (T-51). Destino del enlace "Ver cruce"
+            // de cada meta en Saldos (T-48).
             path: 'cruce/meta/:secFunc',
-            element: <div>Vista consolidada de meta (Stub · T-51)</div>
+            lazy: async () => {
+              const { default: CruceMeta } = await import('../pages/interno/CruceMeta');
+              return { Component: CruceMeta };
+            }
           },
           {
             // TODO T-35: eliminar tras validar funcionalidad
