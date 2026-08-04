@@ -26,7 +26,6 @@ const RESUMEN_VACIO: SaldosResumen = {
   pim: 0,
   certificado: 0,
   comprometido: 0,
-  devengado: 0,
   saldo_disponible: 0,
   reservado_pedido: 0,
   porcentaje_devengado: 0,

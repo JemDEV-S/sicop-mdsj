@@ -81,7 +81,10 @@ export const router = createBrowserRouter([
           },
           {
             path: 'saldos',
-            element: <div>Módulo Saldos (Stub · T-48)</div>
+            lazy: async () => {
+              const { default: Saldos } = await import('../pages/interno/Saldos');
+              return { Component: Saldos };
+            }
           },
           {
             path: 'pipeline',
@@ -112,6 +115,12 @@ export const router = createBrowserRouter([
           {
             path: 'cruce/expediente-siaf/:exp',
             element: <div>Buscador EXP_SIAF (Stub · T-50)</div>
+          },
+          {
+            // Destino del enlace "Ver cruce" de cada meta en Saldos (T-48).
+            // Pantalla real en T-51 (vista consolidada por meta).
+            path: 'cruce/meta/:secFunc',
+            element: <div>Vista consolidada de meta (Stub · T-51)</div>
           },
           {
             // TODO T-35: eliminar tras validar funcionalidad

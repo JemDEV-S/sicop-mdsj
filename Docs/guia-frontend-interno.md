@@ -230,7 +230,7 @@ Smoke test manual: arrancar `npm run dev`, entrar como funcionario semilla, reco
 - [ ] **T-47** · Alertas estancados
 
 ### Etapa C — Saldos y alertas
-- [ ] **T-48** · Saldos presupuestales
+- [x] **T-48** · Saldos presupuestales — tabla dual SIGA/MEF por meta + KPIs + export — [2026-08-04]
 - [ ] **T-49** · Metas rezagadas
 
 ### Etapa D — Cruce SIAF-SIGA
@@ -276,6 +276,23 @@ Durante el rediseño del interno es **muy probable** que aparezcan cosas para co
 3. Documentar como comportamiento intencional si el negocio lo confirma (los contratos son transversales).
 **Docs a revisar:** `Docs/diccionario-datos-unificado.md` §10 (cadena logística), `Docs/datos-iniciales-siga.md` §12.
 
+### [2026-08-04] · Reporte de export `saldos` quedó desalineado con la consolidación · No bloqueante · Abierto
+
+**Detectado en:** T-48 (Saldos presupuestales) · botones Exportar Excel/PDF.
+**Qué pasa:** el reporte `saldos` de [`backend/app/exportar/reportes.py`](../backend/app/exportar/reportes.py) no se actualizó cuando la Iteración 2 de la consolidación cambió `SaldoItem` a modelo dual por meta. Dos problemas concretos:
+1. Sus columnas referencian claves que ya **no existen** en el nuevo `SaldoItem`: `devengado` (ahora es `devengado_mef`), `clasificador`, `centro_costo`, `centro_costo_nombre`. Como el generador usa `dict.get()`, no crashea (HTTP 200) pero exporta esas columnas **en blanco** — en particular la columna "Devengado" del Excel sale vacía, lo que contradice toda la consolidación (el devengado real es `devengado_mef`).
+2. `_datos_saldos` usa `user.centros_permitidos` directo e **ignora** el `centro_costo` de `filtros`: la exportación siempre trae el alcance completo del usuario, no la unidad activa del topbar. Diverge del listado en pantalla, que sí filtra por CC.
+**Impacto en frontend:** el botón Exportar funciona y descarga un xlsx/pdf válido, pero (a) la columna Devengado va vacía y (b) no respeta el chip de CC. El frontend ya envía `centro_costo` y `sec_func` en `filtros` como forward-compat; el backend debe consumirlos.
+**Propuesta de fix (chat backend):** reescribir `REPORTE_SALDOS` sobre el `SaldoItem` dual — columnas `pim`, `certificado`, `comprometido_anual` (SIGA) + `pim_mef`, `devengado_mef`, `porcentaje_devengado`, `semaforo` (MEF); y que `_datos_saldos` llame `permisos_service.restringir_a_subrama(db, user.centros_permitidos, filtros.get("centro_costo"))` igual que el router de listado.
+**Docs a revisar:** `Docs/consolidacion-backend-presupuestal.md` §3 (Iteración 2, esquema dual).
+
+### [2026-08-04] · `RESUMEN_VACIO` del dashboard con campo `devengado` inexistente · Trivial · Resuelto en este commit
+
+**Detectado en:** T-48, al correr `tsc -b` (fallaba en `main` antes de esta tarea).
+**Qué pasa:** la Iteración 2 quitó `devengado` del tipo `SaldosResumen` (el interno no tiene un "devengado" SIGA), pero el literal `RESUMEN_VACIO` en `DashboardWidgets.tsx` seguía declarando `devengado: 0` → error TS2353 que rompía el build de todo el frontend.
+**Impacto en frontend:** `npm run build` (y por tanto el checklist §3.4 "typecheck limpio") fallaba en cualquier tarea. El campo no se lee en ningún sitio (`WidgetSaldos` usa `mef.devengado`, otro objeto).
+**Fix aplicado:** se eliminó la línea muerta `devengado: 0` (1 línea, mismo commit, regla §8 "trivial"). `tsc -b` vuelve a pasar en verde.
+
 ---
 
 ---
@@ -291,6 +308,24 @@ Registro de decisiones no triviales que afectan a más de una pantalla o al sist
 **Alternativas descartadas:** cuáles y por qué
 **Impacto:** qué archivos/pantallas se ven afectadas
 ```
+
+### [2026-08-04] · T-48 Saldos: tabla dual por meta, no por clasificador (Etapa C · paso 1)
+
+**Contexto:** el mockup textual de HU-15 (§735 de actividad-2) muestra saldos **por clasificador** dentro de cada meta y un **semáforo del saldo disponible** (verde >20%, rojo <5%). Pero la consolidación del backend (Iteración 2) dejó el endpoint `/interno/saldos` agregado **por meta** (`sec_func`, 159 filas) con columnas duales `_mef`, y el semáforo se calcula sobre `devengado_mef/pim_mef` (no sobre el saldo). Seguir el mockup literal contradiría el backend ya consolidado y verificado.
+
+**Decisión:** la pantalla replica el backend consolidado (fuente de verdad), no el mockup:
+- **Una fila por meta**, con dos bloques de columnas visualmente separados: **SIGA operativo** (PIM, Certificado, Comprometido — fases previas, fondo neutro) | **MEF oficial** (PIM MEF, Devengado, % y semáforo — resaltado con tinte `primary`). Cabecera de grupo que rotula cada bloque para que nunca se confundan.
+- El **devengado y el %** salen SIEMPRE del MEF real — el mismo número que ve el ciudadano. Cert/compr se muestran con su nombre propio, jamás como "devengado".
+- **Semáforo** = componente `Semaforo` del sistema de diseño, sobre `devengado_mef/pim_mef`. Mapeo `verde/amarillo/rojo/desconocido` (backend) → `ok/alerta/critico` (componente); `desconocido`/meta sin cruce MEF → pastilla "Sin dato MEF", nunca un semáforo inventado.
+- **KPIs** (fila superior): Devengado oficial MEF (protagonista, con semáforo global), PIM SIGA (con PIM MEF del pliego como referencia en tooltip), Saldo disponible SIGA, Metas de la unidad (con conteo de críticas). Reutilizan `/interno/saldos/resumen`.
+- **Filtros:** semáforo (pastillas, filtro cliente sobre la página) + SEC_FUNC (filtro backend). El **CC no se filtra aquí** — se controla desde el chip del topbar (decisión previa "un solo lugar de control"); la pantalla solo muestra la unidad activa como contexto.
+- **El desglose por clasificador del mockup** se difiere: será el detalle de la meta en T-51 (vista consolidada), a donde enlaza el "Ver cruce" de cada fila. No se pierde; se ancla en la meta (§1 principio 5).
+
+**Alternativas descartadas:**
+- Reproducir el mockup por-clasificador → multiplicaría el devengado (filas clasificador×CC) y reintroduciría el error que la consolidación acaba de eliminar; además el backend ya no expone esa granularidad en este endpoint.
+- Semáforo sobre saldo disponible (mockup HU-15 AC-15.3) → el backend consolidado evalúa % devengado; usar otro criterio rompería la coherencia con dashboard y portal público.
+
+**Impacto:** nuevo feature `features/saldos/` (`types`, `api`, `lib`, `secciones/{KpisSaldos,FiltrosSaldos,TablaSaldos}`), nueva página `pages/interno/Saldos.tsx`, router (`/interno/saldos` lazy + stub `/interno/cruce/meta/:secFunc` para el enlace). Reutiliza `SaldosResumen` del feature dashboard (sin duplicar tipo). Reveló dos hallazgos backend (ver §5.2: export desalineado + `RESUMEN_VACIO` roto). El patrón de tabla dual con cabecera de grupo es la referencia para T-51 (Cruce).
 
 ### [2026-07-15] · Auditoría del interno actual (Etapa A · paso 1)
 
