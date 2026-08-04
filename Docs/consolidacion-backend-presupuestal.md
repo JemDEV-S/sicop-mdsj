@@ -200,7 +200,29 @@ CLAUDE.md "Cómo trabajar").
 4. **Test:** el total agregado de la vista == el total de `resumen_mef` actual
    (regresión: no cambiamos el número del pliego, solo lo desagregamos).
 
-### Iteración 2 — Saldos duales reales por meta
+### Iteración 2 — Saldos duales reales por meta ✅ HECHA [2026-08-04]
+
+> **Estado:** implementada y verificada contra la BD real.
+> - **Camino elegido** (validado con datos): lista agregada **por meta**
+>   (`sec_func`), cruce `sec_func↔sec_func` verificado **159/159 metas SIGA con
+>   PIM cruzan 100% con MEF**. Evita multiplicar el devengado ×9.6 (filas
+>   clasificador×CC por meta).
+> - `saldos_repo`: `listar_saldos` agrega por meta y expone `certificado` /
+>   `comprometido` con su nombre propio (sin "devengado"). `resumen_saldos` y
+>   `metas_con_saldo` (antes `metas_rezagadas`) devuelven candidatas; el % y la
+>   criticidad salen del MEF en el service. `contar_saldos` cuenta metas.
+> - `saldos_service`: LEFT JOIN con `ejecucion_por_meta`; `porcentaje_devengado`
+>   y semáforo sobre `devengado_mef/pim_mef`; **el bloque MEF ya aparece con
+>   filtro de CC** (restringido a las metas visibles, ya no se oculta a
+>   decisores).
+> - `schemas`: `SaldoItem` con columnas duales `_mef` explícitas; `porcentaje`
+>   nullable (meta sin cruce ⇒ None, no se inventa con cert+compr).
+> - **Frontend**: `WidgetSaldos` deja de mostrar "Cert.+Comprometido" como
+>   devengado; ahora muestra Certificado y Comprometido separados. `types.ts`
+>   alineado. Typecheck TS limpio.
+> - **Verificado en BD:** % global 44.45% = idéntico al portal público; meta
+>   129 = 44.87% (dev_mef/pim_mef exacto); 60 metas críticas (<30% real).
+>   7 tests de service nuevos + suite sin regresiones nuevas.
 
 5. **`saldos_service.listar_saldos`** hace `LEFT JOIN` en Python: por cada fila
    SIGA (por `sec_func`), adjunta el bloque MEF de la vista. La respuesta gana:

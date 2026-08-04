@@ -132,16 +132,21 @@ function BloqueSiga({ resumen }: { resumen: SaldosResumen }) {
         </dd>
         <dt
           className="text-muted-foreground"
-          title="Certificado + Comprometido en el SIGA. En 2026 la col MNTO_ACUM_DEVGDO_SIGA no está poblada por la muni."
+          title="Certificación: crédito presupuestal reservado. Fase previa al compromiso."
         >
-          Cert. + Comprometido
+          Certificado
         </dt>
         <dd className="text-right font-medium text-foreground">
-          {formatearMoneda(resumen.devengado)}
+          {formatearMoneda(resumen.certificado)}
         </dd>
-        <dt className="text-muted-foreground">% Ejecución</dt>
-        <dd className="text-right font-semibold text-foreground">
-          {formatPorcentaje(resumen.porcentaje_devengado)}
+        <dt
+          className="text-muted-foreground"
+          title="Compromiso: obligación adquirida. Fase previa al devengado (el devengado real es el del MEF, arriba)."
+        >
+          Comprometido
+        </dt>
+        <dd className="text-right font-medium text-foreground">
+          {formatearMoneda(resumen.comprometido)}
         </dd>
         <dt className="text-muted-foreground">Metas activas</dt>
         <dd className="text-right font-medium text-foreground">

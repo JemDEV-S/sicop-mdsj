@@ -174,21 +174,22 @@ export interface EjecucionMef {
 
 export interface SaldosResumen {
   ano: number;
-  // Campos SIGA (a nivel meta, con filtro por CC).
+  // Bloque SIGA operativo (a nivel meta, con filtro por CC). Fases PREVIAS al
+  // devengado — aquí no hay "devengado" SIGA.
   pia: number;
   pim: number;
   certificado: number;
   comprometido: number;
-  devengado: number;
   saldo_disponible: number;
   reservado_pedido: number;
+  // % y semáforo globales sobre el devengado MEF real.
   porcentaje_devengado: number;
   semaforo: string;
   metas_total: number;
   metas_criticas: number;
   top_metas_criticas: MetaCritica[];
-  // Bloque MEF (oficial, sin filtro por CC). null si el usuario está
-  // restringido a un subárbol de CC.
+  // Bloque MEF (oficial). Restringido a las metas visibles del usuario; ahora
+  // aparece también para decisores/CC (ya no se oculta).
   mef: EjecucionMef | null;
 }
 

@@ -50,7 +50,22 @@ def listar_saldos(
     limit: int = 500,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    """Devuelve saldos por meta + clasificador + centro de costo.
+    """Devuelve saldos SIGA agregados **por meta** (`sec_func`).
+
+    Una meta tiene ~9.6 filas en SIG_TECHO_PRESUPUESTO (clasificador × CC). Se
+    agrega por `sec_func` para que:
+      1. cada fila sea una meta (misma granularidad que resumen/metas_rezagadas
+         y que el portal público);
+      2. el bloque MEF por meta (que el service adjunta luego) no se multiplique
+         por el número de clasificadores/CC. Ver
+         Docs/consolidacion-backend-presupuestal.md (Iteración 2).
+
+    Solo devuelve montos SIGA operativos: `certificado` y `comprometido` con sus
+    nombres propios (fases previas). **No devuelve "devengado"** — el devengado
+    real, único y oficial, lo adjunta el service desde el snapshot MEF.
+
+    `clasificador`/`fuente_financ` filtran a nivel meta (incluye la meta si
+    tiene al menos una fila con ese clasificador/fuente), no fragmentan la fila.
 
     `centros=None` = admin (sin filtro). `centros=[]` = usuario sin CC asignado
     (devuelve vacio).
@@ -92,36 +107,23 @@ def listar_saldos(
     sql = f"""
         SELECT
             t.sec_func,
-            LTRIM(RTRIM(m.nombre))                                AS nombre_meta,
-            LTRIM(RTRIM(m.act_proy))                              AS act_proy,
-            LTRIM(RTRIM(t.CLASIFICADOR))                          AS clasificador,
-            LTRIM(RTRIM(t.FUENTE_FINANC))                         AS fuente_financ,
-            LTRIM(RTRIM(t.CENTRO_COSTO))                          AS centro_costo,
-            LTRIM(RTRIM(cc.NOMBRE_DEPEND))                        AS centro_costo_nombre,
-            COALESCE(t.PPTO_PIA, 0)                               AS pia,
-            COALESCE(t.PPTO_MODIF, 0)                             AS pim,
-            COALESCE(t.mnto_acum_cert, 0)                         AS certificado,
-            COALESCE(t.mnto_acum_coma, 0)                         AS comprometido_anual,
-            COALESCE(t.mnto_acum_comm, 0)                         AS comprometido_mensual,
-            -- "Devengado" SIGA = certificado + comprometido (la col
-            -- MNTO_ACUM_DEVGDO_SIGA está en 0 en 2026). El devengado
-            -- oficial viene del snapshot MEF en el service.
-            COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0) AS devengado,
-            COALESCE(t.PPTO_DISP_SIAF, 0)                         AS saldo_disponible,
-            COALESCE(t.MNTO_RESERVA_PEDIDO, 0)                    AS reservado_pedido,
-            CASE WHEN COALESCE(t.PPTO_MODIF, 0) > 0
-                 THEN ROUND(
-                    (COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
-                    / t.PPTO_MODIF * 100, 2)
-                 ELSE 0 END                                       AS porcentaje_devengado
+            LTRIM(RTRIM(MAX(m.nombre)))                     AS nombre_meta,
+            LTRIM(RTRIM(MAX(m.act_proy)))                   AS act_proy,
+            COALESCE(SUM(t.PPTO_PIA), 0)                    AS pia,
+            COALESCE(SUM(t.PPTO_MODIF), 0)                  AS pim,
+            -- Fases previas SIGA, con su nombre propio (NO son devengado).
+            COALESCE(SUM(t.mnto_acum_cert), 0)              AS certificado,
+            COALESCE(SUM(t.mnto_acum_coma), 0)              AS comprometido_anual,
+            COALESCE(SUM(t.mnto_acum_comm), 0)              AS comprometido_mensual,
+            COALESCE(SUM(t.PPTO_DISP_SIAF), 0)              AS saldo_disponible,
+            COALESCE(SUM(t.MNTO_RESERVA_PEDIDO), 0)         AS reservado_pedido,
+            COUNT(*)                                        AS filas_clasificador
         FROM SIG_TECHO_PRESUPUESTO t
         INNER JOIN META m
             ON t.sec_func = m.sec_func AND t.ANO_EJE = m.ano_eje
-        LEFT JOIN SIG_CENTRO_COSTO cc
-            ON t.ANO_EJE = cc.ANO_EJE AND t.SEC_EJEC = cc.SEC_EJEC
-           AND t.CENTRO_COSTO = cc.CENTRO_COSTO
         WHERE {" AND ".join(where)}
-        ORDER BY t.PPTO_MODIF DESC
+        GROUP BY t.sec_func
+        ORDER BY SUM(t.PPTO_MODIF) DESC
         OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
     """
     params["limit"] = limit
@@ -156,7 +158,11 @@ def contar_saldos(
         for i, c in enumerate(centros):
             params[f"cc{i}"] = c
 
-    sql = f"SELECT COUNT(*) FROM SIG_TECHO_PRESUPUESTO WHERE {' AND '.join(where)}"
+    # La lista es por meta → contamos metas distintas, no filas clasificador×CC.
+    sql = (
+        "SELECT COUNT(DISTINCT sec_func) FROM SIG_TECHO_PRESUPUESTO "
+        f"WHERE {' AND '.join(where)}"
+    )
     with get_connection() as conn:
         return int(conn.execute(text(sql), params).scalar_one())
 
@@ -164,24 +170,21 @@ def contar_saldos(
 def resumen_saldos(
     ano: int,
     centros: list[str] | None = None,
-    *,
-    top_criticas_limit: int = 3,
-    umbral_critico: float = 30.0,
 ) -> dict[str, Any]:
-    """Agrega totales de saldos + top de metas críticas para el dashboard T-44.
+    """Agrega totales SIGA operativos por meta para el dashboard T-44.
 
-    Una sola consulta a `SIG_TECHO_PRESUPUESTO` filtrada por año/CC devuelve los
-    totales globales. La lista de top-N metas críticas se resuelve con una segunda
-    consulta que agrupa por `sec_func` (misma agregación que `metas_rezagadas`).
-
-    El semáforo global se aplica al % devengado agregado en el servicio.
+    Devuelve los montos SIGA crudos (PIM, certificado, comprometido, saldo
+    disponible, reservado) y la lista de metas candidatas con su PIM+cert+compr.
+    **No calcula devengado ni % ni criticidad** — eso lo hace el service con el
+    devengado MEF real (una meta "crítica" es la que tiene bajo % devengado
+    OFICIAL, no bajo cert+compr). Ver Docs/consolidacion-backend-presupuestal.md
+    (Iteración 2).
     """
     if centros is not None and len(centros) == 0:
         return {
             "pia": 0, "pim": 0, "certificado": 0, "comprometido": 0,
-            "devengado": 0, "saldo_disponible": 0, "reservado_pedido": 0,
-            "porcentaje_devengado": 0, "metas_total": 0, "metas_criticas": 0,
-            "top_metas_criticas": [],
+            "saldo_disponible": 0, "reservado_pedido": 0,
+            "metas_total": 0, "metas": [],
         }
 
     where = [
@@ -205,9 +208,6 @@ def resumen_saldos(
             COALESCE(SUM(t.PPTO_MODIF), 0)                  AS pim,
             COALESCE(SUM(t.mnto_acum_cert), 0)              AS certificado,
             COALESCE(SUM(t.mnto_acum_coma), 0)              AS comprometido,
-            -- "Devengado" SIGA = certificado + comprometido (MNTO_ACUM_DEVGDO_SIGA
-            -- está en 0 en 2026). El devengado oficial viene del snapshot MEF.
-            COALESCE(SUM(t.mnto_acum_cert + t.mnto_acum_coma), 0) AS devengado,
             COALESCE(SUM(t.PPTO_DISP_SIAF), 0)              AS saldo_disponible,
             COALESCE(SUM(t.MNTO_RESERVA_PEDIDO), 0)         AS reservado_pedido,
             COUNT(DISTINCT t.sec_func)                      AS metas_total
@@ -215,74 +215,43 @@ def resumen_saldos(
         WHERE {where_sql}
     """
 
-    # Top-N metas críticas: mismo criterio que metas_rezagadas pero ordenando
-    # además por PIM DESC para priorizar las de mayor peso presupuestal.
-    params_top = dict(params)
-    params_top["umbral_critico"] = umbral_critico
-    params_top["top_limit"] = top_criticas_limit
-
-    sql_top = f"""
-        SELECT TOP (:top_limit)
+    # Todas las metas candidatas con su PIM + cert/compr SIGA. El service las
+    # cruza con MEF, calcula el % devengado real y elige las críticas.
+    sql_metas = f"""
+        SELECT
             t.sec_func,
-            LTRIM(RTRIM(m.nombre))                          AS nombre_meta,
+            LTRIM(RTRIM(MAX(m.nombre)))                     AS nombre_meta,
             SUM(COALESCE(t.PPTO_MODIF, 0))                  AS pim,
-            SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0)) AS devengado,
-            CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                 THEN ROUND(SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
-                            / SUM(t.PPTO_MODIF) * 100, 2)
-                 ELSE 0 END                                 AS porcentaje_devengado
+            SUM(COALESCE(t.mnto_acum_cert, 0))              AS certificado,
+            SUM(COALESCE(t.mnto_acum_coma, 0))              AS comprometido
         FROM SIG_TECHO_PRESUPUESTO t
         INNER JOIN META m
             ON t.sec_func = m.sec_func AND t.ANO_EJE = m.ano_eje
         WHERE {where_sql}
-        GROUP BY t.sec_func, m.nombre
-        HAVING CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                    THEN SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
-                         / SUM(t.PPTO_MODIF) * 100
-                    ELSE 0 END < :umbral_critico
+        GROUP BY t.sec_func
         ORDER BY SUM(t.PPTO_MODIF) DESC
     """
 
-    sql_metas_criticas = f"""
-        SELECT COUNT(*) FROM (
-            SELECT t.sec_func
-            FROM SIG_TECHO_PRESUPUESTO t
-            WHERE {where_sql}
-            GROUP BY t.sec_func
-            HAVING CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                        THEN SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
-                             / SUM(t.PPTO_MODIF) * 100
-                        ELSE 0 END < :umbral_critico
-        ) x
-    """
-    params_count = dict(params)
-    params_count["umbral_critico"] = umbral_critico
-
     with get_connection() as conn:
         totales = dict(conn.execute(text(sql_totales), params).mappings().one())
-        top = [dict(r) for r in conn.execute(text(sql_top), params_top).mappings().all()]
-        metas_criticas = int(
-            conn.execute(text(sql_metas_criticas), params_count).scalar_one()
-        )
+        metas = [dict(r) for r in conn.execute(text(sql_metas), params).mappings().all()]
 
-    pim = float(totales.get("pim") or 0)
-    devengado = float(totales.get("devengado") or 0)
-    totales["porcentaje_devengado"] = round(devengado / pim * 100, 2) if pim > 0 else 0.0
-    totales["metas_criticas"] = metas_criticas
-    totales["top_metas_criticas"] = top
+    totales["metas"] = metas
     return totales
 
 
-def metas_rezagadas(
+def metas_con_saldo(
     ano: int,
     centros: list[str] | None = None,
-    *,
-    umbral_porcentaje: float = 50.0,
-    limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """Metas con % devengado < umbral (HU-16, RN-02 alerta configurable).
+    """Todas las metas con PIM > 0 y sus montos SIGA operativos, por meta.
 
-    Agrega por sec_func (una meta puede tener varias filas por clasificador/CC).
+    Base para HU-16 (metas rezagadas): el filtro por umbral de % devengado lo
+    aplica el service usando el devengado MEF real (no cert+compr). Aquí solo
+    entregamos PIM + cert + compr agregados por `sec_func`. Ver
+    Docs/consolidacion-backend-presupuestal.md (Iteración 2).
+
+    Agrega por sec_func (una meta tiene varias filas por clasificador/CC).
     """
     if centros is not None and len(centros) == 0:
         return []
@@ -296,8 +265,6 @@ def metas_rezagadas(
     params: dict[str, Any] = {
         "ano": ano,
         "sec_ejec": settings.SEC_EJEC,
-        "umbral": umbral_porcentaje,
-        "limit": limit,
     }
     if centros is not None:
         binds = [f":cc{i}" for i in range(len(centros))]
@@ -306,26 +273,19 @@ def metas_rezagadas(
             params[f"cc{i}"] = c
 
     sql = f"""
-        SELECT TOP (:limit)
+        SELECT
             t.sec_func,
-            LTRIM(RTRIM(m.nombre))          AS nombre_meta,
-            LTRIM(RTRIM(m.act_proy))        AS act_proy,
-            SUM(COALESCE(t.PPTO_MODIF, 0))              AS pim,
-            SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0)) AS devengado,
-            CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                 THEN ROUND(SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
-                            / SUM(t.PPTO_MODIF) * 100, 2)
-                 ELSE 0 END                 AS porcentaje_devengado
+            LTRIM(RTRIM(MAX(m.nombre)))                AS nombre_meta,
+            LTRIM(RTRIM(MAX(m.act_proy)))              AS act_proy,
+            SUM(COALESCE(t.PPTO_MODIF, 0))             AS pim,
+            SUM(COALESCE(t.mnto_acum_cert, 0))         AS certificado,
+            SUM(COALESCE(t.mnto_acum_coma, 0))         AS comprometido
         FROM SIG_TECHO_PRESUPUESTO t
         INNER JOIN META m
             ON t.sec_func = m.sec_func AND t.ANO_EJE = m.ano_eje
         WHERE {" AND ".join(where)}
-        GROUP BY t.sec_func, m.nombre, m.act_proy
-        HAVING CASE WHEN SUM(COALESCE(t.PPTO_MODIF, 0)) > 0
-                    THEN SUM(COALESCE(t.mnto_acum_cert, 0) + COALESCE(t.mnto_acum_coma, 0))
-                         / SUM(t.PPTO_MODIF) * 100
-                    ELSE 0 END < :umbral
-        ORDER BY porcentaje_devengado ASC
+        GROUP BY t.sec_func
+        ORDER BY SUM(t.PPTO_MODIF) DESC
     """
     with get_connection() as conn:
         rows = conn.execute(text(sql), params).mappings().all()
