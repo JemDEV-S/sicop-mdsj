@@ -172,19 +172,32 @@ export interface EjecucionMef {
   sincronizado_en: string | null;
 }
 
+/** Contexto del semáforo temporal (espejo de SemaforoContexto del backend). */
+export interface SemaforoContextoResumen {
+  color: string;
+  esperado: number;
+  real: number | null;
+  rezago: number | null;
+  mes_corte: number;
+}
+
 export interface SaldosResumen {
   ano: number;
-  // Bloque SIGA operativo (a nivel meta, con filtro por CC). Fases PREVIAS al
-  // devengado — aquí no hay "devengado" SIGA.
+  // Referencia operativa SIGA (a nivel meta, con filtro por CC). NO es cifra
+  // presupuestal — el PIM SIGA discrepa del SIAF. Solo contexto.
   pia: number;
   pim: number;
   certificado: number;
   comprometido: number;
   saldo_disponible: number;
   reservado_pedido: number;
-  // % y semáforo globales sobre el devengado MEF real.
+  // % y semáforo globales sobre el devengado MEF real (semáforo temporal).
   porcentaje_devengado: number;
   semaforo: string;
+  semaforo_ctx: SemaforoContextoResumen | null;
+  /** Mes de corte del snapshot y % de avance esperado a ese mes. */
+  mes_corte: number;
+  avance_esperado: number;
   metas_total: number;
   metas_criticas: number;
   top_metas_criticas: MetaCritica[];

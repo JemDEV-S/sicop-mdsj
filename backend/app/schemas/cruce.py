@@ -193,3 +193,31 @@ class ConsolidadoMetaResponse(BaseModel):
     ordenes: list[OrdenCruceItem]
     pedidos: list[PedidoOrigenItem]
     certificaciones: list[CertificacionItem]
+
+
+class PresupuestoClasificador(BaseModel):
+    """Techo SIGA de un clasificador (fases previas). Sin bloque MEF: el snapshot
+    oficial se guarda por meta, no baja a clasificador."""
+
+    pia: float = 0
+    pim: float = 0
+    certificado: float = 0
+    comprometido: float = 0
+    saldo_disponible: float = 0
+
+
+class ConsolidadoClasificadorResponse(BaseModel):
+    """Cruce SIAF-SIGA de un clasificador dentro de una meta.
+
+    Igual estructura que el consolidado de meta pero filtrado a un clasificador.
+    `sin_mef=True` recuerda a la UI que aquí no hay % oficial (el MEF es por meta).
+    """
+
+    meta: MetaCabecera
+    clasificador: str
+    clasificador_nombre: str | None = None
+    presupuesto: PresupuestoClasificador
+    ordenes: list[OrdenCruceItem]
+    pedidos: list[PedidoOrigenItem]
+    certificaciones: list[CertificacionItem]
+    sin_mef: bool = True

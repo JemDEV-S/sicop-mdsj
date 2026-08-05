@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
 import { apiClient } from '@/lib/api-client';
 import { useContextoInterno } from '@/store/contexto-interno';
-import type { ConsolidadoMeta } from './types';
+import type { ConsolidadoClasificador, ConsolidadoMeta } from './types';
 
 /**
  * Consolidado de una meta (presupuesto dual + órdenes + certificaciones +
@@ -24,6 +24,36 @@ export function useConsolidadoMeta(secFunc: number | null) {
       const { data } = await apiClient.get<ConsolidadoMeta>(
         `/interno/cruce/meta/${secFunc}`,
         { params: { ano } },
+      );
+      return data;
+    },
+  });
+}
+
+/**
+ * Cruce SIAF-SIGA de un clasificador dentro de una meta (para el modal desde el
+ * drill-down de saldos). Incluye órdenes, certificaciones y pedidos filtrados al
+ * clasificador. Solo se ejecuta cuando `secFunc` y `clasificador` están presentes.
+ */
+export function useConsolidadoClasificador(
+  secFunc: number | null,
+  clasificador: string | null,
+  centroCosto?: string | null,
+) {
+  const ano = useContextoInterno((s) => s.añoActivo);
+  return useQuery({
+    queryKey: ['interno', 'cruce', 'clasificador', secFunc, clasificador, ano, centroCosto],
+    enabled: secFunc != null && Number.isFinite(secFunc) && !!clasificador,
+    retry: (fallidos, error) => {
+      if (error instanceof AxiosError && error.response?.status === 404) return false;
+      return fallidos < 2;
+    },
+    queryFn: async () => {
+      const params: Record<string, string | number> = { ano, clasificador: clasificador! };
+      if (centroCosto) params.centro_costo = centroCosto;
+      const { data } = await apiClient.get<ConsolidadoClasificador>(
+        `/interno/cruce/meta/${secFunc}/clasificador`,
+        { params },
       );
       return data;
     },

@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { useContextoInterno } from '@/store/contexto-interno';
 import type { SaldosResumen } from '@/features/dashboard/types';
-import type { SaldoItem, SaldosListadoResponse } from './types';
+import type { SaldoDetalle, SaldoItem, SaldosListadoResponse } from './types';
 
 /**
  * Hooks del módulo de Saldos. Todos consumen el año + CC activos del store
@@ -75,32 +75,53 @@ export function useSaldos({ page, size, secFunc }: ListadoParams) {
   });
 }
 
+/**
+ * Detalle drill-down de una meta: cabecera dual + composición SIGA por
+ * clasificador y por fuente. Solo se ejecuta cuando `secFunc != null` (el panel
+ * se abre bajo demanda al expandir una fila).
+ */
+export function useDetalleMeta(secFunc: number | null) {
+  const { ano, ccCodigo } = useContextoSaldos();
+  return useQuery({
+    queryKey: ['interno', 'saldos', 'detalle', ano, ccCodigo, secFunc],
+    enabled: secFunc != null,
+    queryFn: async () => {
+      const { data } = await apiClient.get<SaldoDetalle>(
+        `/interno/saldos/meta/${secFunc}/detalle`,
+        { params: paramsBase(ano, ccCodigo) },
+      );
+      return data;
+    },
+  });
+}
+
 export type { SaldoItem };
 
 /**
- * Descarga el reporte de saldos (Excel o PDF) con los filtros de contexto
+ * Descarga un reporte de saldos (Excel o PDF) con los filtros de contexto
  * aplicados. Devuelve el blob y dispara la descarga en el navegador.
  *
- * NOTA (backend): el reporte `saldos` hoy exporta el alcance COMPLETO del
- * usuario e ignora `centro_costo` y el nuevo esquema dual (ver bitácora §5 de
- * la guía). Enviamos `centro_costo` igual, como forward-compat, para cuando el
- * backend lo respete.
+ * El backend ya respeta `centro_costo` (subrama del usuario) y exporta el
+ * esquema DUAL completo: columnas SIGA (fases previas) + MEF (devengado/girado
+ * oficiales). El reporte `saldos_detalle` exporta la composición por
+ * clasificador de una meta (requiere `sec_func`).
  */
 export async function descargarSaldos(
   formato: 'excel' | 'pdf',
   filtros: { ano: number; centro_costo?: string; sec_func?: number },
+  reporte: 'saldos' | 'saldos_detalle' = 'saldos',
 ): Promise<void> {
   const ruta = formato === 'excel' ? 'excel' : 'pdf';
   const { data, headers } = await apiClient.post(
     `/interno/exportar/${ruta}`,
-    { reporte: 'saldos', filtros },
+    { reporte, filtros },
     { responseType: 'blob' },
   );
 
   const disposition = String(headers['content-disposition'] ?? '');
   const match = disposition.match(/filename="?([^"]+)"?/);
   const ext = formato === 'excel' ? 'xlsx' : 'pdf';
-  const nombre = match?.[1] ?? `saldos_${filtros.ano}.${ext}`;
+  const nombre = match?.[1] ?? `${reporte}_${filtros.ano}.${ext}`;
 
   const url = URL.createObjectURL(data as Blob);
   const a = document.createElement('a');

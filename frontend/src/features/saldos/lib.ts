@@ -1,5 +1,5 @@
 import type { EstadoSemaforo } from '@/lib/semaforo';
-import type { SemaforoSaldo } from './types';
+import type { SemaforoContexto, SemaforoSaldo } from './types';
 
 /**
  * El backend de saldos emite 'verde' | 'amarillo' | 'rojo' | 'desconocido'
@@ -25,6 +25,26 @@ export function etiquetaSemaforo(
   if (valor === 'verde') return `En avance · ${pct}`;
   if (valor === 'amarillo') return `En atención · ${pct}`;
   return `En riesgo · ${pct}`;
+}
+
+/**
+ * Explicación del semáforo TEMPORAL: contrasta el avance real contra el esperado
+ * al mes de corte. Da al funcionario el porqué del color, no solo el color.
+ * Ej.: "44.9% dev · esperado 58.3% a jul · rezago 13.5 pp".
+ */
+const MESES_ABREV = [
+  'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+  'jul', 'ago', 'set', 'oct', 'nov', 'dic',
+];
+
+export function explicacionSemaforo(ctx: SemaforoContexto | null): string | null {
+  if (!ctx || ctx.real == null || ctx.rezago == null) return null;
+  const mes = MESES_ABREV[Math.min(11, Math.max(0, ctx.mes_corte - 1))] ?? '';
+  const base = `${ctx.real.toFixed(1)}% dev · esperado ${ctx.esperado.toFixed(1)}% a ${mes}`;
+  if (ctx.rezago <= 0) {
+    return `${base} · adelantado ${Math.abs(ctx.rezago).toFixed(1)} pp`;
+  }
+  return `${base} · rezago ${ctx.rezago.toFixed(1)} pp`;
 }
 
 /** Etiqueta corta para el resumen global (sin %). */

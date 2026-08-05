@@ -1,12 +1,29 @@
-import { Link } from 'react-router-dom';
-import { ArrowRight } from 'lucide-react';
+import { useState } from 'react';
+import { GitCompareArrows, ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatearMoneda, formatPorcentaje } from '@/lib/formatters';
 import Semaforo from '@/components/Semaforo';
 import { EmptyState } from '@/components/layout/EmptyState';
 import { Button } from '@/components/ui/button';
-import { mapSemaforo, etiquetaSemaforo, formatSecFunc } from '../lib';
+import { ModalCruce } from '@/features/cruce/ModalCruce';
+import {
+  mapSemaforo,
+  etiquetaSemaforo,
+  explicacionSemaforo,
+  formatSecFunc,
+} from '../lib';
+import { DetalleMeta } from './DetalleMeta';
 import type { SaldoItem, SemaforoSaldo } from '../types';
+
+/** Selección activa del modal de cruce (meta, o meta+clasificador). */
+interface CruceSel {
+  secFunc: number;
+  clasificador?: string | null;
+  clasificadorNombre?: string | null;
+}
+
+/** Columnas de la tabla desktop (para el colSpan de la fila de detalle). */
+const N_COLUMNAS = 8;
 
 interface TablaSaldosProps {
   items: SaldoItem[];
@@ -22,13 +39,16 @@ interface TablaSaldosProps {
 }
 
 /**
- * Tabla DUAL de saldos por meta. La regla de oro de la consolidación:
+ * Tabla de saldos por meta, 100% SIAF/MEF. Toda cifra presupuestal es la oficial
+ * del snapshot MEF (el PIM SIGA discrepa del SIAF en el 75% de las metas y NO se
+ * usa como presupuesto). Muestra la cadena de ejecución con sus saldos:
  *
- *   - Columnas SIGA (PIM, Certificado, Comprometido): fases PREVIAS. Fondo neutro.
- *   - Columnas MEF (PIM oficial, Devengado, % y semáforo): el número oficial que
- *     ve el ciudadano. Resaltadas con un tinte primary para separarlas del SIGA.
+ *   PIM → Certificado → Comprometido → Devengado → Girado
  *
- * Nunca se mezclan ni se presenta cert/compr como "devengado".
+ * y destaca el saldo por ejecutar (PIM − devengado). El estado usa el semáforo
+ * TEMPORAL: compara el avance real contra el esperado por el mes de corte, así
+ * no alarma de más por el rezago propio del backup. El detalle operativo del
+ * SIGA (por clasificador y fuente) se abre en el drill-down.
  */
 export function TablaSaldos({
   items,
@@ -40,6 +60,13 @@ export function TablaSaldos({
   onPageChange,
   isFetching,
 }: TablaSaldosProps) {
+  const [expandida, setExpandida] = useState<number | null>(null);
+  const toggle = (secFunc: number) =>
+    setExpandida((prev) => (prev === secFunc ? null : secFunc));
+
+  // Modal de cruce SIAF-SIGA (por meta o por clasificador).
+  const [cruce, setCruce] = useState<CruceSel | null>(null);
+
   const visibles = filtroSemaforo
     ? items.filter((i) => i.semaforo === filtroSemaforo)
     : items;
@@ -81,53 +108,54 @@ export function TablaSaldos({
       </div>
 
       {/* Tabla desktop */}
-      <div className="hidden overflow-x-auto md:block">
+      <div className="hidden overflow-x-auto lg:block">
         <table className="w-full border-collapse text-sm">
-          {/* Cabecera de grupo: separa visualmente SIGA de MEF */}
           <thead>
             <tr className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-              <th className="border-b border-border px-4 py-2 text-left" colSpan={1} />
+              <th className="border-b border-border px-4 py-2 text-left" colSpan={1}>
+                Meta
+              </th>
               <th
-                className="border-b border-border bg-muted/40 px-4 py-2 text-center"
-                colSpan={3}
-                title="Fases previas del gasto según el SIGA de la muni. No son devengado."
+                className="border-b border-border px-4 py-2 text-center"
+                colSpan={4}
+                title="Cadena de ejecución del gasto según el SIAF/MEF (fuente oficial)."
               >
-                SIGA · Operativo (fases previas)
+                Ejecución oficial (SIAF)
               </th>
               <th
                 className="border-b border-primary/30 bg-primary/5 px-4 py-2 text-center"
-                colSpan={3}
-                title="Snapshot oficial del portal MEF. El devengado real que ve el ciudadano."
+                colSpan={2}
+                title="Saldo aún por ejecutar y estado de avance frente a lo esperado."
               >
-                MEF · Oficial
+                Saldo y avance
               </th>
             </tr>
             <tr className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <th className="border-b border-border px-4 py-2.5 text-left">Meta</th>
-              <th className="border-b border-border bg-muted/40 px-4 py-2.5 text-right">
+              <th className="border-b border-border px-4 py-2.5 text-left" />
+              <th className="border-b border-border px-4 py-2.5 text-right" title="Presupuesto Institucional Modificado (oficial).">
                 PIM
               </th>
-              <th className="border-b border-border bg-muted/40 px-4 py-2.5 text-right">
+              <th className="border-b border-border px-4 py-2.5 text-right" title="Crédito certificado disponible para comprometer.">
                 Certificado
               </th>
-              <th className="border-b border-border bg-muted/40 px-4 py-2.5 text-right">
+              <th className="border-b border-border px-4 py-2.5 text-right" title="Compromiso anual del gasto.">
                 Comprometido
               </th>
-              <th className="border-b border-primary/30 bg-primary/5 px-4 py-2.5 text-right">
-                PIM MEF
-              </th>
-              <th className="border-b border-primary/30 bg-primary/5 px-4 py-2.5 text-right">
+              <th className="border-b border-border px-4 py-2.5 text-right" title="Devengado: el bien/servicio se recibió (obligación de pago). Girado bajo la barra.">
                 Devengado
               </th>
+              <th className="border-b border-primary/30 bg-primary/5 px-4 py-2.5 text-right" title="PIM − Devengado: cuánto queda por ejecutar.">
+                Por ejecutar
+              </th>
               <th className="border-b border-primary/30 bg-primary/5 px-4 py-2.5 text-right">
-                % · Estado
+                Avance · Estado
               </th>
             </tr>
           </thead>
           <tbody>
             {visibles.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center">
+                <td colSpan={N_COLUMNAS} className="px-4 py-10 text-center">
                   <p className="text-sm text-muted-foreground">
                     Ninguna meta de esta página tiene el estado filtrado.
                   </p>
@@ -143,15 +171,29 @@ export function TablaSaldos({
               </tr>
             ) : (
               visibles.map((it, idx) => (
-                <FilaSaldo key={it.sec_func} item={it} zebra={idx % 2 === 1} />
+                <FilaSaldo
+                  key={it.sec_func}
+                  item={it}
+                  zebra={idx % 2 === 1}
+                  expandida={expandida === it.sec_func}
+                  onToggle={() => toggle(it.sec_func)}
+                  onVerCruce={() => setCruce({ secFunc: it.sec_func })}
+                  onVerCruceClasif={(codigo, nombre) =>
+                    setCruce({
+                      secFunc: it.sec_func,
+                      clasificador: codigo,
+                      clasificadorNombre: nombre,
+                    })
+                  }
+                />
               ))
             )}
           </tbody>
         </table>
       </div>
 
-      {/* Tarjetas móvil */}
-      <ul className="divide-y divide-border md:hidden">
+      {/* Tarjetas móvil / tablet */}
+      <ul className="divide-y divide-border lg:hidden">
         {visibles.length === 0 ? (
           <li className="px-4 py-10 text-center">
             <p className="text-sm text-muted-foreground">
@@ -164,7 +206,7 @@ export function TablaSaldos({
         ) : (
           visibles.map((it) => (
             <li key={it.sec_func} className="px-4 py-4">
-              <TarjetaSaldo item={it} />
+              <TarjetaSaldo item={it} onVerCruce={() => setCruce({ secFunc: it.sec_func })} />
             </li>
           ))
         )}
@@ -194,13 +236,49 @@ export function TablaSaldos({
           </Button>
         </div>
       </div>
+
+      {/* Modal de cruce SIAF-SIGA (meta o clasificador) */}
+      <ModalCruce
+        secFunc={cruce?.secFunc ?? null}
+        clasificador={cruce?.clasificador ?? null}
+        clasificadorNombre={cruce?.clasificadorNombre ?? null}
+        onClose={() => setCruce(null)}
+      />
     </div>
   );
 }
 
-/** Semáforo compacto reutilizado en fila y tarjeta. */
+/**
+ * Barra de avance por fases apiladas sobre el PIM: certificado (más claro),
+ * comprometido, devengado (sólido) y girado (marca oscura). Muestra de un vistazo
+ * la cascada Certificado ≥ Comprometido ≥ Devengado ≥ Girado y dónde se detiene.
+ */
+function BarraFases({ item }: { item: SaldoItem }) {
+  const dev = item.porcentaje_devengado;
+  if (dev == null) return null;
+  const clamp = (v: number | null) => (v == null ? 0 : Math.min(100, Math.max(0, v)));
+  const cert = clamp(item.porcentaje_certificado);
+  const compr = clamp(item.porcentaje_comprometido);
+  const devP = clamp(dev);
+  const gir = clamp(item.porcentaje_girado);
+  return (
+    <div
+      className="relative h-2 w-full overflow-hidden rounded-full bg-muted"
+      title={`Certificado ${cert.toFixed(0)}% · Comprometido ${compr.toFixed(0)}% · Devengado ${devP.toFixed(0)}% · Girado ${gir.toFixed(0)}%`}
+    >
+      {/* Capas apiladas de menor a mayor avance (las más avanzadas encima). */}
+      <div className="absolute inset-y-0 left-0 bg-primary/15" style={{ width: `${cert}%` }} />
+      <div className="absolute inset-y-0 left-0 bg-primary/30" style={{ width: `${compr}%` }} />
+      <div className="absolute inset-y-0 left-0 bg-primary/60" style={{ width: `${devP}%` }} />
+      <div className="absolute inset-y-0 left-0 bg-primary" style={{ width: `${gir}%` }} />
+    </div>
+  );
+}
+
+/** Semáforo temporal con explicación (esperado vs. real). */
 function SemaforoMeta({ item }: { item: SaldoItem }) {
   const estado = mapSemaforo(item.semaforo);
+  const explicacion = explicacionSemaforo(item.semaforo_ctx);
   if (!estado) {
     return (
       <span
@@ -213,77 +291,149 @@ function SemaforoMeta({ item }: { item: SaldoItem }) {
     );
   }
   return (
-    <Semaforo
-      estado={estado}
-      texto={etiquetaSemaforo(item.semaforo, item.porcentaje_devengado)}
-    />
+    <span title={explicacion ?? undefined}>
+      <Semaforo
+        estado={estado}
+        texto={etiquetaSemaforo(item.semaforo, item.porcentaje_devengado)}
+      />
+    </span>
   );
 }
 
-function EnlaceCruce({ secFunc }: { secFunc: number }) {
+function BotonCruce({ onClick }: { onClick: () => void }) {
   return (
-    <Link
-      to={`/interno/cruce/meta/${secFunc}`}
+    <button
+      type="button"
+      onClick={onClick}
       className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
     >
-      Ver cruce <ArrowRight className="h-3 w-3" aria-hidden="true" />
-    </Link>
+      <GitCompareArrows className="h-3 w-3" aria-hidden="true" /> Ver cruce
+    </button>
   );
 }
 
-function FilaSaldo({ item, zebra }: { item: SaldoItem; zebra: boolean }) {
-  const comprometido = item.comprometido_anual;
+/** Celda de monto oficial: valor o guion si la meta no cruza con MEF. */
+function Monto({ valor, fuerte }: { valor: number | null; fuerte?: boolean }) {
   return (
-    <tr className={cn('align-top', zebra && 'bg-muted/20')}>
-      {/* Meta */}
-      <td className="max-w-[22rem] px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-semibold text-muted-foreground">
-            {formatSecFunc(item.sec_func)}
+    <td className={cn('px-4 py-3 text-right tabular-nums', fuerte && 'font-semibold text-foreground')}>
+      {valor != null ? formatearMoneda(valor, true) : '—'}
+    </td>
+  );
+}
+
+function FilaSaldo({
+  item,
+  zebra,
+  expandida,
+  onToggle,
+  onVerCruce,
+  onVerCruceClasif,
+}: {
+  item: SaldoItem;
+  zebra: boolean;
+  expandida: boolean;
+  onToggle: () => void;
+  onVerCruce: () => void;
+  onVerCruceClasif: (codigo: string, nombre: string | null) => void;
+}) {
+  const explicacion = explicacionSemaforo(item.semaforo_ctx);
+  return (
+    <>
+      <tr className={cn('align-top', (zebra || expandida) && 'bg-muted/20')}>
+        {/* Meta */}
+        <td className="max-w-[22rem] px-4 py-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggle}
+              aria-expanded={expandida}
+              aria-label={expandida ? 'Ocultar composición' : 'Ver composición'}
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {expandida ? (
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              )}
+            </button>
+            <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] font-semibold text-muted-foreground">
+              {formatSecFunc(item.sec_func)}
+            </span>
+            <BotonCruce onClick={onVerCruce} />
+          </div>
+          <p
+            className="mt-1 line-clamp-2 pl-7 text-sm font-medium text-foreground"
+            title={item.nombre_meta ?? ''}
+          >
+            {item.nombre_meta ?? 'Sin nombre'}
+          </p>
+          <button
+            type="button"
+            onClick={onToggle}
+            className="mt-0.5 pl-7 text-[11px] text-primary hover:underline"
+          >
+            Ver detalle del gasto ({item.filas_clasificador} líneas)
+          </button>
+        </td>
+
+        {/* Cadena SIAF */}
+        <Monto valor={item.pim_mef} />
+        <Monto valor={item.certificado_mef} />
+        <Monto valor={item.comprometido_mef} />
+        <td className="px-4 py-3 text-right">
+          <span className="font-semibold tabular-nums text-foreground">
+            {item.devengado_mef != null ? formatearMoneda(item.devengado_mef, true) : '—'}
           </span>
-          <EnlaceCruce secFunc={item.sec_func} />
-        </div>
-        <p
-          className="mt-1 line-clamp-2 text-sm font-medium text-foreground"
-          title={item.nombre_meta ?? ''}
-        >
-          {item.nombre_meta ?? 'Sin nombre'}
-        </p>
-      </td>
+          {item.girado_mef != null ? (
+            <p
+              className="mt-0.5 text-[11px] text-muted-foreground"
+              title="Girado (pagado)"
+            >
+              Girado {formatearMoneda(item.girado_mef, true)}
+            </p>
+          ) : null}
+        </td>
 
-      {/* SIGA */}
-      <td className="bg-muted/20 px-4 py-3 text-right tabular-nums">
-        {formatearMoneda(item.pim, true)}
-      </td>
-      <td className="bg-muted/20 px-4 py-3 text-right tabular-nums text-muted-foreground">
-        {formatearMoneda(item.certificado, true)}
-      </td>
-      <td className="bg-muted/20 px-4 py-3 text-right tabular-nums text-muted-foreground">
-        {formatearMoneda(comprometido, true)}
-      </td>
-
-      {/* MEF */}
-      <td className="bg-primary/[0.03] px-4 py-3 text-right tabular-nums">
-        {item.pim_mef != null ? formatearMoneda(item.pim_mef, true) : '—'}
-      </td>
-      <td className="bg-primary/[0.03] px-4 py-3 text-right font-semibold tabular-nums text-foreground">
-        {item.devengado_mef != null ? formatearMoneda(item.devengado_mef, true) : '—'}
-      </td>
-      <td className="bg-primary/[0.03] px-4 py-3 text-right">
-        <div className="flex flex-col items-end gap-1">
-          <span className="font-semibold tabular-nums">
-            {item.porcentaje_devengado != null
-              ? formatPorcentaje(item.porcentaje_devengado)
+        {/* Saldo por ejecutar */}
+        <td className="bg-primary/[0.03] px-4 py-3 text-right">
+          <span className="font-semibold tabular-nums text-foreground">
+            {item.saldo_por_ejecutar != null
+              ? formatearMoneda(item.saldo_por_ejecutar, true)
               : '—'}
           </span>
-          <SemaforoMeta item={item} />
-        </div>
-      </td>
-    </tr>
+          {item.saldo_por_pagar != null && item.saldo_por_pagar > 0 ? (
+            <p className="mt-0.5 text-[11px] text-muted-foreground" title="Devengado aún no pagado">
+              Por pagar {formatearMoneda(item.saldo_por_pagar, true)}
+            </p>
+          ) : null}
+        </td>
+
+        {/* Avance + estado */}
+        <td className="bg-primary/[0.03] px-4 py-3 text-right">
+          <div className="flex flex-col items-end gap-1.5">
+            <span className="font-semibold tabular-nums" title={explicacion ?? undefined}>
+              {item.porcentaje_devengado != null
+                ? formatPorcentaje(item.porcentaje_devengado)
+                : '—'}
+            </span>
+            <BarraFases item={item} />
+            <SemaforoMeta item={item} />
+          </div>
+        </td>
+      </tr>
+      {expandida ? (
+        <DetalleMeta
+          secFunc={item.sec_func}
+          colSpan={N_COLUMNAS}
+          onVerCruceClasif={onVerCruceClasif}
+        />
+      ) : null}
+    </>
   );
 }
 
-function TarjetaSaldo({ item }: { item: SaldoItem }) {
+function TarjetaSaldo({ item, onVerCruce }: { item: SaldoItem; onVerCruce: () => void }) {
+  const explicacion = explicacionSemaforo(item.semaforo_ctx);
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
@@ -301,33 +451,52 @@ function TarjetaSaldo({ item }: { item: SaldoItem }) {
       </div>
 
       <SemaforoMeta item={item} />
+      {explicacion ? (
+        <p className="text-[11px] text-muted-foreground">{explicacion}</p>
+      ) : null}
+      <BarraFases item={item} />
 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-        <dt className="text-muted-foreground">Devengado (MEF)</dt>
-        <dd className="text-right font-semibold tabular-nums text-foreground">
-          {item.devengado_mef != null ? formatearMoneda(item.devengado_mef, true) : '—'}
-        </dd>
-        <dt className="text-muted-foreground">PIM (MEF)</dt>
+        <dt className="col-span-2 mt-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          Ejecución oficial (SIAF)
+        </dt>
+        <dt className="text-muted-foreground">PIM</dt>
         <dd className="text-right tabular-nums">
           {item.pim_mef != null ? formatearMoneda(item.pim_mef, true) : '—'}
         </dd>
-        <dt className="text-muted-foreground">PIM (SIGA)</dt>
-        <dd className="text-right tabular-nums">{formatearMoneda(item.pim, true)}</dd>
-        <dt className="text-muted-foreground" title="Fase previa al devengado">
-          Certificado (SIGA)
-        </dt>
-        <dd className="text-right tabular-nums text-muted-foreground">
-          {formatearMoneda(item.certificado, true)}
+        <dt className="text-muted-foreground">Certificado</dt>
+        <dd className="text-right tabular-nums">
+          {item.certificado_mef != null ? formatearMoneda(item.certificado_mef, true) : '—'}
         </dd>
-        <dt className="text-muted-foreground" title="Fase previa al devengado">
-          Comprometido (SIGA)
+        <dt className="text-muted-foreground">Comprometido</dt>
+        <dd className="text-right tabular-nums">
+          {item.comprometido_mef != null ? formatearMoneda(item.comprometido_mef, true) : '—'}
+        </dd>
+        <dt className="text-muted-foreground">Devengado</dt>
+        <dd className="text-right font-semibold tabular-nums text-foreground">
+          {item.devengado_mef != null ? formatearMoneda(item.devengado_mef, true) : '—'}
+        </dd>
+        <dt className="text-muted-foreground">Girado (pagado)</dt>
+        <dd className="text-right tabular-nums">
+          {item.girado_mef != null ? formatearMoneda(item.girado_mef, true) : '—'}
+        </dd>
+
+        <dt className="col-span-2 mt-2 text-[10px] font-bold uppercase tracking-wider text-primary/70">
+          Saldos
         </dt>
-        <dd className="text-right tabular-nums text-muted-foreground">
-          {formatearMoneda(item.comprometido_anual, true)}
+        <dt className="text-muted-foreground">Por ejecutar</dt>
+        <dd className="text-right font-semibold tabular-nums text-foreground">
+          {item.saldo_por_ejecutar != null
+            ? formatearMoneda(item.saldo_por_ejecutar, true)
+            : '—'}
+        </dd>
+        <dt className="text-muted-foreground">Por pagar</dt>
+        <dd className="text-right tabular-nums">
+          {item.saldo_por_pagar != null ? formatearMoneda(item.saldo_por_pagar, true) : '—'}
         </dd>
       </dl>
 
-      <EnlaceCruce secFunc={item.sec_func} />
+      <BotonCruce onClick={onVerCruce} />
     </div>
   );
 }

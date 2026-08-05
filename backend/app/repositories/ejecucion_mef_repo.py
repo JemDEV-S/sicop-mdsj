@@ -64,6 +64,29 @@ def _con_derivados(base: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def mes_maximo_ejecutado(db: Session, *, ano: int) -> int:
+    """Mes de ejecución más avanzado con datos en el snapshot (`MAX(mes_eje)`).
+
+    Es el corte real de los datos, NO la fecha de hoy. Sobre un backup el
+    snapshot puede ir a julio (mes 7) aunque hoy sea agosto — el avance esperado
+    del semáforo debe medirse contra este mes, no contra el calendario, para no
+    alarmar por el rezago propio del backup (memoria: datos-backup-no-tiempo-real).
+
+    Devuelve 0 si no hay ejecución cargada (solo PIA/PIM en mes 0).
+    """
+    r = db.execute(
+        text(
+            """
+            SELECT COALESCE(MAX(mes_eje), 0) AS mes
+              FROM siaf.ejecucion_presupuestal
+             WHERE ano_eje = :ano AND sec_ejec = :sec_ejec AND mes_eje > 0
+            """
+        ),
+        {"ano": ano, "sec_ejec": settings.SEC_EJEC},
+    ).scalar_one()
+    return int(r or 0)
+
+
 def resumen_mef(db: Session, *, ano: int) -> dict[str, Any]:
     """Totales oficiales MEF del pliego (agregado de todas las metas).
 

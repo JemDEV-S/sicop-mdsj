@@ -89,3 +89,25 @@ export interface ConsolidadoMeta {
   pedidos: PedidoOrigenItem[];
   certificaciones: CertificacionItem[];
 }
+
+/** Presupuesto de un clasificador: solo SIGA (el MEF no baja a clasificador). */
+export interface PresupuestoClasificador {
+  pia: number;
+  pim: number;
+  certificado: number;
+  comprometido: number;
+  saldo_disponible: number;
+}
+
+/** Cruce SIAF-SIGA filtrado a un clasificador dentro de una meta. */
+export interface ConsolidadoClasificador {
+  meta: MetaCabecera;
+  clasificador: string;
+  clasificador_nombre: string | null;
+  presupuesto: PresupuestoClasificador;
+  ordenes: OrdenCruceItem[];
+  pedidos: PedidoOrigenItem[];
+  certificaciones: CertificacionItem[];
+  /** Siempre true a nivel clasificador: no hay % oficial (MEF es por meta). */
+  sin_mef: boolean;
+}

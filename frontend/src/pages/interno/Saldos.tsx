@@ -103,7 +103,7 @@ export default function Saldos() {
       {/* KPIs de resumen */}
       {resumenQ.isLoading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <SkeletonKPI key={i} />
           ))}
         </div>
@@ -130,7 +130,7 @@ export default function Saldos() {
       <SectionCard titulo="Metas presupuestales" icono={Wallet} padding="sm" bodyClassName="p-0">
         {listadoQ.isLoading ? (
           <div className="p-4">
-            <SkeletonTable rows={8} cols={7} />
+            <SkeletonTable rows={8} cols={8} />
           </div>
         ) : listadoQ.isError ? (
           <div className="p-4">

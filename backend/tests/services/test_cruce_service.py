@@ -83,3 +83,39 @@ def test_pide_mef_solo_de_esa_meta(m_repo, m_mef):
     m_mef.return_value = {}
     cruce_service.consolidado_por_meta(None, ano=2026, sec_func=129)
     assert m_mef.call_args.kwargs["sec_funcs"] == [129]
+
+
+# ─── consolidado_por_clasificador ─────────────────────────────────────────
+
+@patch("app.services.cruce_service.cruce_repo.consolidado_por_clasificador")
+def test_clasificador_incluye_ordenes_pedidos_certif(m_repo):
+    m_repo.return_value = {
+        "meta": {"sec_func": 6, "ano_eje": 2026, "nombre": "Meta 6"},
+        "clasificador": "2.3. 1  3. 1  1",
+        "clasificador_nombre": "COMBUSTIBLES Y CARBURANTES",
+        "presupuesto": {"pia": 0, "pim": 2145913.0, "certificado": 721354.99,
+                        "comprometido": 721354.99, "saldo_disponible": 0},
+        "ordenes": [{"NRO_ORDEN": 228}],
+        "pedidos": [{"NRO_PEDIDO": 446}, {"NRO_PEDIDO": 447}],
+        "certificaciones": [{"NRO_CERTIFICA": 1}],
+    }
+    res = cruce_service.consolidado_por_clasificador(
+        None, ano=2026, sec_func=6, clasificador="2.3. 1  3. 1  1"
+    )
+    assert res["clasificador_nombre"] == "COMBUSTIBLES Y CARBURANTES"
+    # Los pedidos SÍ se incluyen a nivel clasificador (cruzan por DETALLE_PEDIDOS).
+    assert len(res["pedidos"]) == 2
+    assert len(res["ordenes"]) == 1
+    assert len(res["certificaciones"]) == 1
+    # A nivel clasificador no hay bloque MEF (el snapshot es por meta).
+    assert res["sin_mef"] is True
+    assert "devengado_mef" not in res["presupuesto"]
+
+
+@patch("app.services.cruce_service.cruce_repo.consolidado_por_clasificador")
+def test_clasificador_meta_inexistente_none(m_repo):
+    m_repo.return_value = None
+    res = cruce_service.consolidado_por_clasificador(
+        None, ano=2026, sec_func=99999, clasificador="X"
+    )
+    assert res is None

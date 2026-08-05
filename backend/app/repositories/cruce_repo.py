@@ -276,6 +276,180 @@ def consolidado_por_meta(
     }
 
 
+def consolidado_por_clasificador(
+    ano: int,
+    sec_func: int,
+    clasificador: str,
+    centros: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Cruce SIAF-SIGA de UN clasificador dentro de una meta.
+
+    Más granular que `consolidado_por_meta`: filtra órdenes, certificaciones y
+    pedidos al clasificador de gasto indicado. Verificado (2026) que los tres
+    cruzan por clasificador:
+      - Órdenes: `SIG_ORDEN_PRESUPUESTO.CLASIFICADOR`.
+      - Certificaciones: `SIG_CERTIFICACION_PPTO.CLASIFICADOR`.
+      - Pedidos: `SIG_DETALLE_PEDIDOS.CLASIFICADOR` (PK completa con TIPO_PEDIDO).
+
+    El presupuesto del bloque es el techo SIGA de ese clasificador (fases previas).
+    NO lleva bloque MEF: el snapshot oficial no se desagrega a clasificador (es por
+    meta) — el service lo deja explícito.
+
+    Devuelve `None` si la meta no existe / no es visible. El clasificador se compara
+    por su valor exacto (con los espacios internos que usa el SIGA).
+    """
+    if centros is not None and len(centros) == 0:
+        return None
+
+    params: dict[str, Any] = {
+        "ano": ano,
+        "sec_ejec": settings.SEC_EJEC,
+        "sec_func": sec_func,
+        "clasif": clasificador,
+    }
+    where_cc = ""
+    if centros is not None:
+        binds = ", ".join(f":cc{i}" for i in range(len(centros)))
+        where_cc = f" AND t.CENTRO_COSTO IN ({binds})"
+        for i, c in enumerate(centros):
+            params[f"cc{i}"] = c
+
+    with get_connection() as conn:
+        meta = conn.execute(
+            text(
+                """
+                SELECT
+                    m.sec_func, m.ano_eje,
+                    LTRIM(RTRIM(m.meta))     AS meta,
+                    LTRIM(RTRIM(m.nombre))   AS nombre,
+                    LTRIM(RTRIM(m.act_proy)) AS act_proy,
+                    LTRIM(RTRIM(m.funcion))  AS funcion,
+                    LTRIM(RTRIM(m.programa)) AS programa,
+                    LTRIM(RTRIM(m.finalidad)) AS finalidad
+                FROM META m
+                WHERE m.ano_eje = :ano AND m.sec_ejec = :sec_ejec
+                  AND m.sec_func = :sec_func
+                """
+            ),
+            {"ano": ano, "sec_ejec": settings.SEC_EJEC, "sec_func": sec_func},
+        ).mappings().first()
+        if meta is None:
+            return None
+
+        # Nombre del clasificador (para la cabecera del modal).
+        clasif_nombre = conn.execute(
+            text(
+                """
+                SELECT LTRIM(RTRIM(NOMBRE_CLASIF)) AS nombre
+                  FROM SIG_CLASIFICADOR_GASTO
+                 WHERE ANO_EJE = :ano AND LTRIM(RTRIM(CLASIFICADOR)) = :clasif
+                """
+            ),
+            {"ano": ano, "clasif": clasificador},
+        ).scalar()
+
+        # Presupuesto SIGA del clasificador (fases previas). Sin devengado MEF
+        # (el snapshot no baja a clasificador).
+        presupuesto = conn.execute(
+            text(
+                f"""
+                SELECT
+                    SUM(COALESCE(t.PPTO_PIA, 0))       AS pia,
+                    SUM(COALESCE(t.PPTO_MODIF, 0))     AS pim,
+                    SUM(COALESCE(t.mnto_acum_cert, 0)) AS certificado,
+                    SUM(COALESCE(t.mnto_acum_coma, 0)) AS comprometido,
+                    SUM(COALESCE(t.PPTO_DISP_SIAF, 0)) AS saldo_disponible
+                FROM SIG_TECHO_PRESUPUESTO t
+                WHERE t.ANO_EJE = :ano AND t.SEC_EJEC = :sec_ejec
+                  AND t.sec_func = :sec_func
+                  AND LTRIM(RTRIM(t.CLASIFICADOR)) = :clasif{where_cc}
+                """
+            ),
+            params,
+        ).mappings().first()
+
+        # Órdenes del clasificador (por SIG_ORDEN_PRESUPUESTO).
+        ordenes = conn.execute(
+            text(
+                """
+                SELECT DISTINCT
+                    o.ANO_EJE, o.SEC_EJEC,
+                    o.NRO_ORDEN, o.TIPO_BIEN,
+                    o.EXP_SIAF, o.EXP_SIGA,
+                    o.ESTADO, o.ESTADO_SIAF, o.TOTAL_FACT_SOLES,
+                    o.FECHA_ORDEN,
+                    LTRIM(RTRIM(CAST(o.CONCEPTO AS VARCHAR(300)))) AS concepto,
+                    LTRIM(RTRIM(c.NRO_RUC))     AS proveedor_ruc,
+                    LTRIM(RTRIM(c.NOMBRE_PROV)) AS proveedor_nombre
+                FROM SIG_ORDEN_PRESUPUESTO p
+                INNER JOIN SIG_ORDEN_ADQUISICION o
+                    ON o.ANO_EJE = p.ANO_EJE AND o.SEC_EJEC = p.SEC_EJEC
+                   AND o.NRO_ORDEN = p.NRO_ORDEN AND o.TIPO_BIEN = p.TIPO_BIEN
+                LEFT JOIN SIG_CONTRATISTAS c ON c.PROVEEDOR = o.PROVEEDOR
+                WHERE p.ANO_EJE = :ano AND p.SEC_EJEC = :sec_ejec
+                  AND p.SEC_FUNC = :sec_func
+                  AND LTRIM(RTRIM(p.CLASIFICADOR)) = :clasif
+                """
+            ),
+            {"ano": ano, "sec_ejec": settings.SEC_EJEC,
+             "sec_func": sec_func, "clasif": clasificador},
+        ).mappings().all()
+
+        # Pedidos del clasificador (por SIG_DETALLE_PEDIDOS.CLASIFICADOR).
+        pedidos = conn.execute(
+            text(
+                """
+                SELECT DISTINCT
+                    pe.NRO_PEDIDO, pe.TIPO_BIEN,
+                    pe.CENTRO_COSTO,
+                    pe.FECHA_PEDIDO, pe.ESTADO AS estado_pedido,
+                    LTRIM(RTRIM(CAST(pe.MOTIVO_PEDIDO AS VARCHAR(300)))) AS motivo
+                FROM SIG_DETALLE_PEDIDOS dp
+                INNER JOIN SIG_PEDIDOS pe
+                    ON pe.ANO_EJE = dp.ANO_EJE AND pe.SEC_EJEC = dp.sec_ejec
+                   AND pe.NRO_PEDIDO = dp.NRO_PEDIDO AND pe.TIPO_BIEN = dp.TIPO_BIEN
+                   AND pe.TIPO_PEDIDO = dp.TIPO_PEDIDO
+                WHERE dp.ANO_EJE = :ano AND dp.sec_ejec = :sec_ejec
+                  AND pe.sec_func = :sec_func
+                  AND LTRIM(RTRIM(dp.CLASIFICADOR)) = :clasif
+                ORDER BY pe.FECHA_PEDIDO DESC
+                """
+            ),
+            {"ano": ano, "sec_ejec": settings.SEC_EJEC,
+             "sec_func": sec_func, "clasif": clasificador},
+        ).mappings().all()
+
+        # Certificaciones del clasificador.
+        certificaciones = conn.execute(
+            text(
+                """
+                SELECT
+                    c.NRO_CERTIFICA,
+                    LTRIM(RTRIM(c.CLASIFICADOR)) AS clasificador,
+                    c.VALOR_SOLES,
+                    c.FECHA_REG
+                FROM SIG_CERTIFICACION_PPTO c
+                WHERE c.ANO_EJE = :ano AND c.SEC_EJEC = :sec_ejec
+                  AND c.SEC_FUNC = :sec_func
+                  AND LTRIM(RTRIM(c.CLASIFICADOR)) = :clasif
+                ORDER BY c.FECHA_REG DESC
+                """
+            ),
+            {"ano": ano, "sec_ejec": settings.SEC_EJEC,
+             "sec_func": sec_func, "clasif": clasificador},
+        ).mappings().all()
+
+    return {
+        "meta": dict(meta),
+        "clasificador": clasificador,
+        "clasificador_nombre": (clasif_nombre or "").strip() or None,
+        "presupuesto": dict(presupuesto) if presupuesto else {},
+        "ordenes": [dict(o) for o in ordenes],
+        "pedidos": [dict(p) for p in pedidos],
+        "certificaciones": [dict(c) for c in certificaciones],
+    }
+
+
 def sugerir_exp_siaf(ano: int, prefijo: str, limit: int = 10) -> list[str]:
     """Autocomplete de EXP_SIAF (para HU-12 AC-12.1)."""
     with get_connection() as conn:

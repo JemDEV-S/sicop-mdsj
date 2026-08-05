@@ -40,34 +40,81 @@ def _fusionar_mef(
 
     # Montos MEF (oficiales). Sufijo _mef explícito para no confundir la fuente.
     pim_mef = float(mef["pim"]) if mef else None
+    certificado_mef = float(mef["certificado"]) if mef else None
+    comprometido_mef = float(mef["comprometido"]) if mef else None
     devengado_mef = float(mef["devengado"]) if mef else None
+    girado_mef = float(mef["girado"]) if mef else None
     fila["pim_mef"] = pim_mef
-    fila["certificado_mef"] = float(mef["certificado"]) if mef else None
-    fila["comprometido_mef"] = float(mef["comprometido"]) if mef else None
+    fila["certificado_mef"] = certificado_mef
+    fila["comprometido_mef"] = comprometido_mef
     fila["devengado_mef"] = devengado_mef
-    fila["girado_mef"] = float(mef["girado"]) if mef else None
+    fila["girado_mef"] = girado_mef
 
-    # % de ejecución y saldo: SIEMPRE sobre el devengado real del MEF.
+    # ── Cadena de ejecución SIAF/MEF con saldos entre fases y % por fase ──────
+    # El presupuesto es SIEMPRE del SIAF/MEF (el PIM SIGA discrepa en el 75% de
+    # las metas). Toda cifra presupuestal y todo saldo/% de la fila sale de aquí.
     if pim_mef and pim_mef > 0 and devengado_mef is not None:
-        fila["porcentaje_devengado"] = round(devengado_mef / pim_mef * 100, 2)
-        fila["saldo_disponible_mef"] = pim_mef - devengado_mef
+        cert = certificado_mef or 0
+        compr = comprometido_mef or 0
+        dev = devengado_mef
+        gir = girado_mef or 0
+
+        # Saldos entre fases consecutivas (dónde está detenido el gasto).
+        fila["saldo_por_certificar"] = round(pim_mef - cert, 2)   # PIM − Certificado
+        fila["saldo_por_comprometer_mef"] = round(cert - compr, 2)  # Cert − Comprometido
+        fila["saldo_por_devengar"] = round(compr - dev, 2)         # Compr − Devengado
+        fila["saldo_por_ejecutar"] = round(pim_mef - dev, 2)       # PIM − Devengado (clave)
+        fila["saldo_por_pagar"] = round(dev - gir, 2)              # Devengado − Girado
+        fila["saldo_disponible_mef"] = fila["saldo_por_ejecutar"]  # alias legado
+
+        # % de avance por fase sobre el PIM oficial (dónde se estanca).
+        fila["porcentaje_certificado"] = round(cert / pim_mef * 100, 2)
+        fila["porcentaje_comprometido"] = round(compr / pim_mef * 100, 2)
+        fila["porcentaje_devengado"] = round(dev / pim_mef * 100, 2)
+        fila["porcentaje_girado"] = round(gir / pim_mef * 100, 2)
+        fila["devengado_no_girado_mef"] = round(dev - gir, 2)
     else:
-        # La meta no cruza con MEF (raro: solo metas sin PIM). Sin devengado
-        # oficial, el % queda indefinido — no lo inventamos con cert+compr.
-        fila["porcentaje_devengado"] = None
-        fila["saldo_disponible_mef"] = None
+        # La meta no cruza con MEF (raro: solo metas sin PIM). Sin cifra oficial,
+        # los saldos y % quedan indefinidos — no se inventan con datos SIGA.
+        for k in (
+            "saldo_por_certificar", "saldo_por_comprometer_mef", "saldo_por_devengar",
+            "saldo_por_ejecutar", "saldo_por_pagar", "saldo_disponible_mef",
+            "porcentaje_certificado", "porcentaje_comprometido",
+            "porcentaje_devengado", "porcentaje_girado", "devengado_no_girado_mef",
+        ):
+            fila[k] = None
+
+    # ── Referencia operativa SIGA (NO presupuestal) ──────────────────────────
+    # El PIM SIGA discrepa del SIAF en el 75% de las metas → no se expone como
+    # cifra de presupuesto. Se conserva remapeado con sufijo _siga solo como
+    # referencia operativa; el detalle real por clasificador vive en el drill-down.
+    fila["pim_siga"] = float(fila.pop("pim", 0) or 0)
+    fila["certificado_siga"] = float(fila.pop("certificado", 0) or 0)
+    fila["comprometido_siga"] = float(fila.pop("comprometido_anual", 0) or 0)
+    fila["saldo_disponible_siga"] = float(fila.pop("saldo_disponible", 0) or 0)
+    fila["reservado_pedido"] = float(fila.get("reservado_pedido", 0) or 0)
+    # Limpieza de llaves SIGA que ya no exponemos como cifra.
+    fila.pop("comprometido_mensual", None)
+    fila.pop("pia", None)
 
     return fila
 
 
-def _con_semaforo(db: Session, fila: dict[str, Any]) -> dict[str, Any]:
-    """Colorea sobre el % devengado MEF real (o 'desconocido' si no hay dato)."""
-    fila["semaforo"] = semaforo_service.color(
+def _con_semaforo(db: Session, fila: dict[str, Any], *, mes_corte: int) -> dict[str, Any]:
+    """Semáforo temporal: compara el % devengado real vs. el esperado por el mes.
+
+    En vez de un corte fijo, mide el rezago (esperado − real) y expone el contexto
+    en `semaforo_ctx` para que la UI explique el color (esperado/real/rezago/mes).
+    El campo plano `semaforo` conserva el color para compatibilidad.
+    """
+    ctx = semaforo_service.color_temporal(
         db,
         modulo="saldos",
-        metrica="avance_devengado",
-        valor=fila.get("porcentaje_devengado"),
+        porcentaje_real=fila.get("porcentaje_devengado"),
+        mes_corte=mes_corte,
     )
+    fila["semaforo"] = ctx["color"]
+    fila["semaforo_ctx"] = ctx
     return fila
 
 
@@ -102,9 +149,14 @@ def listar_saldos(
     mef_por_meta = ejecucion_mef_repo.ejecucion_por_meta(
         db, ano=ano, sec_funcs=sec_funcs
     )
+    mes_corte = ejecucion_mef_repo.mes_maximo_ejecutado(db, ano=ano)
 
     items = [
-        _con_semaforo(db, _fusionar_mef(f, mef_por_meta.get(int(f["sec_func"]))))
+        _con_semaforo(
+            db,
+            _fusionar_mef(f, mef_por_meta.get(int(f["sec_func"]))),
+            mes_corte=mes_corte,
+        )
         for f in filas
     ]
     return items, total
@@ -158,42 +210,150 @@ def resumen_saldos(
         ),
     } if mef_por_meta else None
 
-    # Criticidad por % devengado MEF real. Metas sin dato MEF no se marcan.
+    # Criticidad por REZAGO temporal (esperado − real), no por corte fijo: una
+    # meta es crítica si su semáforo temporal da rojo. Metas sin MEF no se marcan.
+    mes_corte = ejecucion_mef_repo.mes_maximo_ejecutado(db, ano=ano)
+    resumen["mes_corte"] = mes_corte
+    resumen["avance_esperado"] = semaforo_service.avance_esperado(mes_corte)
+
     criticas: list[dict[str, Any]] = []
     for m in metas_siga:
         mef = mef_por_meta.get(int(m["sec_func"]))
         if not mef or mef["pim"] <= 0:
             continue
         pct = round(mef["devengado"] / mef["pim"] * 100, 2)
-        if pct < umbral_critico:
+        ctx = semaforo_service.color_temporal(
+            db, modulo="saldos", porcentaje_real=pct, mes_corte=mes_corte
+        )
+        if ctx["color"] == "rojo":
             criticas.append({
                 "sec_func": m["sec_func"],
                 "nombre_meta": m["nombre_meta"],
                 "pim": mef["pim"],
                 "devengado": mef["devengado"],
                 "porcentaje_devengado": pct,
+                "semaforo": ctx["color"],
+                "semaforo_ctx": ctx,
             })
     # Prioriza por PIM (mayor peso presupuestal) descendente.
     criticas.sort(key=lambda x: x["pim"], reverse=True)
     resumen["metas_criticas"] = len(criticas)
-    resumen["top_metas_criticas"] = [
-        _con_semaforo(db, c) for c in criticas[:top_criticas_limit]
-    ]
+    resumen["top_metas_criticas"] = criticas[:top_criticas_limit]
 
-    # % y semáforo global sobre el bloque MEF (número oficial).
+    # % y semáforo global temporal sobre el bloque MEF (número oficial).
     porcentaje_global = (
         float(resumen["mef"]["porcentaje_devengado"])
         if resumen["mef"] is not None
         else None
     )
     resumen["porcentaje_devengado"] = porcentaje_global or 0.0
-    resumen["semaforo"] = semaforo_service.color(
-        db,
-        modulo="saldos",
-        metrica="avance_devengado",
-        valor=porcentaje_global,
+    ctx_global = semaforo_service.color_temporal(
+        db, modulo="saldos", porcentaje_real=porcentaje_global, mes_corte=mes_corte
     )
+    resumen["semaforo"] = ctx_global["color"]
+    resumen["semaforo_ctx"] = ctx_global
     return resumen
+
+
+def detalle_meta(
+    db: Session,
+    *,
+    ano: int,
+    sec_func: int,
+    centros: list[str] | None,
+) -> dict[str, Any] | None:
+    """Detalle drill-down de una meta: cabecera oficial + árbol operativo SIGA.
+
+    Estructura:
+      - `cabecera`: la cadena de ejecución oficial (SIAF/MEF) de la meta con sus
+        saldos entre fases, % por fase y semáforo temporal — igual que la fila de
+        la lista.
+      - `fuentes`: árbol Fuente de Financiamiento → Clasificadores. Es el detalle
+        OPERATIVO del SIGA (qué se compra en cada clasificador), NO presupuesto:
+        el presupuesto oficial vive en la cabecera. Incluye TODOS los
+        clasificadores, también los de PIM 0 (marcados `sin_pim`), para no ocultar
+        líneas del plan (era el bug de la meta 57).
+
+    Devuelve `None` si la meta no existe o no es visible para el usuario.
+    """
+    cab_siga = saldos_repo.cabecera_meta(ano=ano, sec_func=sec_func, centros=centros)
+    if cab_siga is None:
+        return None
+
+    mef_por_meta = ejecucion_mef_repo.ejecucion_por_meta(
+        db, ano=ano, sec_funcs=[sec_func]
+    )
+    mes_corte = ejecucion_mef_repo.mes_maximo_ejecutado(db, ano=ano)
+    cabecera = _con_semaforo(
+        db, _fusionar_mef(cab_siga, mef_por_meta.get(sec_func)), mes_corte=mes_corte
+    )
+
+    lineas = saldos_repo.detalle_meta_jerarquico(ano, sec_func, centros)
+    fuentes = _agrupar_por_fuente(lineas)
+
+    return {
+        "ano": ano,
+        "cabecera": cabecera,
+        "fuentes": fuentes,
+    }
+
+
+def _agrupar_por_fuente(lineas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Arma el árbol Fuente → Clasificadores a partir de las filas planas.
+
+    Cada fuente lleva sus clasificadores y los subtotales de la fuente. Los
+    clasificadores con PIM 0 se marcan `sin_pim` (para que la UI los distinga sin
+    ocultarlos). Ordena fuentes por PIM descendente, clasificadores idem.
+    """
+    por_codigo: dict[str, dict[str, Any]] = {}
+    for ln in lineas:
+        fcod = (ln.get("fuente_codigo") or "").strip() or "—"
+        grupo = por_codigo.setdefault(
+            fcod,
+            {
+                "fuente_codigo": fcod,
+                "fuente_nombre": (ln.get("fuente_nombre") or "").strip() or None,
+                "pim": 0.0,
+                "certificado": 0.0,
+                "comprometido": 0.0,
+                "saldo_disponible": 0.0,
+                "clasificadores": [],
+            },
+        )
+        pim = float(ln.get("pim") or 0)
+        cert = float(ln.get("certificado") or 0)
+        compr = float(ln.get("comprometido") or 0)
+        disp = float(ln.get("saldo_disponible") or 0)
+
+        grupo["pim"] += pim
+        grupo["certificado"] += cert
+        grupo["comprometido"] += compr
+        grupo["saldo_disponible"] += disp
+        grupo["clasificadores"].append(
+            {
+                "codigo": (ln.get("codigo") or "").strip() or None,
+                "nombre": (ln.get("nombre") or "").strip() or None,
+                "pim": round(pim, 2),
+                "certificado": round(cert, 2),
+                "comprometido": round(compr, 2),
+                "saldo_disponible": round(disp, 2),
+                "saldo_por_comprometer": round(pim - compr, 2),
+                "reservado_pedido": float(ln.get("reservado_pedido") or 0),
+                "filas": int(ln.get("filas") or 0),
+                "sin_pim": pim == 0,
+            }
+        )
+
+    fuentes = list(por_codigo.values())
+    for g in fuentes:
+        g["pim"] = round(g["pim"], 2)
+        g["certificado"] = round(g["certificado"], 2)
+        g["comprometido"] = round(g["comprometido"], 2)
+        g["saldo_disponible"] = round(g["saldo_disponible"], 2)
+        g["n_clasificadores"] = len(g["clasificadores"])
+        g["clasificadores"].sort(key=lambda c: c["pim"], reverse=True)
+    fuentes.sort(key=lambda g: g["pim"], reverse=True)
+    return fuentes
 
 
 def metas_rezagadas(
@@ -214,6 +374,7 @@ def metas_rezagadas(
     mef_por_meta = ejecucion_mef_repo.ejecucion_por_meta(
         db, ano=ano, sec_funcs=sec_funcs if centros is not None else None
     )
+    mes_corte = ejecucion_mef_repo.mes_maximo_ejecutado(db, ano=ano)
 
     rezagadas: list[dict[str, Any]] = []
     for m in metas_siga:
@@ -230,7 +391,7 @@ def metas_rezagadas(
                 "devengado": mef["devengado"],
                 "porcentaje_devengado": pct,
             }
-            rezagadas.append(_con_semaforo(db, fila))
+            rezagadas.append(_con_semaforo(db, fila, mes_corte=mes_corte))
 
     rezagadas.sort(key=lambda x: x["porcentaje_devengado"])
     return rezagadas[:limit]

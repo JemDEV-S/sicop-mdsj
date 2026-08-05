@@ -240,6 +240,129 @@ def resumen_saldos(
     return totales
 
 
+def detalle_meta_jerarquico(
+    ano: int,
+    sec_func: int,
+    centros: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Composición operativa SIGA de UNA meta: fuente × clasificador × CC.
+
+    Devuelve una fila por combinación `FUENTE_FINANC × CLASIFICADOR`, con nombres
+    legibles (fuente y clasificador). El service la arma en árbol
+    Fuente → Clasificadores.
+
+    **Muestra TODOS los clasificadores**, incluidos los de PIM 0 (líneas del plan
+    sin techo activo o residuales): un clasificador con PIM 0 sigue siendo
+    información para el funcionario (puede tener certificado/compromiso histórico
+    o quedar como línea prevista). El filtro `PPTO_MODIF > 0` que antes los ocultaba
+    causaba el bug de la meta 57 (mostraba 7 de 12 clasificadores).
+
+    Solo montos SIGA operativos (detalle del gasto, NO presupuesto): el presupuesto
+    oficial es del SIAF/MEF y no se desagrega a este nivel.
+    """
+    if centros is not None and len(centros) == 0:
+        return []
+
+    where = [
+        "t.ANO_EJE = :ano",
+        "t.SEC_EJEC = :sec_ejec",
+        "t.sec_func = :sec_func",
+        "t.CLASIFICADOR IS NOT NULL",  # descarta filas sin clasificar (ruido)
+    ]
+    params: dict[str, Any] = {
+        "ano": ano,
+        "sec_ejec": settings.SEC_EJEC,
+        "sec_func": sec_func,
+    }
+    if centros is not None:
+        binds = [f":cc{i}" for i in range(len(centros))]
+        where.append(f"t.CENTRO_COSTO IN ({', '.join(binds)})")
+        for i, c in enumerate(centros):
+            params[f"cc{i}"] = c
+
+    sql = f"""
+        SELECT
+            t.FUENTE_FINANC                            AS fuente_codigo,
+            LTRIM(RTRIM(MAX(ff.nombre)))               AS fuente_nombre,
+            t.CLASIFICADOR                             AS codigo,
+            LTRIM(RTRIM(MAX(cg.NOMBRE_CLASIF)))        AS nombre,
+            COALESCE(SUM(t.PPTO_PIA), 0)               AS pia,
+            COALESCE(SUM(t.PPTO_MODIF), 0)             AS pim,
+            COALESCE(SUM(t.mnto_acum_cert), 0)         AS certificado,
+            COALESCE(SUM(t.mnto_acum_coma), 0)         AS comprometido,
+            COALESCE(SUM(t.PPTO_DISP_SIAF), 0)         AS saldo_disponible,
+            COALESCE(SUM(t.MNTO_RESERVA_PEDIDO), 0)    AS reservado_pedido,
+            COUNT(*)                                   AS filas
+        FROM SIG_TECHO_PRESUPUESTO t
+        LEFT JOIN FUENTE_FINANC ff
+            ON ff.FUENTE_FINANC = t.FUENTE_FINANC AND ff.ANO_EJE = t.ANO_EJE
+            AND ff.ORIGEN = t.ORIGEN
+        LEFT JOIN SIG_CLASIFICADOR_GASTO cg
+            ON cg.CLASIFICADOR = t.CLASIFICADOR AND cg.ANO_EJE = t.ANO_EJE
+        WHERE {" AND ".join(where)}
+        GROUP BY t.FUENTE_FINANC, t.CLASIFICADOR
+        ORDER BY t.FUENTE_FINANC, SUM(t.PPTO_MODIF) DESC
+    """
+    with get_connection() as conn:
+        rows = conn.execute(text(sql), params).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def cabecera_meta(
+    ano: int,
+    sec_func: int,
+    centros: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Totales SIGA de una meta + su nombre, para la cabecera del detalle.
+
+    Devuelve `None` si la meta no existe / no es visible para el usuario. Los
+    montos son la suma sobre las líneas visibles (mismo alcance que el desglose).
+    """
+    if centros is not None and len(centros) == 0:
+        return None
+
+    where = [
+        "t.ANO_EJE = :ano",
+        "t.SEC_EJEC = :sec_ejec",
+        "t.sec_func = :sec_func",
+        "t.PPTO_MODIF > 0",
+    ]
+    params: dict[str, Any] = {
+        "ano": ano,
+        "sec_ejec": settings.SEC_EJEC,
+        "sec_func": sec_func,
+    }
+    if centros is not None:
+        binds = [f":cc{i}" for i in range(len(centros))]
+        where.append(f"t.CENTRO_COSTO IN ({', '.join(binds)})")
+        for i, c in enumerate(centros):
+            params[f"cc{i}"] = c
+
+    sql = f"""
+        SELECT
+            t.sec_func,
+            LTRIM(RTRIM(MAX(m.nombre)))                AS nombre_meta,
+            LTRIM(RTRIM(MAX(m.act_proy)))              AS act_proy,
+            COALESCE(SUM(t.PPTO_PIA), 0)               AS pia,
+            COALESCE(SUM(t.PPTO_MODIF), 0)             AS pim,
+            COALESCE(SUM(t.mnto_acum_cert), 0)         AS certificado,
+            COALESCE(SUM(t.mnto_acum_coma), 0)         AS comprometido,
+            COALESCE(SUM(t.PPTO_DISP_SIAF), 0)         AS saldo_disponible,
+            COALESCE(SUM(t.MNTO_RESERVA_PEDIDO), 0)    AS reservado_pedido,
+            COUNT(*)                                   AS filas_clasificador,
+            COUNT(DISTINCT t.CLASIFICADOR)             AS n_clasificadores,
+            COUNT(DISTINCT t.FUENTE_FINANC)            AS n_fuentes
+        FROM SIG_TECHO_PRESUPUESTO t
+        INNER JOIN META m
+            ON t.sec_func = m.sec_func AND t.ANO_EJE = m.ano_eje
+        WHERE {" AND ".join(where)}
+        GROUP BY t.sec_func
+    """
+    with get_connection() as conn:
+        row = conn.execute(text(sql), params).mappings().one_or_none()
+    return dict(row) if row else None
+
+
 def metas_con_saldo(
     ano: int,
     centros: list[str] | None = None,

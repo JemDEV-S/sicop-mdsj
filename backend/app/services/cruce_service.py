@@ -54,3 +54,29 @@ def consolidado_por_meta(
 
     resultado["presupuesto"] = presupuesto
     return resultado
+
+
+def consolidado_por_clasificador(
+    db: Session,
+    *,
+    ano: int,
+    sec_func: int,
+    clasificador: str,
+    centros: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Cruce SIAF-SIGA de un clasificador dentro de una meta.
+
+    Filtra órdenes, certificaciones y pedidos al clasificador de gasto. El
+    presupuesto es el techo SIGA de ese clasificador (fases previas). A este
+    nivel NO hay bloque MEF: el snapshot oficial se guarda por meta, no por
+    clasificador — el flag `sin_mef` lo deja explícito para que la UI lo aclare.
+    """
+    resultado = cruce_repo.consolidado_por_clasificador(
+        ano, sec_func, clasificador, centros=centros
+    )
+    if resultado is None:
+        return None
+    # El presupuesto de clasificador es solo SIGA operativo; el % oficial no se
+    # puede calcular a este nivel (el MEF no baja a clasificador).
+    resultado["sin_mef"] = True
+    return resultado

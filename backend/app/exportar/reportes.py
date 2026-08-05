@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.security.deps import CurrentUser
-from app.services import ejecucion_service, saldos_service
+from app.services import ejecucion_service, permisos_service, saldos_service
 from app.repositories import contratos_repo, pipeline_repo
 
 
@@ -39,7 +39,13 @@ class Reporte:
 def _datos_saldos(
     db: Session, filtros: dict[str, Any], user: CurrentUser | None
 ) -> list[dict[str, Any]]:
-    centros = user.centros_permitidos if user else None
+    # Respeta el CC del filtro (centro_costo) igual que el endpoint de pantalla,
+    # no solo el alcance completo del usuario. Alineado al esquema DUAL por meta:
+    # las columnas SIGA son fases previas y el devengado sale del MEF (_mef).
+    permitidos = user.centros_permitidos if user else None
+    centros = permisos_service.restringir_a_subrama(
+        db, permitidos, filtros.get("centro_costo")
+    )
     items, _ = saldos_service.listar_saldos(
         db,
         ano=filtros.get("ano") or settings.ANO_VIGENTE,
@@ -56,25 +62,96 @@ def _datos_saldos(
 
 REPORTE_SALDOS = Reporte(
     codigo="saldos",
-    titulo="Saldos presupuestales",
+    titulo="Saldos presupuestales por meta (ejecución oficial SIAF)",
     columnas=[
         Columna("sec_func", "Meta"),
         Columna("nombre_meta", "Nombre de meta"),
         Columna("act_proy", "Acto/Proy"),
-        Columna("clasificador", "Clasificador"),
-        Columna("fuente_financ", "Fuente"),
-        Columna("centro_costo", "CC"),
-        Columna("centro_costo_nombre", "Unidad"),
-        Columna("pia", "PIA", "moneda"),
-        Columna("pim", "PIM", "moneda"),
-        Columna("certificado", "Certificado", "moneda"),
-        Columna("devengado", "Devengado", "moneda"),
-        Columna("saldo_disponible", "Saldo disponible", "moneda"),
-        Columna("porcentaje_devengado", "% Dev.", "porcentaje"),
+        # ── Cadena de ejecución oficial (SIAF/MEF) ──
+        Columna("pim_mef", "PIM", "moneda"),
+        Columna("certificado_mef", "Certificado", "moneda"),
+        Columna("comprometido_mef", "Comprometido", "moneda"),
+        Columna("devengado_mef", "Devengado", "moneda"),
+        Columna("girado_mef", "Girado", "moneda"),
+        # ── Saldos y avance ──
+        Columna("saldo_por_ejecutar", "Por ejecutar", "moneda"),
+        Columna("saldo_por_pagar", "Por pagar", "moneda"),
+        Columna("porcentaje_devengado", "% Devengado", "porcentaje"),
+        Columna("porcentaje_girado", "% Girado", "porcentaje"),
+        Columna("semaforo", "Estado"),
     ],
     obtener_datos=_datos_saldos,
     con_totales=True,
-    columnas_totalizables=["pia", "pim", "certificado", "devengado", "saldo_disponible"],
+    columnas_totalizables=[
+        "pim_mef", "certificado_mef", "comprometido_mef", "devengado_mef",
+        "girado_mef", "saldo_por_ejecutar", "saldo_por_pagar",
+    ],
+)
+
+
+# ─── Reporte: DETALLE DE META (drill-down por clasificador) ──────────────
+
+def _datos_saldos_detalle(
+    db: Session, filtros: dict[str, Any], user: CurrentUser | None
+) -> list[dict[str, Any]]:
+    """Detalle operativo SIGA de una meta, aplanado a filas fuente+clasificador
+    (para exportar el drill-down jerárquico que se ve en pantalla). Requiere
+    `sec_func` en los filtros. Incluye TODOS los clasificadores (también PIM 0).
+    """
+    sec_func = filtros.get("sec_func")
+    if sec_func is None:
+        return []
+    permitidos = user.centros_permitidos if user else None
+    centros = permisos_service.restringir_a_subrama(
+        db, permitidos, filtros.get("centro_costo")
+    )
+    data = saldos_service.detalle_meta(
+        db,
+        ano=filtros.get("ano") or settings.ANO_VIGENTE,
+        sec_func=int(sec_func),
+        centros=centros,
+    )
+    if not data:
+        return []
+    filas: list[dict[str, Any]] = []
+    for f in data["fuentes"]:
+        for c in f["clasificadores"]:
+            filas.append({
+                "fuente_codigo": f["fuente_codigo"],
+                "fuente_nombre": f["fuente_nombre"],
+                "codigo": c["codigo"],
+                "nombre": c["nombre"],
+                "pim": c["pim"],
+                "certificado": c["certificado"],
+                "comprometido": c["comprometido"],
+                "saldo_por_comprometer": c["saldo_por_comprometer"],
+                "saldo_disponible": c["saldo_disponible"],
+                "filas": c["filas"],
+            })
+    return filas
+
+
+REPORTE_SALDOS_DETALLE = Reporte(
+    codigo="saldos_detalle",
+    titulo="Detalle operativo de meta (fuente y clasificador de gasto)",
+    columnas=[
+        Columna("fuente_codigo", "Fuente"),
+        Columna("fuente_nombre", "Nombre fuente"),
+        Columna("codigo", "Clasificador"),
+        Columna("nombre", "Descripción"),
+        Columna("pim", "PIM", "moneda"),
+        Columna("certificado", "Certificado", "moneda"),
+        Columna("comprometido", "Comprometido", "moneda"),
+        Columna("saldo_por_comprometer", "Por comprometer", "moneda"),
+        Columna("saldo_disponible", "Saldo disponible", "moneda"),
+        Columna("filas", "Líneas", "numero"),
+    ],
+    obtener_datos=_datos_saldos_detalle,
+    con_totales=True,
+    columnas_totalizables=[
+        "pim", "certificado", "comprometido",
+        "saldo_por_comprometer", "saldo_disponible",
+    ],
 )
 
 
@@ -213,6 +290,7 @@ _REGISTRO: dict[str, Reporte] = {
     r.codigo: r
     for r in (
         REPORTE_SALDOS,
+        REPORTE_SALDOS_DETALLE,
         REPORTE_EJECUCION_DETALLE,
         REPORTE_PEDIDOS,
         REPORTE_CONTRATOS,

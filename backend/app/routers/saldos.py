@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.schemas.saldos import (
     MetaRezagadaItem,
+    SaldoDetalleResponse,
     SaldoItem,
     SaldosListadoResponse,
     SaldosResumenResponse,
@@ -82,6 +83,40 @@ def resumen(
         centros=centros,
     )
     return SaldosResumenResponse.model_validate(data)
+
+
+@router.get("/meta/{sec_func}/detalle", response_model=SaldoDetalleResponse)
+def detalle_meta(
+    sec_func: int,
+    ano: int | None = None,
+    centro_costo: str | None = Query(
+        None,
+        description="Restringe el desglose a la subrama del CC indicado.",
+    ),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> SaldoDetalleResponse:
+    """Drill-down de una meta: cabecera dual (SIGA + MEF) + desglose SIGA por
+    clasificador de gasto y por fuente de financiamiento.
+
+    Respeta el filtro por CC del usuario. Devuelve 404 si la meta no existe o
+    no es visible en el alcance del usuario.
+    """
+    centros = permisos_service.restringir_a_subrama(
+        db, user.centros_permitidos, centro_costo
+    )
+    data = saldos_service.detalle_meta(
+        db,
+        ano=ano or settings.ANO_VIGENTE,
+        sec_func=sec_func,
+        centros=centros,
+    )
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Meta no encontrada o fuera del alcance del usuario.",
+        )
+    return SaldoDetalleResponse.model_validate(data)
 
 
 @router.get("/metas-rezagadas", response_model=list[MetaRezagadaItem])

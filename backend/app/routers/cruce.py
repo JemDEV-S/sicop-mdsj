@@ -12,15 +12,17 @@ from app.schemas.cruce import (
     AfectacionItem,
     CertificacionItem,
     ConformidadItem,
+    ConsolidadoClasificadorResponse,
     ConsolidadoMetaResponse,
     CruceExpedienteResponse,
     MetaCabecera,
     OrdenCruceItem,
     PedidoOrigenItem,
+    PresupuestoClasificador,
     PresupuestoMeta,
 )
 from app.security.deps import CurrentUser, get_current_user
-from app.services import cruce_service
+from app.services import cruce_service, permisos_service
 
 router = APIRouter(prefix="/interno/cruce", tags=["interno-cruce"])
 
@@ -125,4 +127,59 @@ def consolidado_meta(
             CertificacionItem.model_validate(_norm(c))
             for c in resultado["certificaciones"]
         ],
+    )
+
+
+@router.get(
+    "/meta/{sec_func}/clasificador",
+    response_model=ConsolidadoClasificadorResponse,
+)
+def consolidado_clasificador(
+    sec_func: int,
+    clasificador: str = Query(
+        ...,
+        description="Código de clasificador de gasto (con los espacios del SIGA).",
+    ),
+    ano: int | None = None,
+    centro_costo: str | None = Query(
+        None, description="Restringe al alcance del CC indicado."
+    ),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ConsolidadoClasificadorResponse:
+    """Cruce SIAF-SIGA de un clasificador dentro de una meta (para el modal).
+
+    Devuelve órdenes, certificaciones y pedidos filtrados al clasificador, más el
+    techo SIGA de esa línea. Sin bloque MEF (el snapshot es por meta). 404 si la
+    meta no existe o está fuera de alcance.
+    """
+    centros = permisos_service.restringir_a_subrama(
+        db, user.centros_permitidos, centro_costo
+    )
+    resultado = cruce_service.consolidado_por_clasificador(
+        db,
+        ano=ano or settings.ANO_VIGENTE,
+        sec_func=sec_func,
+        clasificador=clasificador,
+        centros=centros,
+    )
+    if resultado is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"meta {sec_func} no encontrada o fuera de alcance",
+        )
+    return ConsolidadoClasificadorResponse(
+        meta=MetaCabecera.model_validate(_norm(resultado["meta"])),
+        clasificador=resultado["clasificador"],
+        clasificador_nombre=resultado.get("clasificador_nombre"),
+        presupuesto=PresupuestoClasificador.model_validate(
+            resultado["presupuesto"] or {}
+        ),
+        ordenes=[OrdenCruceItem.model_validate(_norm(o)) for o in resultado["ordenes"]],
+        pedidos=[PedidoOrigenItem.model_validate(_norm(p)) for p in resultado["pedidos"]],
+        certificaciones=[
+            CertificacionItem.model_validate(_norm(c))
+            for c in resultado["certificaciones"]
+        ],
+        sin_mef=resultado.get("sin_mef", True),
     )
