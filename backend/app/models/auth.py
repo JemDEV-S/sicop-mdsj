@@ -39,6 +39,12 @@ class Usuario(Base):
             "email",
             postgresql_where=text("email IS NOT NULL"),
         ),
+        Index(
+            "ix_usuarios_dni",
+            "dni",
+            unique=True,
+            postgresql_where=text("dni IS NOT NULL"),
+        ),
         Index("ix_usuarios_rol_id", "rol_id"),
         {"schema": SCHEMA},
     )
@@ -51,6 +57,7 @@ class Usuario(Base):
     usuario: Mapped[str] = mapped_column(String(60), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     nombre_completo: Mapped[str] = mapped_column(String(150), nullable=False)
+    dni: Mapped[str | None] = mapped_column(String(15))
     email: Mapped[str | None] = mapped_column(String(150))
     rol_id: Mapped[int] = mapped_column(
         SmallInteger, ForeignKey(f"{SCHEMA}.roles.id"), nullable=False

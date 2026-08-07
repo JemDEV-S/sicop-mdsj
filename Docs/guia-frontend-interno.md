@@ -240,7 +240,7 @@ Smoke test manual: arrancar `npm run dev`, entrar como funcionario semilla, reco
 
 ### Etapa E — Complementos
 - [x] **T-53** · Proveedores internos + contratos por vencer — directorio + perfil + contratos con alerta de vencimientos — [2026-08-04]
-- [ ] **T-54** · Gestión de usuarios
+- [x] **T-54** · Gestión de usuarios — CRUD + asignación de CC + reset password (contraseña inicial = DNI); incluye backend T-08 — [2026-08-07]
 - [ ] **T-55** · Configuración de umbrales
 
 ### Transversal — Acceso jerárquico + auditoría
@@ -321,6 +321,26 @@ Registro de decisiones no triviales que afectan a más de una pantalla o al sist
 **Alternativas descartadas:** cuáles y por qué
 **Impacto:** qué archivos/pantallas se ven afectadas
 ```
+
+### [2026-08-07] · T-54/T-08 Gestión de usuarios (Etapa E) — contraseña inicial = DNI
+
+**Contexto:** T-54 (HU-17, admin-only) es la pantalla que hace **operable** la jerarquía consolidada en T-56: sin ella, asignar CC a un usuario se hacía a mano en la BD. Dependía de T-08 (backend de usuarios), que **no existía** — `auth.py` solo tenía login/refresh/logout/me. Se construyó backend + frontend en esta tarea.
+
+**Decisiones del usuario:**
+- **Contraseña inicial = DNI del usuario**, y el cambio posterior es **opcional** → el usuario nace con `debe_cambiar_password=false`. Requirió añadir la columna `dni` a `auth.usuarios` (migración `f4a1b2c3d5e7`, nullable + índice único parcial para no romper el seed sin DNI; la obligatoriedad se exige en la API al crear, no en la columna). Verificado end-to-end: crear usuario → login con el DNI como contraseña funciona.
+- **Salvaguarda de auto-gestión:** un admin no puede cambiar su propio rol ni su estado (evita autobloqueo / dejar el sistema sin admins). Sí puede editar su nombre/email. Se aplica en el servicio y se refleja en la UI (campos deshabilitados). Verificado: 403 al intentar cambiarse el rol.
+- **Selector de CC = todo el árbol de la entidad** (admin ve toda la municipalidad).
+
+**Backend (`/interno/admin/usuarios`, admin-only, todo auditado):** listar (con nº de CC, excluye ciudadanos), crear, editar parcial (PATCH), reset-password-al-DNI, asignar/quitar CC (con flag `es_raiz_jerarquia` para decisores), y `centros-costo` (árbol para el selector). Acciones de auditoría nuevas: `usuario_creado/actualizado/password_reset/cc_asignado/cc_quitado`. El rol `ciudadano` se rechaza para usuarios internos.
+
+**Frontend (`/admin/usuarios`, reemplaza el stub):** feature `features/usuarios/` (`types`, `api`, `lib`, `secciones/{ModalUsuario, ModalCentros}`), página con tabla paginada + búsqueda con debounce 350ms + filtros rol/estado, modal de alta/edición (el DNI se rotula como contraseña inicial; usuario/DNI no editables en edición), y modal de asignación de CC (asignados con quitar + selector del árbol + flag cabeza de jerarquía). Reset de contraseña con `window.confirm`. Item "Auditoría" y "Usuarios" ya viven en la sección admin del nav.
+
+**Alternativas descartadas:**
+- Contraseña temporal con cambio forzado → el usuario pidió explícitamente DNI + cambio opcional.
+- DNI obligatorio en la columna → rompería el admin del seed (sin DNI); se hace nullable + requerido en la API.
+- Selector solo de CC con presupuesto → dejaría fuera dependencias operativas sin techo propio.
+
+**Impacto:** backend — migración `f4a1b2c3d5e7`, `models/auth.py` (columna `dni` + índice), `schemas/usuarios.py`, `services/usuarios_service.py`, `routers/usuarios.py`, `auditoria_service.py` (5 acciones), `main.py`. Frontend — feature `usuarios/` completo, `pages/interno/Usuarios.tsx`, ruta `/admin/usuarios` lazy. Pendiente Etapa E: **T-55** (configuración de umbrales).
 
 ### [2026-08-07] · T-56 Consolidación de acceso jerárquico por CC + auditoría (transversal)
 

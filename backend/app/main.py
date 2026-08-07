@@ -37,6 +37,7 @@ from app.routers import (
     pipeline,
     proveedores,
     saldos,
+    usuarios,
 )
 
 # Configurar structlog + stdlib logging antes de crear la app: así los logs
@@ -120,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(pipeline.alertas_router, prefix=API_PREFIX)
     app.include_router(anotaciones.router, prefix=API_PREFIX)
     app.include_router(auditoria.router, prefix=API_PREFIX)
+    app.include_router(usuarios.router, prefix=API_PREFIX)
     app.include_router(cruce.router, prefix=API_PREFIX)
     app.include_router(proveedores.publico_router, prefix=API_PREFIX)
     app.include_router(proveedores.interno_router, prefix=API_PREFIX)

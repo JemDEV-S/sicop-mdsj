@@ -74,6 +74,14 @@ class Accion:
     # de una dependencia, sin auditar cada request (eso seria ruido y volumen).
     CONSULTA_CRUCE_META = "consulta_cruce_meta"
     CONSULTA_SALDOS_CC = "consulta_saldos_cc"
+    # Gestion de usuarios (admin-only, HU-17). Alta/edicion/estado, reset de
+    # contrasena y asignacion de centros de costo: quien administra el acceso de
+    # quien queda registrado.
+    USUARIO_CREADO = "usuario_creado"
+    USUARIO_ACTUALIZADO = "usuario_actualizado"
+    USUARIO_PASSWORD_RESET = "usuario_password_reset"
+    USUARIO_CC_ASIGNADO = "usuario_cc_asignado"
+    USUARIO_CC_QUITADO = "usuario_cc_quitado"
 
 
 def registrar(

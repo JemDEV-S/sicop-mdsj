@@ -165,7 +165,10 @@ export const router = createBrowserRouter([
               },
               {
                 path: 'usuarios',
-                element: <div>Gestión de Usuarios (Stub)</div>
+                lazy: async () => {
+                  const { default: Usuarios } = await import('../pages/interno/Usuarios');
+                  return { Component: Usuarios };
+                }
               },
               {
                 path: 'auditoria',
