@@ -39,6 +39,42 @@ from app.config import settings
 from app.siga.conexion import get_connection
 
 
+def _predicado_cc_detalle(
+    centros: list[str] | None, params: dict[str, Any]
+) -> str | None:
+    """Predicado de CC para el DETALLE de UNA meta (cabecera + desglose).
+
+    A diferencia del LISTADO (que decide elegibilidad de meta con `CENTRO_COSTO
+    IN (...)` estricto), el detalle de una meta ya elegible debe mostrar TODAS
+    sus líneas, incluidas las de `CENTRO_COSTO IS NULL` (presupuesto de la meta a
+    nivel cabecera, no desagregado a una dependencia). Ver bug meta 57: la mitad
+    del PIM vive en filas de CC nulo y quedaba oculto al usuario con alcance.
+
+    Seguridad: los nulos se incluyen SOLO si la meta tiene al menos una línea de
+    un CC del alcance del usuario (`EXISTS`). Así una meta ajena que solo tenga
+    líneas de CC nulo NO se filtra (evita fuga: hay 164 metas con CC nulo sin
+    línea del usuario). Admin (`centros=None`) no filtra nada.
+
+    Muta `params` con los binds `:ccd0, :ccd1, ...`. Devuelve el fragmento SQL o
+    `None` si no hay que filtrar (admin).
+    """
+    if centros is None:
+        return None
+    binds = [f":ccd{i}" for i in range(len(centros))]
+    for i, c in enumerate(centros):
+        params[f"ccd{i}"] = c
+    in_list = ", ".join(binds)
+    # La subconsulta EXISTS confirma que la meta tiene alguna línea del alcance
+    # del usuario antes de dejar pasar las líneas de CC nulo de esa misma meta.
+    return (
+        f"(t.CENTRO_COSTO IN ({in_list}) OR (t.CENTRO_COSTO IS NULL AND EXISTS ("
+        f"  SELECT 1 FROM SIG_TECHO_PRESUPUESTO t2"
+        f"   WHERE t2.ANO_EJE = t.ANO_EJE AND t2.SEC_EJEC = t.SEC_EJEC"
+        f"     AND t2.sec_func = t.sec_func"
+        f"     AND t2.CENTRO_COSTO IN ({in_list}))))"
+    )
+
+
 def listar_saldos(
     ano: int,
     centros: list[str] | None = None,
@@ -274,11 +310,12 @@ def detalle_meta_jerarquico(
         "sec_ejec": settings.SEC_EJEC,
         "sec_func": sec_func,
     }
-    if centros is not None:
-        binds = [f":cc{i}" for i in range(len(centros))]
-        where.append(f"t.CENTRO_COSTO IN ({', '.join(binds)})")
-        for i, c in enumerate(centros):
-            params[f"cc{i}"] = c
+    # Detalle de meta elegible: incluye las líneas de CC nulo de ESTA meta
+    # (presupuesto de cabecera) además de las del CC del usuario. Ver
+    # _predicado_cc_detalle y el bug de la meta 57.
+    pred_cc = _predicado_cc_detalle(centros, params)
+    if pred_cc is not None:
+        where.append(pred_cc)
 
     sql = f"""
         SELECT
@@ -332,11 +369,11 @@ def cabecera_meta(
         "sec_ejec": settings.SEC_EJEC,
         "sec_func": sec_func,
     }
-    if centros is not None:
-        binds = [f":cc{i}" for i in range(len(centros))]
-        where.append(f"t.CENTRO_COSTO IN ({', '.join(binds)})")
-        for i, c in enumerate(centros):
-            params[f"cc{i}"] = c
+    # Misma regla que el desglose: la cabecera de una meta elegible suma también
+    # sus líneas de CC nulo (coherencia KPI ↔ detalle). Ver _predicado_cc_detalle.
+    pred_cc = _predicado_cc_detalle(centros, params)
+    if pred_cc is not None:
+        where.append(pred_cc)
 
     sql = f"""
         SELECT

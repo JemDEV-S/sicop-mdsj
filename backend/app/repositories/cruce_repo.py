@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import text
 
 from app.config import settings
+from app.repositories import saldos_repo
 from app.siga.conexion import get_connection
 
 
@@ -152,15 +153,14 @@ def consolidado_por_meta(
     if centros is not None and len(centros) == 0:
         return None
 
-    where_cc = ""
     params: dict[str, Any] = {
         "ano": ano, "sec_ejec": settings.SEC_EJEC, "sec_func": sec_func,
     }
-    if centros is not None:
-        binds = ", ".join(f":cc{i}" for i in range(len(centros)))
-        where_cc = f" AND t.CENTRO_COSTO IN ({binds})"
-        for i, c in enumerate(centros):
-            params[f"cc{i}"] = c
+    # Presupuesto de una meta elegible: incluye sus líneas de CC nulo (cabecera)
+    # además de las del CC del usuario, con EXISTS anti-fuga. Misma regla que
+    # saldos (bug meta 57). `_predicado_cc_detalle` devuelve None para admin.
+    pred_cc = saldos_repo._predicado_cc_detalle(centros, params)
+    where_cc = f" AND {pred_cc}" if pred_cc else ""
 
     with get_connection() as conn:
         meta = conn.execute(
@@ -307,12 +307,10 @@ def consolidado_por_clasificador(
         "sec_func": sec_func,
         "clasif": clasificador,
     }
-    where_cc = ""
-    if centros is not None:
-        binds = ", ".join(f":cc{i}" for i in range(len(centros)))
-        where_cc = f" AND t.CENTRO_COSTO IN ({binds})"
-        for i, c in enumerate(centros):
-            params[f"cc{i}"] = c
+    # Incluye líneas de CC nulo de la meta elegible (cabecera), con EXISTS
+    # anti-fuga. Misma regla que saldos/consolidado_por_meta (bug meta 57).
+    pred_cc = saldos_repo._predicado_cc_detalle(centros, params)
+    where_cc = f" AND {pred_cc}" if pred_cc else ""
 
     with get_connection() as conn:
         meta = conn.execute(

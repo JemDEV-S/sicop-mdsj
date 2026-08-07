@@ -5,10 +5,16 @@ swap, ltree, log) corre contra la BD PostgreSQL de dev.
 
 Requiere:
 - PostgreSQL corriendo (docker-compose up postgres) con `alembic upgrade head`.
+- SIGA accesible: el teardown RE-SINCRONIZA el catálogo real tras el test.
 
-Se usa `monkeypatch` para reemplazar las 3 funciones lectoras. Después de la
-sincronización, se restaura el estado ejecutando el job real (si `RESTORE_SIGA=1`)
-o dejando el snapshot fixture (útil para debug local).
+Aislamiento (importante): el test sobrescribe `ref.centros_costo` con un fixture
+de 3 CC. Para no destruir los datos de dev ni chocar con la salvaguarda que
+protege `auth.usuarios_centros_costo`, la fixture `entorno_aislado`:
+  1. guarda las asignaciones de CC reales y las quita temporalmente (así el sync
+     con fixture no aborta por permisos que quedarían huérfanos);
+  2. corre el test;
+  3. en el teardown re-sincroniza SIGA real (restaura los 89 CC) y re-inserta las
+     asignaciones guardadas.
 """
 
 from __future__ import annotations
@@ -128,7 +134,47 @@ def mock_siga(monkeypatch):
     )
 
 
-def test_sync_completo_con_mock(mock_siga):
+@pytest.fixture
+def entorno_aislado():
+    """Aísla el test del catálogo real y lo restaura al terminar.
+
+    Setup: guarda y quita las asignaciones de `auth.usuarios_centros_costo`
+    (si no, la salvaguarda del sync aborta al ver que el fixture no cubre esos
+    CC reales). Teardown: re-sincroniza SIGA real (restaura los 89 CC) y
+    re-inserta las asignaciones tal como estaban.
+    """
+    with SessionLocal() as db:
+        asignaciones = db.execute(
+            text(
+                "SELECT usuario_id, centro_costo, es_raiz_jerarquia "
+                "FROM auth.usuarios_centros_costo"
+            )
+        ).mappings().all()
+        asignaciones = [dict(a) for a in asignaciones]
+        db.execute(text("DELETE FROM auth.usuarios_centros_costo"))
+        db.commit()
+
+    try:
+        yield
+    finally:
+        # Restaurar el catálogo real desde SIGA (los 89 CC), no el fixture.
+        sync_catalogos_siga.sync_catalogos()
+        # Re-insertar las asignaciones guardadas (los CC ya existen de nuevo).
+        if asignaciones:
+            with SessionLocal() as db:
+                for a in asignaciones:
+                    db.execute(
+                        text(
+                            "INSERT INTO auth.usuarios_centros_costo "
+                            "(usuario_id, centro_costo, es_raiz_jerarquia) "
+                            "VALUES (:u, :c, :r) ON CONFLICT DO NOTHING"
+                        ),
+                        {"u": str(a["usuario_id"]), "c": a["centro_costo"], "r": a["es_raiz_jerarquia"]},
+                    )
+                db.commit()
+
+
+def test_sync_completo_con_mock(entorno_aislado, mock_siga):
     """El job pobla las 3 tablas y construye la jerarquía ltree correcta."""
     resultado = sync_catalogos_siga.sync_catalogos(ano=2026)
 
