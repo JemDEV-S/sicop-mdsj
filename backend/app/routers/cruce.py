@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -22,7 +22,7 @@ from app.schemas.cruce import (
     PresupuestoMeta,
 )
 from app.security.deps import CurrentUser, get_current_user
-from app.services import cruce_service, permisos_service
+from app.services import auditoria_service, cruce_service, permisos_service
 
 router = APIRouter(prefix="/interno/cruce", tags=["interno-cruce"])
 
@@ -103,21 +103,39 @@ def sugerir_expedientes(
 )
 def consolidado_meta(
     sec_func: int,
+    request: Request,
     ano: int | None = None,
+    centro_costo: str | None = Query(
+        None, description="Restringe al alcance del CC indicado."
+    ),
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ConsolidadoMetaResponse:
+    ano_eje = ano or settings.ANO_VIGENTE
+    centros = permisos_service.restringir_a_subrama(
+        db, user.centros_permitidos, centro_costo
+    )
     resultado = cruce_service.consolidado_por_meta(
         db,
-        ano=ano or settings.ANO_VIGENTE,
+        ano=ano_eje,
         sec_func=sec_func,
-        centros=user.centros_permitidos,
+        centros=centros,
     )
     if resultado is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"meta {sec_func} no encontrada o fuera de alcance",
         )
+    # Consulta sensible: quien ve el cruce SIAF-SIGA de una meta accede al
+    # detalle presupuestal + operativo de una dependencia. Se deja rastro.
+    auditoria_service.registrar_desde_request(
+        db,
+        request,
+        accion=auditoria_service.Accion.CONSULTA_CRUCE_META,
+        usuario_id=user.id,
+        detalle={"ano": ano_eje, "sec_func": sec_func, "centro_costo": centro_costo},
+    )
+    db.commit()
     return ConsolidadoMetaResponse(
         meta=MetaCabecera.model_validate(_norm(resultado["meta"])),
         presupuesto=PresupuestoMeta.model_validate(resultado["presupuesto"] or {}),

@@ -243,6 +243,9 @@ Smoke test manual: arrancar `npm run dev`, entrar como funcionario semilla, reco
 - [ ] **T-54** · Gestión de usuarios
 - [ ] **T-55** · Configuración de umbrales
 
+### Transversal — Acceso jerárquico + auditoría
+- [x] **T-56** · Consolidación de acceso por CC (filtro unificado + anotaciones por unidad) + cobertura de auditoría + vista admin `/admin/auditoria` — [2026-08-07]
+
 ---
 
 ## 5. Correcciones y hallazgos del backend (bitácora viva)
@@ -265,7 +268,9 @@ Durante el rediseño del interno es **muy probable** que aparezcan cosas para co
 
 ### 5.2 Anotaciones
 
-### [2026-07-15] · `/interno/alertas/contratos-por-vencer` sin filtro por CC · No bloqueante · Abierto
+### [2026-07-15] · `/interno/alertas/contratos-por-vencer` sin filtro por CC · No bloqueante · Resuelto (por diseño) en T-56
+
+**Resolución [2026-08-07]:** confirmado como comportamiento **intencional** — los contratos son transversales. Verificado que ni `SIG_CONTRATOS` ni `SIG_ORDEN_ADQUISICION` exponen `CENTRO_COSTO`/`SEC_FUNC` directo; en la municipalidad los contratos los administra Logística de forma central, no la sub-gerencia usuaria. Se documenta como tal en el código (nota de alcance en `contratos.py`) y en la UI. El amarre vía cadena orden→presupuesto→meta→CC queda como mejora futura (ver decisión T-56 en §6).
 
 **Detectado en:** T-44 (dashboard bienvenida) · widget de alertas.
 **Qué pasa:** `SIG_CONTRATOS` en SIGA no tiene una relación directa con `CENTRO_COSTO`. El endpoint devuelve los contratos de toda la entidad (SEC_EJEC=300687) sin importar el CC activo del contexto, mientras que pedidos y saldos sí filtran por CC.
@@ -316,6 +321,29 @@ Registro de decisiones no triviales que afectan a más de una pantalla o al sist
 **Alternativas descartadas:** cuáles y por qué
 **Impacto:** qué archivos/pantallas se ven afectadas
 ```
+
+### [2026-08-07] · T-56 Consolidación de acceso jerárquico por CC + auditoría (transversal)
+
+**Contexto:** con las vistas operativas ya construidas (T-44..T-53), faltaba cerrar el control de acceso y el rastro de eventos. La infraestructura ya existía (`permisos_service` con jerarquía ltree por rol, `restringir_a_subrama`, `auditoria_service`), pero estaba cableada de forma inconsistente entre endpoints y no cubría las consultas sensibles que pide idea-principal §8. Consideración municipal clave: **la unidad de trabajo es la dependencia (centro de costo), no la persona** — la gente rota, cubre licencias y hereda expedientes; por eso el alcance de anotaciones/alertas es por unidad, y los contratos (que administra Logística de forma central) son transversales.
+
+**Decisión — cuatro bloques (backend + una vista frontend):**
+
+1. **Filtro CC unificado.** Todos los endpoints internos siguen el mismo patrón `restringir_a_subrama(db, user.centros_permitidos, centro_costo)`. Se corrigió `cruce.consolidado_meta`, que pasaba `centros_permitidos` crudo sin enfocar el CC activo (quedaba desalineado con su vecino `consolidado_clasificador`).
+
+2. **Contratos transversales, explícito.** SIGA no amarra contrato↔CC (`SIG_CONTRATOS` sin `CENTRO_COSTO`) y — verificado en esta tarea — la orden **tampoco** (`SIG_ORDEN_ADQUISICION` no expone `CENTRO_COSTO` ni `SEC_FUNC` directos). En vez de dejarlo silenciosamente sin filtro, se documenta como transversal en el código (nota de alcance en `contratos.py`) y en la UI. El amarre vía cadena orden→presupuesto→meta→CC queda como mejora futura (costo alto, poco retorno MVP).
+
+3. **Alcance por unidad en anotaciones.** `anotaciones.py` ahora resuelve el CC de la entidad anotada (`permisos_anotaciones_service`) y verifica alcance: quien puede ver el pedido ve las anotaciones de su equipo sobre él (RN-04). Solo `pedido` tiene CC verificado y barato (`SIG_PEDIDOS.CENTRO_COSTO`); `orden/meta/obra/contrato` se tratan como transversales aquí (no se inventa una llave que SIGA no expone).
+
+4. **Cobertura de auditoría + vista admin.** Nuevas acciones canónicas: `anotacion_creada/borrada` (cambian estado) y `consulta_cruce_meta`/`consulta_saldos_cc` (consultas sensibles — solo cuando se enfoca un CC concreto, no en la carga general del dashboard, para no generar ruido). Nueva vista **admin-only** `/admin/auditoria` (endpoint paginado con filtros por acción/usuario/fecha + catálogo dinámico de acciones + pantalla `pages/interno/Auditoria.tsx`).
+
+**Alternativas descartadas:**
+- Alcance por autor (ver solo mis anotaciones) → contradice cómo trabaja una dependencia municipal (equipo, no individuo).
+- Resolver CC de la orden vía cadena presupuestal → SIGA no expone la llave directa; sería costoso y frágil. Se difiere (misma línea que contratos §5.2).
+- Auditar todo request → volumen excesivo y necesitaría política de retención; para el MVP se auditan cambios de estado + consultas sensibles enfocadas.
+
+**Diferido:** "marcar alerta como revisada" (HU-11) se implementa en **T-47** (el modelo `AlertaRevisada` existe pero el endpoint no); nacerá con alcance por-CC desde el inicio, reusando el patrón de anotaciones.
+
+**Impacto:** backend — `cruce.py`, `saldos.py`, `contratos.py`, `anotaciones.py`, `auditoria_service.py` (acciones nuevas), nuevos `services/permisos_anotaciones_service.py`, `routers/auditoria.py`, `schemas/auditoria.py`, `main.py` (registro). Frontend — nuevo feature `features/auditoria/` (`types`, `api`, `lib`), `pages/interno/Auditoria.tsx`, `formatFechaHora` en formatters, ruta `/admin/auditoria` + item en nav admin. Tests: `test_permisos_anotaciones.py` (17). *(Nota: `test_sync_invierte::test_leer_todo_consolida_por_codigo` falla, pero es preexistente — no relacionado con esta tarea.)*
 
 ### [2026-08-04] · T-53 Proveedores + contratos: tres pantallas, orden ≠ contrato en toda la UI (Etapa E)
 
@@ -569,8 +597,8 @@ Endpoints modificados: `/interno/pipeline/kanban`, `/interno/pedidos`, `/interno
 Cosas que necesitan definición del usuario o del backend antes de que bloqueen una pantalla. Se resuelven o se convierten en decisiones (§6) o en issues backend (§5).
 
 - ~~**Filtro global de año en la topbar:** ¿el año se elige una vez por sesión y se aplica a todo, o cada pantalla lo trae en sus filtros?~~ **Resuelto [2026-07-15]:** global en topbar (ver §6).
-- **Anotaciones internas de pedido (HU-10):** ¿los operativos pueden ver anotaciones de otros usuarios de su misma unidad, o solo las propias?
-- **Alertas "marcar como revisada" (HU-11):** ¿la revisión es por usuario o por unidad? (Impacta el modelo `sistema.alertas_revisadas`.)
+- ~~**Anotaciones internas de pedido (HU-10):** ¿los operativos pueden ver anotaciones de otros usuarios de su misma unidad, o solo las propias?~~ **Resuelto [2026-08-07] (T-56):** por unidad (CC) — la dependencia trabaja como equipo. El alcance se ancla en el CC de la entidad anotada, no en el autor.
+- **Alertas "marcar como revisada" (HU-11):** ~~¿por usuario o por unidad?~~ **Decidido [2026-08-07]:** por unidad (CC), mismo criterio que anotaciones. El endpoint aún no existe — se implementa en **T-47** con alcance por-CC desde el inicio.
 - **Exportación desde tabla (HU-15, HU-21):** ¿se exporta la tabla con los filtros aplicados o el dataset completo? (Recomendado: con filtros aplicados, siempre.)
 - **Vista consolidada de meta (HU-13):** ¿el acordeón inicia todo colapsado, o con "Presupuesto" y "Órdenes" expandidos por defecto?
 - **Configuración de umbrales (HU-18):** ¿los cambios aplican inmediato para todos, o requieren un flujo de aprobación?

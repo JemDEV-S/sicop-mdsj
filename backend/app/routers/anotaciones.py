@@ -7,13 +7,14 @@ El `entidad_id` es el identificador logico (para pedido: "NRO_PEDIDO/TIPO_BIEN")
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas.anotaciones import AnotacionCreate, AnotacionResponse
 from app.security.deps import CurrentUser, get_current_user
+from app.services import auditoria_service, permisos_anotaciones_service
 
 router = APIRouter(prefix="/interno/anotaciones", tags=["interno-anotaciones"])
 
@@ -35,10 +36,16 @@ def _validar_tipo(tipo: str) -> None:
 def listar_anotaciones(
     entidad_tipo: str = Path(...),
     entidad_id: str = Path(...),
-    _: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[AnotacionResponse]:
     _validar_tipo(entidad_tipo)
+    # Alcance por unidad (RN-04): las anotaciones de un pedido pertenecen a la
+    # dependencia dueña del pedido; se ven en equipo, no por autor. 403 si el
+    # pedido cae fuera del alcance del usuario.
+    permisos_anotaciones_service.verificar_alcance_entidad(
+        user, entidad_tipo, entidad_id
+    )
     rows = db.execute(
         text(
             """
@@ -65,12 +72,16 @@ def listar_anotaciones(
 )
 def crear_anotacion(
     payload: AnotacionCreate,
+    request: Request,
     entidad_tipo: str = Path(...),
     entidad_id: str = Path(...),
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> AnotacionResponse:
     _validar_tipo(entidad_tipo)
+    permisos_anotaciones_service.verificar_alcance_entidad(
+        user, entidad_tipo, entidad_id
+    )
     row = db.execute(
         text(
             """
@@ -89,6 +100,17 @@ def crear_anotacion(
             "texto": payload.texto,
         },
     ).mappings().first()
+    auditoria_service.registrar_desde_request(
+        db,
+        request,
+        accion=auditoria_service.Accion.ANOTACION_CREADA,
+        usuario_id=user.id,
+        detalle={
+            "anotacion_id": row["id"],
+            "entidad_tipo": entidad_tipo,
+            "entidad_id": entidad_id,
+        },
+    )
     db.commit()
     return AnotacionResponse.model_validate(
         {**dict(row), "usuario_nombre": user.nombre_completo}
@@ -101,6 +123,7 @@ def crear_anotacion(
 )
 def eliminar_anotacion(
     anotacion_id: int,
+    request: Request,
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
@@ -120,5 +143,12 @@ def eliminar_anotacion(
     db.execute(
         text("DELETE FROM sistema.anotaciones_internas WHERE id = :id"),
         {"id": anotacion_id},
+    )
+    auditoria_service.registrar_desde_request(
+        db,
+        request,
+        accion=auditoria_service.Accion.ANOTACION_BORRADA,
+        usuario_id=user.id,
+        detalle={"anotacion_id": anotacion_id, "autor_id": str(row.usuario_id)},
     )
     db.commit()

@@ -65,6 +65,15 @@ class Accion:
     # quedar rastro de quien asocio que y quien lo deshizo.
     RESOLUCION_CCMN_CREADA = "resolucion_ccmn_creada"
     RESOLUCION_CCMN_REVOCADA = "resolucion_ccmn_revocada"
+    # Anotaciones internas sobre una entidad (pedido/orden/meta). Cambian estado
+    # compartido de la dependencia: se audita quien anoto y quien borro.
+    ANOTACION_CREADA = "anotacion_creada"
+    ANOTACION_BORRADA = "anotacion_borrada"
+    # Consultas sensibles (idea-principal §8: "registrar las consultas y acciones
+    # realizadas"). Dejan rastro de quien mira el detalle presupuestal/operativo
+    # de una dependencia, sin auditar cada request (eso seria ruido y volumen).
+    CONSULTA_CRUCE_META = "consulta_cruce_meta"
+    CONSULTA_SALDOS_CC = "consulta_saldos_cc"
 
 
 def registrar(

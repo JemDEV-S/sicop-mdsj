@@ -23,6 +23,7 @@ from app.middleware.request_logging import RequestLoggingMiddleware
 from app.routers import (
     admin_jobs,
     anotaciones,
+    auditoria,
     auth,
     contratos,
     cruce,
@@ -118,6 +119,7 @@ def create_app() -> FastAPI:
     app.include_router(pipeline.pedidos_router, prefix=API_PREFIX)
     app.include_router(pipeline.alertas_router, prefix=API_PREFIX)
     app.include_router(anotaciones.router, prefix=API_PREFIX)
+    app.include_router(auditoria.router, prefix=API_PREFIX)
     app.include_router(cruce.router, prefix=API_PREFIX)
     app.include_router(proveedores.publico_router, prefix=API_PREFIX)
     app.include_router(proveedores.interno_router, prefix=API_PREFIX)

@@ -39,6 +39,16 @@ def _norm(d: dict) -> dict:
 
 router = APIRouter(prefix="/interno/contratos", tags=["interno-contratos"])
 
+# NOTA DE ALCANCE — contratos transversales (no filtrados por CC).
+# En la municipalidad los contratos los administra de forma central Logistica /
+# Abastecimiento, no la sub-gerencia usuaria. Ademas SIGA no amarra el contrato
+# a un centro de costo directamente (SIG_CONTRATOS no tiene CENTRO_COSTO); el
+# unico vinculo posible seria via las ordenes derivadas, con costo alto y poco
+# retorno para el MVP. Por eso estos endpoints devuelven contratos de toda la
+# entidad (SEC_EJEC=300687) para cualquier rol autenticado. Es intencional y se
+# rotula como tal en la UI. Amarre CC<->contrato via ordenes: mejora futura.
+# Ver Docs/guia-frontend-interno.md §5.2 y §6 (decision T-53).
+
 
 @router.get("", response_model=ContratosListado)
 def listar_contratos(

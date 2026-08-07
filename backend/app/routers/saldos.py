@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -15,13 +15,14 @@ from app.schemas.saldos import (
     SaldosResumenResponse,
 )
 from app.security.deps import CurrentUser, get_current_user
-from app.services import permisos_service, saldos_service
+from app.services import auditoria_service, permisos_service, saldos_service
 
 router = APIRouter(prefix="/interno/saldos", tags=["interno-saldos"])
 
 
 @router.get("", response_model=SaldosListadoResponse)
 def listar(
+    request: Request,
     ano: int | None = None,
     sec_func: int | None = None,
     clasificador: str | None = None,
@@ -36,13 +37,14 @@ def listar(
     user: CurrentUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SaldosListadoResponse:
+    ano_eje = ano or settings.ANO_VIGENTE
     centros = permisos_service.restringir_a_subrama(
         db, user.centros_permitidos, centro_costo
     )
     offset = (page - 1) * size
     items, total = saldos_service.listar_saldos(
         db,
-        ano=ano or settings.ANO_VIGENTE,
+        ano=ano_eje,
         centros=centros,
         sec_func=sec_func,
         clasificador=clasificador,
@@ -51,6 +53,18 @@ def listar(
         limit=size,
         offset=offset,
     )
+    # Consulta sensible solo cuando se enfoca un CC concreto (no en la carga
+    # general del dashboard, que seria ruido). Registra quien miro el
+    # presupuesto de una dependencia especifica.
+    if centro_costo:
+        auditoria_service.registrar_desde_request(
+            db,
+            request,
+            accion=auditoria_service.Accion.CONSULTA_SALDOS_CC,
+            usuario_id=user.id,
+            detalle={"ano": ano_eje, "centro_costo": centro_costo, "sec_func": sec_func},
+        )
+        db.commit()
     return SaldosListadoResponse(
         items=[SaldoItem.model_validate(i) for i in items],
         total=total,

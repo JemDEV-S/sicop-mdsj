@@ -62,15 +62,31 @@ export function formatPorcentaje(amount: number | null | undefined, decimals = 1
  */
 export function formatFecha(dateInput: string | Date | null | undefined): string {
   if (!dateInput) return '-';
-  
+
   const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
-  
+
   // Evitar invalid date
   if (isNaN(date.getTime())) return '-';
-  
+
   return new Intl.DateTimeFormat('es-PE', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
+  }).format(date);
+}
+
+/** Fecha + hora (para logs, timestamps de eventos). Ej. "15/07/2026, 14:32". */
+export function formatFechaHora(dateInput: string | Date | null | undefined): string {
+  if (!dateInput) return '-';
+
+  const date = typeof dateInput === 'string' ? new Date(dateInput) : dateInput;
+  if (isNaN(date.getTime())) return '-';
+
+  return new Intl.DateTimeFormat('es-PE', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(date);
 }
