@@ -19,26 +19,34 @@ export function HeaderPublico() {
   const cerrarMenu = () => setMenuAbierto(false);
 
   return (
-    <header className="sticky top-0 z-40 bg-primary text-primary-foreground border-b border-primary/20">
-      <div className="mx-auto max-w-7xl px-4 md:px-6">
-        <div className="flex h-16 items-center justify-between gap-4">
+    <header className="sticky top-0 z-40 border-b border-primary-foreground/15 bg-primary text-primary-foreground shadow-[0_10px_30px_rgba(15,23,42,0.12)]">
+      <div
+        className="pointer-events-none absolute inset-0 opacity-70"
+        style={{
+          background:
+            'linear-gradient(90deg, rgba(255,255,255,0.10) 0%, transparent 38%, rgba(255,255,255,0.06) 100%)',
+        }}
+        aria-hidden="true"
+      />
+      <div className="relative mx-auto max-w-7xl px-4 md:px-6">
+        <div className="flex h-[72px] items-center justify-between gap-6 md:h-20">
           {/* Branding */}
           <Link
             to="/"
-            className="flex items-center gap-3 min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground rounded-md"
+            className="group flex min-w-0 items-center gap-3.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground"
             onClick={cerrarMenu}
           >
             <span
               aria-hidden="true"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary-foreground text-primary text-sm font-bold shrink-0"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-foreground text-primary text-sm font-black tracking-tight shadow-sm ring-1 ring-primary-foreground/40 transition-transform duration-200 group-hover:-translate-y-0.5"
             >
               MDSJ
             </span>
             <span className="flex flex-col leading-tight min-w-0">
-              <span className="text-sm font-semibold truncate">
+              <span className="truncate text-base font-bold tracking-tight">
                 Municipalidad de San Jerónimo
               </span>
-              <span className="text-xs text-primary-foreground/80 truncate">
+              <span className="truncate text-sm text-primary-foreground/80">
                 Portal de Transparencia
               </span>
             </span>
@@ -46,7 +54,7 @@ export function HeaderPublico() {
 
           {/* Nav desktop */}
           <nav
-            className="hidden md:flex items-center gap-1"
+            className="hidden items-center gap-1 rounded-xl border border-primary-foreground/20 bg-primary-foreground/10 px-1.5 py-1 shadow-inner md:flex"
             aria-label="Navegación principal"
           >
             {navPublica.map((item) => (
@@ -55,12 +63,12 @@ export function HeaderPublico() {
                 to={item.to}
                 className={({ isActive }) =>
                   cn(
-                    'px-3 py-2 text-sm font-medium rounded-md transition-colors',
-                    'hover:bg-primary-foreground/10',
+                    'relative rounded-lg px-4 py-2 text-sm font-semibold transition-all duration-200',
+                    'hover:bg-primary-foreground/15 hover:text-primary-foreground',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground',
                     isActive
-                      ? 'border-b-2 border-accent rounded-b-none'
-                      : 'border-b-2 border-transparent rounded-b-none',
+                      ? 'bg-primary-foreground/15 text-primary-foreground shadow-sm after:absolute after:left-4 after:right-4 after:-bottom-1 after:h-0.5 after:rounded-full after:bg-accent'
+                      : 'text-primary-foreground/90',
                   )
                 }
               >
@@ -73,7 +81,7 @@ export function HeaderPublico() {
           <div className="hidden md:flex items-center gap-2">
             <Link
               to="/login"
-              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md border border-primary-foreground/40 hover:bg-primary-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground"
+              className="inline-flex items-center gap-2 rounded-lg border border-primary-foreground/50 bg-primary-foreground/10 px-4 py-2.5 text-sm font-bold shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-primary-foreground/20 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground"
             >
               <LogIn className="w-4 h-4" aria-hidden="true" />
               Ingresar
@@ -83,7 +91,7 @@ export function HeaderPublico() {
           {/* Botón hamburguesa móvil */}
           <button
             type="button"
-            className="md:hidden inline-flex items-center justify-center w-10 h-10 rounded-md hover:bg-primary-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-primary-foreground/20 bg-primary-foreground/10 hover:bg-primary-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground md:hidden"
             aria-label={menuAbierto ? 'Cerrar menú' : 'Abrir menú'}
             aria-expanded={menuAbierto}
             onClick={() => setMenuAbierto((v) => !v)}
@@ -125,7 +133,7 @@ export function HeaderPublico() {
             <Link
               to="/login"
               onClick={cerrarMenu}
-              className="mt-2 inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-primary-foreground/40 hover:bg-primary-foreground/10"
+              className="mt-3 inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-md border border-primary-foreground/50 bg-primary-foreground/10 hover:bg-primary-foreground/20 transition-colors"
             >
               <LogIn className="w-4 h-4" aria-hidden="true" />
               Ingresar

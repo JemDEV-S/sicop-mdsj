@@ -29,8 +29,6 @@ import {
 import { ErrorState } from '@/components/layout/ErrorState';
 import { EmptyState } from '@/components/layout/EmptyState';
 import { SkeletonCard } from '@/components/layout/LoadingSkeleton';
-import { PublicHero } from '@/components/publico/PublicHero';
-import { SectionBand } from '@/components/publico/SectionBand';
 import { formatearMoneda } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 
@@ -62,7 +60,7 @@ export default function ObrasListado() {
   const { data: tipologias } = useTipologias();
 
   // KPIs derivados sobre la página actual (limitación: no tenemos endpoint de resumen global de obras)
-  const items = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data?.items]);
   const totalItems = data?.total ?? 0;
   const kpisPagina = useMemo(() => {
     const conCoords = items.filter(
@@ -139,69 +137,78 @@ export default function ObrasListado() {
   return (
     <div className="bg-background">
       {/* HERO */}
-      <PublicHero
-        eyebrow={<>Obras · Año {ANIO_VIGENTE}</>}
-        titulo={
-          <>
-            Directorio de <span className="text-primary">obras públicas</span>
-          </>
-        }
-        subtitulo={
-          totalItems > 0
-            ? `${new Intl.NumberFormat('es-PE').format(totalItems)} proyectos de inversión registrados en el distrito. Consulta el avance físico y el presupuesto de cada obra.`
-            : 'Consulta el estado, avance físico y financiero de los proyectos de inversión del distrito.'
-        }
-        compacto
-        destacado={
-          <MiniStatsObras
-            total={totalItems}
-            conCoords={kpisPagina.conCoords}
-            pageSize={pagination.pageSize}
-            funcionesDistintas={kpisPagina.funcionesDistintas}
-            cargando={isLoading}
-          />
-        }
-      />
+      <section className="border-b border-border bg-gradient-to-br from-card via-card to-primary/5">
+        <div className="mx-auto max-w-6xl px-4 py-10 md:px-6 md:py-12">
+          <div className="max-w-3xl">
+            <div className="mb-5 inline-flex items-center rounded-md border border-primary/20 bg-gradient-to-r from-primary/10 to-secondary/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-primary shadow-sm">
+              Obras públicas · {ANIO_VIGENTE}
+            </div>
+
+            <h1 className="max-w-3xl text-3xl font-bold leading-tight tracking-tight text-foreground md:text-4xl">
+              Proyectos de inversión <span className="text-primary">en el distrito</span>
+            </h1>
+
+            <p className="mt-5 max-w-2xl text-base leading-7 text-muted-foreground">
+              {totalItems > 0
+                ? `${new Intl.NumberFormat('es-PE').format(totalItems)} obras registradas. Consulta el estado, avance físico y presupuesto de cada proyecto.`
+                : 'Directorio centralizado del estado y avance de los proyectos de inversión pública.'}
+            </p>
+
+            <MiniStatsObras
+              total={totalItems}
+              conCoords={kpisPagina.conCoords}
+              pageSize={pagination.pageSize}
+              funcionesDistintas={kpisPagina.funcionesDistintas}
+              cargando={isLoading}
+            />
+          </div>
+        </div>
+      </section>
 
       {/* TOOLBAR DE FILTROS */}
-      <div className="sticky top-16 z-20 bg-card/95 backdrop-blur border-b border-border">
-        <div className="mx-auto max-w-6xl px-4 md:px-6 py-4">
-          <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
-            {/* Búsqueda */}
-            <div className="relative flex-1 lg:max-w-md">
-              <Search
-                className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <Input
-                id="obras-buscar"
-                type="search"
-                placeholder="Buscar por nombre o CUI…"
-                className="pl-9 pr-9 h-10 rounded-lg"
-                value={q}
-                onChange={(e) => {
-                  setQ(e.target.value);
-                  setPagination((p) => ({ ...p, pageIndex: 0 }));
-                }}
-                aria-label="Buscar obras"
-              />
-              {q ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQ('');
+      <div className="border-b border-border bg-gradient-to-r from-card via-card to-muted/35">
+        <div className="mx-auto max-w-6xl px-4 py-5 md:px-6">
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              {/* Búsqueda */}
+              <div className="relative w-full max-w-sm">
+                <Search
+                  className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <Input
+                  id="obras-buscar"
+                  type="search"
+                  placeholder="Buscar por nombre o CUI…"
+                  className="pl-9 pr-9 h-10 rounded-md bg-gradient-to-r from-background via-background to-primary/5 shadow-sm hover:shadow-md focus-visible:ring-primary/30"
+                  value={q}
+                  onChange={(e) => {
+                    setQ(e.target.value);
                     setPagination((p) => ({ ...p, pageIndex: 0 }));
                   }}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
-                  aria-label="Limpiar búsqueda"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              ) : null}
+                  aria-label="Buscar obras"
+                />
+                {q ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQ('');
+                      setPagination((p) => ({ ...p, pageIndex: 0 }));
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    aria-label="Limpiar búsqueda"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                ) : null}
+              </div>
+
+              {/* Toggle vista */}
+              <ToggleVista vista={vista} onCambiar={setVista} />
             </div>
 
             {/* Selects */}
-            <div className="flex flex-col sm:flex-row gap-2 flex-1">
+            <div className="flex flex-col gap-2 sm:flex-row">
               <Select
                 value={funcion || OPCION_TODAS}
                 onValueChange={(val) => {
@@ -209,7 +216,7 @@ export default function ObrasListado() {
                   setPagination((p) => ({ ...p, pageIndex: 0 }));
                 }}
               >
-                <SelectTrigger className="h-10 rounded-lg" aria-label="Filtrar por función">
+                <SelectTrigger className="h-10 rounded-md sm:w-[220px]" aria-label="Filtrar por función">
                   <SelectValue placeholder="Todas las funciones" />
                 </SelectTrigger>
                 <SelectContent>
@@ -229,7 +236,7 @@ export default function ObrasListado() {
                   setPagination((p) => ({ ...p, pageIndex: 0 }));
                 }}
               >
-                <SelectTrigger className="h-10 rounded-lg" aria-label="Filtrar por tipología">
+                <SelectTrigger className="h-10 rounded-md sm:w-[220px]" aria-label="Filtrar por tipología">
                   <SelectValue placeholder="Todas las tipologías" />
                 </SelectTrigger>
                 <SelectContent>
@@ -242,15 +249,12 @@ export default function ObrasListado() {
                 </SelectContent>
               </Select>
             </div>
-
-            {/* Toggle vista */}
-            <ToggleVista vista={vista} onCambiar={setVista} />
           </div>
 
           {/* Chips + limpiar */}
           {chipsActivos > 0 ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted-foreground mr-1">Filtros activos:</span>
+            <div className="mt-3 flex flex-wrap items-center gap-2 pt-1">
+              <span className="text-xs font-medium text-muted-foreground">Filtros:</span>
               {q ? (
                 <FiltroChip
                   label={`"${q}"`}
@@ -281,9 +285,9 @@ export default function ObrasListado() {
               <button
                 type="button"
                 onClick={limpiarTodo}
-                className="text-xs text-primary hover:underline ml-auto"
+                className="text-xs text-primary hover:text-primary/80 font-medium transition-colors ml-auto"
               >
-                Limpiar todos
+                Limpiar filtros
               </button>
             </div>
           ) : null}
@@ -291,69 +295,71 @@ export default function ObrasListado() {
       </div>
 
       {/* LISTADO */}
-      <SectionBand tono="background">
-        {/* Header de resultados */}
-        <div className="flex items-baseline justify-between mb-6">
-          <p className="text-sm text-muted-foreground">
-            {isLoading ? (
-              <span className="inline-block w-40 h-4 bg-muted animate-pulse rounded" aria-hidden="true" />
-            ) : totalItems > 0 ? (
-              <>
-                Mostrando{' '}
-                <span className="font-semibold text-foreground tabular-nums">
-                  {(pagination.pageIndex * pagination.pageSize) + 1}
-                  {' – '}
-                  {Math.min((pagination.pageIndex + 1) * pagination.pageSize, totalItems)}
-                </span>{' '}
-                de{' '}
-                <span className="font-semibold text-foreground tabular-nums">
-                  {new Intl.NumberFormat('es-PE').format(totalItems)}
-                </span>{' '}
-                obras
-              </>
-            ) : (
-              'Sin resultados'
-            )}
-          </p>
-        </div>
-
-        {isError ? (
-          <ErrorState
-            titulo="No se pudo cargar el directorio"
-            descripcion="Ocurrió un error al consultar las obras. Intenta de nuevo."
-            onReintentar={() => refetch()}
-          />
-        ) : vista === 'tarjetas' ? (
-          <ObrasEnTarjetas
-            items={items}
-            isLoading={isLoading}
-            pageSize={pagination.pageSize}
-            hayFiltros={chipsActivos > 0}
-            onLimpiar={limpiarTodo}
-          />
-        ) : (
-          <div className="rounded-xl border border-border overflow-hidden bg-card">
-            <DataTable
-              columns={columns}
-              data={items}
-              pageCount={totalPages}
-              pagination={pagination}
-              onPaginationChange={setPagination}
-              isLoading={isLoading}
-            />
+      <section className="bg-gradient-to-br from-muted/55 via-muted/35 to-primary/5">
+        <div className="mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-10">
+          {/* Header de resultados */}
+          <div className="mb-6 flex items-baseline justify-between">
+            <p className="text-sm text-muted-foreground">
+              {isLoading ? (
+                <span className="inline-block w-40 h-4 bg-muted animate-pulse rounded" aria-hidden="true" />
+              ) : totalItems > 0 ? (
+                <>
+                  Mostrando{' '}
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {(pagination.pageIndex * pagination.pageSize) + 1}
+                    {' – '}
+                    {Math.min((pagination.pageIndex + 1) * pagination.pageSize, totalItems)}
+                  </span>{' '}
+                  de{' '}
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {new Intl.NumberFormat('es-PE').format(totalItems)}
+                  </span>{' '}
+                  obras
+                </>
+              ) : (
+                'Sin resultados'
+              )}
+            </p>
           </div>
-        )}
 
-        {vista === 'tarjetas' && data && totalPages > 1 ? (
-          <PaginacionSimple
-            pageIndex={pagination.pageIndex}
-            pageCount={totalPages}
-            onCambiar={(nuevo) =>
-              setPagination((p) => ({ ...p, pageIndex: nuevo }))
-            }
-          />
-        ) : null}
-      </SectionBand>
+          {isError ? (
+            <ErrorState
+              titulo="No se pudo cargar el directorio"
+              descripcion="Ocurrió un error al consultar las obras. Intenta de nuevo."
+              onReintentar={() => refetch()}
+            />
+          ) : vista === 'tarjetas' ? (
+            <ObrasEnTarjetas
+              items={items}
+              isLoading={isLoading}
+              pageSize={pagination.pageSize}
+              hayFiltros={chipsActivos > 0}
+              onLimpiar={limpiarTodo}
+            />
+          ) : (
+            <div className="rounded-xl border border-border overflow-hidden bg-gradient-to-br from-card via-card to-muted/25 shadow-sm">
+              <DataTable
+                columns={columns}
+                data={items}
+                pageCount={totalPages}
+                pagination={pagination}
+                onPaginationChange={setPagination}
+                isLoading={isLoading}
+              />
+            </div>
+          )}
+
+          {vista === 'tarjetas' && data && totalPages > 1 ? (
+            <PaginacionSimple
+              pageIndex={pagination.pageIndex}
+              pageCount={totalPages}
+              onCambiar={(nuevo) =>
+                setPagination((p) => ({ ...p, pageIndex: nuevo }))
+              }
+            />
+          ) : null}
+        </div>
+      </section>
     </div>
   );
 }
@@ -370,30 +376,23 @@ interface MiniStatsObrasProps {
 
 function MiniStatsObras({ total, conCoords, funcionesDistintas, cargando }: MiniStatsObrasProps) {
   return (
-    <div className="rounded-2xl bg-card border border-border p-6 shadow-sm">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary" aria-hidden="true" />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
-          Directorio
-        </span>
-      </div>
-
+    <div className="mt-8 max-w-2xl rounded-lg bg-gradient-to-br from-card via-card to-primary/5 border border-border p-5 shadow-sm">
       <div className="space-y-4">
         <MiniStat
           icono={Building2}
-          label="Proyectos registrados"
+          label="Proyectos"
           valor={cargando ? null : new Intl.NumberFormat('es-PE').format(total)}
         />
-        <div className="h-px bg-border" aria-hidden="true" />
+        <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" aria-hidden="true" />
         <MiniStat
           icono={MapPin}
-          label="Con ubicación en esta página"
+          label="Con ubicación"
           valor={cargando ? null : new Intl.NumberFormat('es-PE').format(conCoords)}
         />
-        <div className="h-px bg-border" aria-hidden="true" />
+        <div className="h-px bg-gradient-to-r from-transparent via-border to-transparent" aria-hidden="true" />
         <MiniStat
           icono={Layers}
-          label="Funciones distintas"
+          label="Funciones"
           valor={cargando ? null : new Intl.NumberFormat('es-PE').format(funcionesDistintas)}
         />
       </div>
@@ -410,14 +409,16 @@ interface MiniStatProps {
 function MiniStat({ icono: Icono, label, valor }: MiniStatProps) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <Icono className="w-4 h-4 text-primary shrink-0" aria-hidden="true" />
-        <span className="text-xs text-muted-foreground truncate">{label}</span>
+      <div className="flex items-center gap-2 min-w-0">
+        <div className="w-6 h-6 rounded-md bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 flex items-center justify-center flex-shrink-0 shadow-sm">
+          <Icono className="w-3.5 h-3.5 text-primary" aria-hidden="true" />
+        </div>
+        <span className="text-xs font-medium text-muted-foreground truncate">{label}</span>
       </div>
       {valor === null ? (
-        <div className="h-6 w-12 bg-muted animate-pulse rounded" aria-hidden="true" />
+        <div className="h-5 w-16 bg-muted animate-pulse rounded-md" aria-hidden="true" />
       ) : (
-        <span className="text-lg font-bold text-foreground tabular-nums leading-none">
+        <span className="text-base font-bold text-foreground tabular-nums leading-none">
           {valor}
         </span>
       )}
@@ -433,7 +434,7 @@ interface ToggleVistaProps {
 function ToggleVista({ vista, onCambiar }: ToggleVistaProps) {
   return (
     <div
-      className="inline-flex bg-muted rounded-lg p-1 border border-border shrink-0 self-start"
+      className="inline-flex bg-gradient-to-r from-muted/80 to-primary/10 rounded-lg p-1 border border-border shrink-0 self-start shadow-sm"
       role="group"
       aria-label="Cambiar vista"
     >
@@ -445,7 +446,7 @@ function ToggleVista({ vista, onCambiar }: ToggleVistaProps) {
           'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           vista === 'tarjetas'
-            ? 'bg-card text-foreground font-medium shadow-xs'
+            ? 'bg-gradient-to-r from-card to-primary/5 text-foreground font-medium shadow-xs'
             : 'text-muted-foreground hover:text-foreground',
         )}
       >
@@ -460,7 +461,7 @@ function ToggleVista({ vista, onCambiar }: ToggleVistaProps) {
           'inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           vista === 'tabla'
-            ? 'bg-card text-foreground font-medium shadow-xs'
+            ? 'bg-gradient-to-r from-card to-primary/5 text-foreground font-medium shadow-xs'
             : 'text-muted-foreground hover:text-foreground',
         )}
       >
@@ -478,15 +479,15 @@ interface FiltroChipProps {
 
 function FiltroChip({ label, onRemove }: FiltroChipProps) {
   return (
-    <span className="inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
+    <span className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-md bg-gradient-to-r from-primary/15 to-secondary/15 text-primary text-xs font-medium border border-primary/20 transition-colors hover:from-primary/20 hover:to-secondary/20 shadow-sm">
       {label}
       <button
         type="button"
         onClick={onRemove}
-        className="inline-flex items-center justify-center h-4 w-4 rounded-full hover:bg-primary/20"
+        className="inline-flex items-center justify-center h-5 w-5 rounded-md hover:bg-primary/20 transition-colors"
         aria-label={`Quitar filtro ${label}`}
       >
-        <X className="w-3 h-3" />
+        <X className="w-3.5 h-3.5" />
       </button>
     </span>
   );
@@ -519,7 +520,7 @@ function ObrasEnTarjetas({
 
   if (items.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card p-10">
+      <div className="rounded-xl border border-border bg-gradient-to-br from-card via-card to-muted/25 p-10 shadow-sm">
         <EmptyState
           icono={Building2}
           titulo="No se encontraron obras"

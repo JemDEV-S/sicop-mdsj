@@ -20,9 +20,9 @@ export function AvancePresupuesto({ obra }: { obra: ObraDetalleResponse }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6">
       {/* Barra + narrativa */}
-      <div className="rounded-2xl bg-card border border-border p-6 md:p-8">
+      <div className="rounded-2xl bg-gradient-to-br from-card via-card to-primary/5 border border-border p-6 shadow-sm md:p-8">
         <div className="flex items-center gap-2 mb-6">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shadow-sm">
             <Wallet className="w-4 h-4" aria-hidden="true" />
           </span>
           <div>
@@ -43,7 +43,7 @@ export function AvancePresupuesto({ obra }: { obra: ObraDetalleResponse }) {
             formatoMonto={(v) => formatearMoneda(v)}
           />
         ) : (
-          <div className="rounded-lg bg-muted/40 border border-border p-6 text-center">
+          <div className="rounded-lg bg-gradient-to-br from-muted/60 to-primary/10 border border-border p-6 text-center">
             <p className="text-sm text-muted-foreground">
               Esta obra aún no tiene presupuesto (PIM) asignado en el ejercicio vigente.
             </p>
@@ -52,7 +52,7 @@ export function AvancePresupuesto({ obra }: { obra: ObraDetalleResponse }) {
       </div>
 
       {/* Detalle numérico */}
-      <div className="rounded-2xl bg-card border border-border p-6 md:p-8">
+      <div className="rounded-2xl bg-gradient-to-br from-card via-card to-secondary/5 border border-border p-6 shadow-sm md:p-8">
         <h3 className="text-sm font-semibold text-foreground mb-4">Detalle en soles</h3>
         <dl className="space-y-3">
           {filas.map((fila, idx) => {

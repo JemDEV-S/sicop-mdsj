@@ -27,14 +27,16 @@ export function SectionBand({
     <section
       id={id}
       className={cn(
-        tono === 'muted' ? 'bg-muted/40' : 'bg-background',
+        tono === 'muted'
+          ? 'bg-gradient-to-br from-muted/80 via-muted/55 to-primary/10'
+          : 'bg-gradient-to-br from-background via-background to-secondary/10',
         className,
       )}
     >
       <div
         className={cn(
           'mx-auto max-w-6xl px-4 md:px-6',
-          denso ? 'py-8 md:py-10' : 'py-14 md:py-20',
+          denso ? 'py-10 md:py-12' : 'py-16 md:py-24',
         )}
       >
         {children}

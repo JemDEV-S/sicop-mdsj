@@ -80,16 +80,24 @@ export function ListaDistribucion({
 
   return (
     <ul
-      className={cn('space-y-4', maxVisible ? 'max-h-[420px] overflow-y-auto pr-1' : '')}
+      className={cn('space-y-3', maxVisible ? 'max-h-[420px] overflow-y-auto pr-1' : '')}
       style={maxVisible ? undefined : undefined}
     >
       {normalizados.map((it) => (
-        <li key={it.codigo}>
-          <div className="flex items-baseline justify-between gap-3 mb-1.5">
-            <p className="text-sm font-medium text-foreground line-clamp-2 min-w-0 flex-1">
-              {it.nombre}
-            </p>
-            <p className="text-sm font-bold text-foreground tabular-nums shrink-0">
+        <li
+          key={it.codigo}
+          className="rounded-lg border border-border/50 bg-gradient-to-br from-background via-background to-muted/30 p-3.5 transition-colors hover:from-primary/5 hover:to-secondary/5"
+        >
+          <div className="mb-2 flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground line-clamp-2">
+                {it.nombre}
+              </p>
+              <p className="mt-1 text-[11px] font-mono font-semibold text-muted-foreground">
+                {it.codigo}
+              </p>
+            </div>
+            <p className="text-sm font-bold text-foreground tabular-nums shrink-0 pt-0.5">
               {formatearMoneda(it.pim, true)}
             </p>
           </div>
@@ -101,7 +109,7 @@ export function ListaDistribucion({
             />
           </div>
 
-          <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+          <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span>
               {it.participacion !== null ? `${it.participacion.toFixed(1)}% del total` : '—'}
             </span>

@@ -145,6 +145,8 @@ function EtiquetasEtapas({ etapas, formatoMonto }: EtiquetasEtapasProps) {
       for (let i = 1; i < nodos.length; i++) {
         const prev = nodos[i - 1];
         const cur = nodos[i];
+        if (!prev || !cur) continue;
+
         const minCentro = prev.centro + prev.ancho / 2 + GAP_MIN_PX + cur.ancho / 2;
         if (cur.centro < minCentro) cur.centro = minCentro;
       }
@@ -159,6 +161,8 @@ function EtiquetasEtapas({ etapas, formatoMonto }: EtiquetasEtapasProps) {
           for (let i = nodos.length - 2; i >= 0; i--) {
             const next = nodos[i + 1];
             const cur = nodos[i];
+            if (!next || !cur) continue;
+
             const maxCentro = next.centro - next.ancho / 2 - GAP_MIN_PX - cur.ancho / 2;
             if (cur.centro > maxCentro) cur.centro = maxCentro;
           }
@@ -174,7 +178,10 @@ function EtiquetasEtapas({ etapas, formatoMonto }: EtiquetasEtapasProps) {
 
       const nuevosOffsets: Record<string, number> = {};
       nodos.forEach((n) => {
-        const centroReal = (etapas.find((e) => e.key === n.key)!.pct / 100) * containerWidth;
+        const etapa = etapas.find((e) => e.key === n.key);
+        if (!etapa) return;
+
+        const centroReal = (etapa.pct / 100) * containerWidth;
         nuevosOffsets[n.key] = n.centro - centroReal;
       });
       setOffsets(nuevosOffsets);

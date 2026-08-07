@@ -35,7 +35,7 @@ export function PublicHero({
   return (
     <section
       className={cn(
-        'relative overflow-hidden bg-card border-b border-border',
+        'relative overflow-hidden bg-gradient-to-br from-card via-background to-primary/10 border-b border-border',
         className,
       )}
     >
@@ -63,7 +63,7 @@ export function PublicHero({
       <div
         className={cn(
           'relative mx-auto max-w-6xl px-4 md:px-6',
-          compacto ? 'py-8 md:py-10' : 'py-12 md:py-20',
+          compacto ? 'py-10 md:py-12' : 'py-14 md:py-24',
         )}
       >
         <div
@@ -75,17 +75,17 @@ export function PublicHero({
           {/* Columna principal */}
           <div className="max-w-2xl">
             {eyebrow ? (
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">
+              <div className="mb-5 inline-flex items-center gap-2 rounded-md border border-primary/20 bg-gradient-to-r from-primary/10 to-secondary/10 px-3.5 py-2 text-xs font-bold uppercase tracking-widest text-primary shadow-sm">
                 {eyebrow}
               </div>
             ) : null}
 
             <h1
               className={cn(
-                'font-bold text-foreground leading-[1.1] tracking-tight',
+                'font-black text-foreground leading-[1.05] tracking-tight text-balance',
                 compacto
                   ? 'text-2xl md:text-3xl'
-                  : 'text-4xl md:text-5xl lg:text-6xl',
+                  : 'text-5xl md:text-6xl lg:text-7xl',
               )}
             >
               {titulo}
@@ -94,7 +94,7 @@ export function PublicHero({
             {subtitulo ? (
               <div
                 className={cn(
-                  'mt-5 text-muted-foreground max-w-xl',
+                  'mt-5 text-muted-foreground max-w-xl text-pretty',
                   compacto ? 'text-sm md:text-base' : 'text-base md:text-lg',
                 )}
               >
@@ -103,7 +103,7 @@ export function PublicHero({
             ) : null}
 
             {acciones ? (
-              <div className="mt-8 flex flex-col sm:flex-row gap-3">{acciones}</div>
+              <div className="mt-10 flex flex-col sm:flex-row gap-4">{acciones}</div>
             ) : null}
           </div>
 

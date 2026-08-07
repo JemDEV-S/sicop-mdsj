@@ -41,7 +41,7 @@ export function GraficoAcumulado({ data, isLoading }: GraficoAcumuladoProps) {
 
   if (isLoading) {
     return (
-      <div className="rounded-2xl border border-border bg-card p-6 md:p-8">
+      <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-primary/5 p-6 shadow-sm md:p-8">
         <div className="h-6 w-64 bg-muted animate-pulse rounded mb-6" />
         <div className="h-[280px] w-full bg-muted animate-pulse rounded-lg" />
       </div>
@@ -50,7 +50,7 @@ export function GraficoAcumulado({ data, isLoading }: GraficoAcumuladoProps) {
 
   if (chartData.length === 0) {
     return (
-      <div className="rounded-2xl border border-border bg-card p-8 text-center">
+      <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-muted/30 p-8 text-center shadow-sm">
         <p className="text-sm text-muted-foreground">
           Aún no hay ejecución registrada para el año seleccionado.
         </p>
@@ -59,19 +59,19 @@ export function GraficoAcumulado({ data, isLoading }: GraficoAcumuladoProps) {
   }
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 md:p-8">
+    <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-primary/5 p-6 shadow-sm md:p-8">
       {/* Etiqueta destacada del último mes */}
       {ultimo ? (
         <div className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
               Total ejecutado hasta {ultimo.mes}
             </p>
-            <p className="mt-1 text-3xl md:text-4xl font-bold text-foreground tabular-nums">
+            <p className="mt-2 text-4xl md:text-5xl font-bold text-foreground leading-tight tabular-nums">
               {formatearMoneda(ultimo.acumulado, true)}
             </p>
           </div>
-          <p className="text-xs text-muted-foreground max-w-sm sm:text-right">
+          <p className="text-xs font-medium text-muted-foreground max-w-sm sm:text-right">
             La línea muestra cuánto dinero se ha pagado en total, mes a mes, desde enero.
           </p>
         </div>

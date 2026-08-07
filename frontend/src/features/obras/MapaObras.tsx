@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Marker, Popup } from 'react-leaflet';
+import { Marker, Popup, Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Link } from 'react-router-dom';
 import { Camera, ChevronLeft, ChevronRight, ArrowRight, Wallet, Navigation } from 'lucide-react';
@@ -16,6 +16,7 @@ interface MapaObrasProps {
   items: ObraMapaItem[];
   isLoading?: boolean;
   height?: string | number;
+  onSeleccionarMarcador?: () => void;
 }
 
 // --- Estilos globales del marcador (inyectados una sola vez por módulo) ---
@@ -34,6 +35,25 @@ const MARKER_STYLES = `
     transform: translateY(-2px) scale(1.08);
     filter: drop-shadow(0 8px 12px rgba(15, 23, 42, 0.35));
     z-index: 1000 !important;
+  }
+  .mapa-marker-obra.is-selected {
+    transform: translateY(-3px) scale(1.12);
+    filter:
+      drop-shadow(0 0 0 rgba(255,255,255,1))
+      drop-shadow(0 10px 16px rgba(15, 23, 42, 0.38));
+  }
+  .mapa-marker-obra.is-selected::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -1px;
+    width: 18px;
+    height: 8px;
+    border-radius: 999px;
+    border: 2px solid white;
+    background: color-mix(in srgb, var(--primary) 70%, transparent);
+    transform: translateX(-50%);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--primary) 18%, transparent);
   }
   .mapa-marker-obra .marker-inner-icon {
     position: absolute;
@@ -83,6 +103,55 @@ const MARKER_STYLES = `
     font-size: 20px;
     padding: 4px 7px;
   }
+  .mapa-marker-obra .marker-spread-dot {
+    position: absolute;
+    left: 50%;
+    bottom: -9px;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: white;
+    border: 2px solid color-mix(in srgb, var(--primary) 72%, transparent);
+    transform: translateX(-50%);
+    box-shadow: 0 1px 4px rgba(15,23,42,.25);
+  }
+  .mapa-marker-obra.is-spread::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -18px;
+    width: 1.5px;
+    height: 14px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 42%, transparent);
+    transform: translateX(-50%);
+  }
+  .leaflet-tooltip.mapa-tooltip-obra {
+    width: 220px;
+    max-width: min(220px, calc(100vw - 48px));
+    white-space: normal;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card);
+    color: var(--foreground);
+    box-shadow: 0 8px 20px rgba(15,23,42,.16), 0 2px 5px rgba(15,23,42,.08);
+    padding: 8px 10px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: left;
+    pointer-events: none;
+  }
+  .leaflet-tooltip.mapa-tooltip-obra .mapa-tooltip-obra__texto {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+  }
+  .leaflet-tooltip-top.mapa-tooltip-obra::before {
+    border-top-color: var(--card);
+  }
 `;
 
 if (typeof document !== 'undefined' && !document.getElementById('mapa-obras-styles')) {
@@ -98,6 +167,20 @@ if (typeof document !== 'undefined' && !document.getElementById('mapa-obras-styl
  * Interpola color del pin entre dos tonos primarios (claro → oscuro).
  * Sin rojos ni amarillos: solo intensidad. Avance nulo = neutro (slate).
  */
+function obtenerNombreTooltip(nombre: string | null | undefined): string {
+  const texto = nombre?.trim();
+  if (!texto) return 'Obra sin nombre registrado';
+
+  const limite = 72;
+  if (texto.length <= limite) return texto;
+
+  const recorte = texto.slice(0, limite).trimEnd();
+  const ultimoEspacio = recorte.lastIndexOf(' ');
+  const base = ultimoEspacio >= 42 ? recorte.slice(0, ultimoEspacio) : recorte;
+
+  return `${base.trimEnd()}...`;
+}
+
 function colorPinPorAvance(avance: number | null): string {
   if (avance == null) return '#94a3b8'; // slate-400 — neutro para "sin dato"
   // Rango: 8FA4D9 (lavanda claro, avance 0) → 1E3A8A (indigo profundo, avance 100)
@@ -158,7 +241,7 @@ function iconoSectorSvg(funcion: string | null | undefined): string {
  * Construye el HTML del marcador tipo pin con anillo de progreso
  * dibujado sobre el contorno mismo del pin.
  */
-function crearIconoPin(obra: ObraMapaItem): L.DivIcon {
+function crearIconoPin(obra: ObraMapaItem, seleccionado = false, separado = false): L.DivIcon {
   const avance =
     obra.avance_fisico != null ? Math.min(100, Math.max(0, Number(obra.avance_fisico))) : null;
   const color = colorPinPorAvance(avance);
@@ -176,7 +259,7 @@ function crearIconoPin(obra: ObraMapaItem): L.DivIcon {
 
   return L.divIcon({
     html: `
-      <div class="mapa-marker-obra" role="button" tabindex="-1">
+      <div class="mapa-marker-obra${seleccionado ? ' is-selected' : ''}${separado ? ' is-spread' : ''}" role="button" tabindex="-1">
         <svg viewBox="0 0 44 54" width="44" height="54" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <defs>
             <linearGradient id="glow-${obra.codigo_unico}" x1="0" x2="0" y1="0" y2="1">
@@ -202,6 +285,7 @@ function crearIconoPin(obra: ObraMapaItem): L.DivIcon {
           </svg>
         </div>
         ${badgePct}
+        ${separado ? '<span class="marker-spread-dot" aria-hidden="true"></span>' : ''}
       </div>
     `,
     className: 'custom-leaflet-icon',
@@ -211,16 +295,174 @@ function crearIconoPin(obra: ObraMapaItem): L.DivIcon {
   });
 }
 
-export default function MapaObras({ items, isLoading = false, height = '100%' }: MapaObrasProps) {
-  const marcadores = useMemo(
-    () => items.map((obra) => ({ obra, icon: crearIconoPin(obra) })),
-    [items],
-  );
+interface MarcadorSeparado {
+  obra: ObraMapaItem;
+  icon: L.DivIcon;
+  position: L.LatLngExpression;
+  posicionReal: L.LatLngExpression;
+  separado: boolean;
+  zIndexOffset: number;
+}
+
+interface ClusterTemporal {
+  indices: number[];
+  centro: L.Point;
+}
+
+const DISTANCIA_COLISION_PX = 56;
+
+function obtenerOffsetMarcador(index: number, total: number): [number, number] {
+  if (total <= 1) return [0, 0];
+
+  const radio =
+    total <= 2 ? 24 :
+      total <= 4 ? 30 :
+        total <= 7 ? 38 :
+          46;
+  const anguloInicial = total === 2 ? Math.PI : -Math.PI / 2;
+  const angulo = anguloInicial + (index * 2 * Math.PI) / total;
+
+  return [
+    Math.round(Math.cos(angulo) * radio),
+    Math.round(Math.sin(angulo) * radio),
+  ];
+}
+
+function calcularMarcadoresSeparados(
+  items: ObraMapaItem[],
+  map: L.Map,
+  codigoSeleccionado: string | null,
+): MarcadorSeparado[] {
+  const puntos = items.map((obra) => {
+    const latLng = L.latLng(obra.latitud!, obra.longitud!);
+    return {
+      obra,
+      latLng,
+      punto: map.latLngToLayerPoint(latLng),
+    };
+  });
+
+  const clusters: ClusterTemporal[] = [];
+
+  puntos.forEach((item, index) => {
+    const cluster = clusters.find((c) => c.centro.distanceTo(item.punto) < DISTANCIA_COLISION_PX);
+
+    if (!cluster) {
+      clusters.push({
+        indices: [index],
+        centro: item.punto,
+      });
+      return;
+    }
+
+    cluster.indices.push(index);
+    const total = cluster.indices.length;
+    cluster.centro = L.point(
+      (cluster.centro.x * (total - 1) + item.punto.x) / total,
+      (cluster.centro.y * (total - 1) + item.punto.y) / total,
+    );
+  });
+
+  const resultado = new Array<MarcadorSeparado>(items.length);
+
+  clusters.forEach((cluster) => {
+    cluster.indices.forEach((itemIndex, indexEnGrupo) => {
+      const item = puntos[itemIndex]!;
+      const separado = cluster.indices.length > 1;
+      const offset: [number, number] = separado
+        ? obtenerOffsetMarcador(indexEnGrupo, cluster.indices.length)
+        : [0, 0];
+      const puntoSeparado = item.punto.add(L.point(offset[0], offset[1]));
+      const position = separado ? map.layerPointToLatLng(puntoSeparado) : item.latLng;
+      const seleccionado = item.obra.codigo_unico === codigoSeleccionado;
+
+      resultado[itemIndex] = {
+        obra: item.obra,
+        icon: crearIconoPin(item.obra, seleccionado, separado),
+        position,
+        posicionReal: item.latLng,
+        separado,
+        zIndexOffset: seleccionado ? 1200 : separado ? 700 + indexEnGrupo : 0,
+      };
+    });
+  });
+
+  return resultado;
+}
+
+type PopupConMapa = L.Popup & { _map?: L.Map };
+
+function ajustarPopupAlAbrir(event: L.LeafletEvent) {
+  const popup = event.target as L.Popup;
+  window.setTimeout(() => {
+    popup.update();
+
+    const map = (popup as PopupConMapa)._map;
+    const popupEl = popup.getElement();
+    const mapEl = map?.getContainer();
+    if (!map || !popupEl || !mapEl) return;
+
+    const popupRect = popupEl.getBoundingClientRect();
+    const mapRect = mapEl.getBoundingClientRect();
+    const latLng = popup.getLatLng();
+    if (!latLng) return;
+
+    const marcador = map.latLngToContainerPoint(latLng);
+    const marcadorRect = {
+      left: mapRect.left + marcador.x - 28,
+      right: mapRect.left + marcador.x + 28,
+      top: mapRect.top + marcador.y - 66,
+      bottom: mapRect.top + marcador.y + 10,
+    };
+    const margen = 18;
+    const margenInferior = 24;
+    const umbralMovimiento = 18;
+    const areaVisible = {
+      left: Math.min(popupRect.left, marcadorRect.left),
+      right: Math.max(popupRect.right, marcadorRect.right),
+      top: Math.min(popupRect.top, marcadorRect.top),
+      bottom: Math.max(popupRect.bottom, marcadorRect.bottom),
+    };
+
+    let dx = 0;
+    let dy = 0;
+
+    if (areaVisible.left < mapRect.left + margen) {
+      dx = areaVisible.left - mapRect.left - margen;
+    } else if (areaVisible.right > mapRect.right - margen) {
+      dx = areaVisible.right - mapRect.right + margen;
+    }
+
+    if (areaVisible.top < mapRect.top + margen) {
+      dy = areaVisible.top - mapRect.top - margen;
+    } else if (areaVisible.bottom > mapRect.bottom - margenInferior) {
+      dy = areaVisible.bottom - mapRect.bottom + margenInferior;
+    }
+
+    const distancia = Math.hypot(dx, dy);
+    if (distancia > umbralMovimiento) {
+      map.stop();
+      map.panBy([dx, dy], {
+        animate: distancia > 90,
+        duration: 0.18,
+        easeLinearity: 0.75,
+      });
+    }
+  }, 80);
+}
+
+export default function MapaObras({
+  items,
+  isLoading = false,
+  height = '100%',
+  onSeleccionarMarcador,
+}: MapaObrasProps) {
+  const [codigoSeleccionado, setCodigoSeleccionado] = useState<string | null>(null);
 
   if (isLoading) {
     return (
       <div
-        className="flex h-full w-full items-center justify-center rounded-2xl border border-border bg-muted/30 text-sm text-muted-foreground"
+        className="flex h-full w-full items-center justify-center rounded-2xl border border-border bg-gradient-to-br from-muted/45 to-primary/10 text-sm text-muted-foreground"
         style={{ height }}
       >
         Cargando mapa…
@@ -229,25 +471,26 @@ export default function MapaObras({ items, isLoading = false, height = '100%' }:
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-border shadow-lg ring-1 ring-black/5">
-      <WrapperMapa height={height} zoom={ZOOM_DEFAULT_MAPA_GENERAL} estilo="voyager">
-        {marcadores.map(({ obra, icon }) => (
-          <Marker key={obra.codigo_unico} position={[obra.latitud!, obra.longitud!]} icon={icon}>
-            <Popup
-              maxWidth={340}
-              minWidth={300}
-              className="mapa-popup-obra"
-              autoPan={false}
-              closeButton
-            >
-              <PopupContenido obra={obra} />
-            </Popup>
-          </Marker>
-        ))}
+    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 shadow-lg ring-1 ring-black/5">
+      <WrapperMapa
+        height={height}
+        zoom={ZOOM_DEFAULT_MAPA_GENERAL}
+        estilo="voyager"
+        scrollWheelZoom
+      >
+        <MarcadoresObras
+          items={items}
+          codigoSeleccionado={codigoSeleccionado}
+          onSeleccionar={(obra) => {
+            setCodigoSeleccionado(obra.codigo_unico);
+            onSeleccionarMarcador?.();
+          }}
+          onCerrar={() => setCodigoSeleccionado(null)}
+        />
       </WrapperMapa>
 
       {/* Leyenda flotante — intensidad de color = avance físico */}
-      <div className="pointer-events-none absolute bottom-4 left-4 z-[500] rounded-xl border border-border bg-card/95 px-3 py-2.5 shadow-md backdrop-blur">
+      <div className="pointer-events-none absolute bottom-4 left-4 z-[500] rounded-xl border border-border bg-gradient-to-br from-card/95 via-card/95 to-primary/10 px-3 py-2.5 shadow-md backdrop-blur">
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Avance físico
         </p>
@@ -267,6 +510,92 @@ export default function MapaObras({ items, isLoading = false, height = '100%' }:
         </p>
       </div>
     </div>
+  );
+}
+
+interface MarcadoresObrasProps {
+  items: ObraMapaItem[];
+  codigoSeleccionado: string | null;
+  onSeleccionar: (obra: ObraMapaItem) => void;
+  onCerrar: () => void;
+}
+
+function MarcadoresObras({
+  items,
+  codigoSeleccionado,
+  onSeleccionar,
+  onCerrar,
+}: MarcadoresObrasProps) {
+  const map = useMap();
+  const [revisionMapa, setRevisionMapa] = useState(0);
+
+  useMapEvents({
+    zoomend: () => setRevisionMapa((v) => v + 1),
+    moveend: () => setRevisionMapa((v) => v + 1),
+  });
+
+  const marcadores = useMemo(
+    () => {
+      void revisionMapa;
+      return calcularMarcadoresSeparados(items, map, codigoSeleccionado);
+    },
+    [items, map, codigoSeleccionado, revisionMapa],
+  );
+
+  return (
+    <>
+      {marcadores
+        .filter((m) => m.separado)
+        .map(({ obra, position, posicionReal }) => (
+          <Polyline
+            key={`linea-${obra.codigo_unico}`}
+            positions={[posicionReal, position]}
+            pathOptions={{
+              color: 'var(--primary)',
+              opacity: 0.28,
+              weight: 1.5,
+              dashArray: '3 5',
+            }}
+            interactive={false}
+          />
+        ))}
+
+      {marcadores.map(({ obra, icon, position, zIndexOffset }) => (
+        <Marker
+          key={obra.codigo_unico}
+          position={position}
+          icon={icon}
+          zIndexOffset={zIndexOffset}
+          eventHandlers={{
+            popupopen: () => onSeleccionar(obra),
+            popupclose: onCerrar,
+          }}
+        >
+          <Tooltip
+            className="mapa-tooltip-obra"
+            direction="top"
+            offset={[0, -56]}
+            opacity={1}
+          >
+            <span className="mapa-tooltip-obra__texto">
+              {obtenerNombreTooltip(obra.nombre_inversion)}
+            </span>
+          </Tooltip>
+          <Popup
+            maxWidth={340}
+            minWidth={300}
+            className="mapa-popup-obra"
+            autoPan={false}
+            eventHandlers={{
+              add: ajustarPopupAlAbrir,
+            }}
+            closeButton
+          >
+            <PopupContenido obra={obra} />
+          </Popup>
+        </Marker>
+      ))}
+    </>
   );
 }
 
@@ -362,7 +691,7 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
         ) : null}
 
         {/* Estado + avance neutral */}
-        <div className="mt-3 rounded-lg border border-border bg-muted/40 p-2.5">
+        <div className="mt-3 rounded-lg border border-border bg-gradient-to-br from-muted/45 to-primary/10 p-2.5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
               Estado de la obra
@@ -392,7 +721,7 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
 
         {/* Costo + ubicación */}
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <div className="rounded-lg border border-border bg-card p-2.5">
+          <div className="rounded-lg border border-border bg-gradient-to-br from-card via-card to-muted/25 p-2.5">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Wallet className="h-3 w-3" aria-hidden="true" />
               <span className="text-[9.5px] font-semibold uppercase tracking-wide">
@@ -404,7 +733,7 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
             </p>
           </div>
 
-          <div className="rounded-lg border border-border bg-card p-2.5">
+          <div className="rounded-lg border border-border bg-gradient-to-br from-card via-card to-muted/25 p-2.5">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Navigation className="h-3 w-3" aria-hidden="true" />
               <span className="text-[9.5px] font-semibold uppercase tracking-wide">

@@ -73,25 +73,25 @@ export default function DirectorioProveedores() {
           </Select>
         }
         destacado={
-          <div className="relative rounded-2xl bg-card border border-border p-8 shadow-sm">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-card via-card to-primary/5 border border-border p-8 shadow-lg hover:shadow-xl transition-all duration-300 hover:-translate-y-0.5">
             <div className="flex items-center gap-2 mb-4">
               <span
                 className="inline-block w-1.5 h-1.5 rounded-full bg-primary"
                 aria-hidden="true"
               />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-primary/80">
                 Padrón vigente
               </span>
             </div>
 
             <div className="flex items-baseline gap-3">
-              <span className="inline-flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-primary shrink-0">
+              <span className="inline-flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shrink-0 shadow-sm">
                 <Users className="w-7 h-7" aria-hidden="true" />
               </span>
               <div>
                 {isLoading ? (
                   <div
-                    className="h-10 w-32 bg-muted animate-pulse rounded-md"
+                    className="h-10 w-32 bg-gradient-to-r from-muted to-muted/50 animate-pulse rounded-md"
                     aria-hidden="true"
                   />
                 ) : (
@@ -99,7 +99,7 @@ export default function DirectorioProveedores() {
                     {total.toLocaleString('es-PE')}
                   </p>
                 )}
-                <p className="mt-2 text-sm text-muted-foreground">
+                <p className="mt-2 text-sm font-medium text-muted-foreground">
                   {total === 1 ? 'proveedor registrado' : 'proveedores registrados'}
                 </p>
               </div>
@@ -135,7 +135,7 @@ export default function DirectorioProveedores() {
             <Input
               type="search"
               placeholder="Buscar por RUC (ej: 20501234567) o razón social..."
-              className="pl-10 h-11 text-base"
+              className="pl-10 h-11 text-base border-border bg-gradient-to-r from-background via-background to-primary/5 focus-visible:ring-2 focus-visible:ring-primary/30 transition-all shadow-sm hover:shadow-md"
               value={q}
               onChange={(e) => {
                 setQ(e.target.value);
@@ -147,7 +147,7 @@ export default function DirectorioProveedores() {
               <button
                 type="button"
                 onClick={limpiarBusqueda}
-                className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center h-6 w-6 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-all duration-200 hover:shadow-sm"
                 aria-label="Limpiar búsqueda"
               >
                 <X className="w-4 h-4" aria-hidden="true" />
@@ -159,7 +159,7 @@ export default function DirectorioProveedores() {
         {debouncedQ ? (
           <div className="mt-4 flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">Resultados para:</span>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 text-primary px-3 py-1 text-xs font-semibold">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-primary/15 to-secondary/15 text-primary px-3 py-1 text-xs font-semibold shadow-sm">
               "{debouncedQ}"
               <button
                 type="button"
@@ -195,13 +195,13 @@ export default function DirectorioProveedores() {
           </div>
         </div>
 
-        <div className="bg-card border border-border rounded-2xl overflow-hidden">
+        <div className="bg-gradient-to-br from-card via-card to-muted/30 border border-border rounded-2xl overflow-hidden shadow-md hover:shadow-lg transition-shadow duration-300">
           {isError ? (
             <div className="p-10 text-center">
-              <p className="text-sm text-destructive mb-3">
+              <p className="text-sm text-destructive mb-3 font-medium">
                 No se pudo cargar el directorio.
               </p>
-              <Button variant="outline" onClick={() => refetch()}>
+              <Button variant="outline" onClick={() => refetch()} className="transition-all duration-200 hover:shadow-md">
                 Reintentar
               </Button>
             </div>
