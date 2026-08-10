@@ -166,3 +166,76 @@ def ejecucion_por_meta(
     ).mappings().all()
 
     return {int(r["sec_func"]): _con_derivados(dict(r)) for r in rows}
+
+
+# ─── Ejecución MEF por celda (SEC_FUNC + clasificador de gasto) ──────────
+#
+# El cruce fino §9.7: la llave `sec_func + generica.subgenerica.subgen_det.
+# especifica.espec_det` baja el grano de meta a específica de gasto. Es la
+# misma regla de granularidad SIAF (PIA/PIM en mes 0; ejecución en meses > 0),
+# solo que agregada por clasificador además de por meta. Cubre genéricas 3
+# (bienes y servicios) y 6 (activos / compras de inversión), que es el universo
+# del pipeline de pedidos; la genérica 1 (planilla) no pasa por pedidos.
+
+
+def ejecucion_por_celda_clasificador(
+    db: Session, *, ano: int, sec_funcs: list[int] | None = None
+) -> dict[tuple[int, str], dict[str, Any]]:
+    """Ejecución MEF por celda `(sec_func, clasificador)` de genéricas 3 y 6.
+
+    La `clasificador` de la llave es la específica de gasto normalizada
+    (`'3.1.10.1.1'`), idéntica al clasificador dominante del pedido-ítem. Es
+    dinero MEF real (devengado/comprometido oficiales), no reparto.
+
+    Args:
+        ano: año fiscal.
+        sec_funcs: si se pasa, restringe a esas metas (alcance por CC). Lista
+            vacía → `{}`. `None` = todas.
+
+    Returns:
+        `dict[(sec_func, clasificador), {pim, certificado, comprometido,
+        devengado, girado, saldo_disponible, porcentaje_devengado}]`.
+    """
+    if sec_funcs is not None and len(sec_funcs) == 0:
+        return {}
+
+    where = ["ano_eje = :ano", "sec_ejec = :sec_ejec", "generica IN ('3', '6')"]
+    params: dict[str, Any] = {"ano": ano, "sec_ejec": settings.SEC_EJEC}
+    if sec_funcs is not None:
+        binds = [f":sf{i}" for i in range(len(sec_funcs))]
+        where.append(f"sec_func IN ({', '.join(binds)})")
+        for i, sf in enumerate(sec_funcs):
+            params[f"sf{i}"] = sf
+
+    rows = db.execute(
+        text(
+            f"""
+            SELECT
+                sec_func,
+                generica || '.' || subgenerica || '.' || subgenerica_det
+                    || '.' || especifica || '.' || especifica_det AS clasificador,
+                -- Nombre de la específica de gasto (el más fino disponible).
+                MAX(COALESCE(especifica_det_nombre, especifica_nombre,
+                             subgenerica_det_nombre)) AS clasificador_nombre,
+                COALESCE(SUM(monto_pim)               FILTER (WHERE mes_eje = 0), 0) AS pim,
+                COALESCE(SUM(monto_certificado)       FILTER (WHERE mes_eje > 0), 0) AS certificado,
+                COALESCE(SUM(monto_comprometido_anual) FILTER (WHERE mes_eje > 0), 0) AS comprometido,
+                COALESCE(SUM(monto_devengado)         FILTER (WHERE mes_eje > 0), 0) AS devengado,
+                COALESCE(SUM(monto_girado)            FILTER (WHERE mes_eje > 0), 0) AS girado,
+                MAX(sincronizado_en)                                                 AS sincronizado_en
+              FROM siaf.v_ejecucion_normalizada
+             WHERE {" AND ".join(where)}
+               AND subgenerica IS NOT NULL AND subgenerica_det IS NOT NULL
+               AND especifica IS NOT NULL AND especifica_det IS NOT NULL
+             GROUP BY sec_func, clasificador
+            """
+        ),
+        params,
+    ).mappings().all()
+
+    out: dict[tuple[int, str], dict[str, Any]] = {}
+    for r in rows:
+        d = _con_derivados(dict(r))
+        d["clasificador_nombre"] = (r["clasificador_nombre"] or "").strip() or None
+        out[(int(r["sec_func"]), r["clasificador"])] = d
+    return out

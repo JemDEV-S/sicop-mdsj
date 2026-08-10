@@ -28,6 +28,7 @@ from app.schemas.pipeline import (
     PedidoCard,
     PedidoDetalleResponse,
     PedidoEnBolsa,
+    ReporteResponse,
     ResolucionCreate,
     ResolucionResponse,
 )
@@ -36,6 +37,7 @@ from app.security.deps import CurrentUser, get_current_user
 from app.services import (
     auditoria_service,
     permisos_service,
+    pipeline_reporte_service,
     pipeline_service,
     rate_limit,
 )
@@ -99,6 +101,31 @@ def kanban(
             for etapa, filas in kb["pedidos_por_etapa"].items()
         },
     })
+
+
+@pipeline_router.get("/reporte", response_model=ReporteResponse)
+def reporte(
+    ano: int | None = None,
+    centro_costo: str | None = Query(
+        None,
+        description="Restringe el reporte a la subrama del CC indicado (dentro del alcance del usuario).",
+    ),
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReporteResponse:
+    """Vista profesional: pivote Meta → Clasificador → Pedido con montos MEF.
+
+    Fuente única de la clasificación (misma que el kanban) + cruce fino por
+    clasificador de gasto (§9.7). Respeta el alcance por CC (RN-04/RN-06): solo
+    los pedidos y las metas visibles del usuario.
+    """
+    centros = permisos_service.restringir_a_subrama(
+        db, user.centros_permitidos, centro_costo
+    )
+    data = pipeline_reporte_service.reporte_profesional(
+        db, ano=ano or settings.ANO_VIGENTE, centros=centros
+    )
+    return ReporteResponse.model_validate(data)
 
 
 @pedidos_router.get("", response_model=list[PedidoCard])

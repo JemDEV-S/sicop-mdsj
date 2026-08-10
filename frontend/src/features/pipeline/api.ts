@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { useContextoInterno } from '@/store/contexto-interno';
 import type { Anotacion, Bolsa, PedidoDetalle, Resolucion } from './types';
+import type { ReporteResponse } from './reporte-types';
 
 // El backend acepta entidad_id como string; usamos "NRO-TIPO" (no barra, que
 // rompe el matcheo del path).
@@ -37,6 +38,58 @@ export function useDetallePedido({
     // El detalle es una foto momentánea del pedido; no refetch al focus.
     refetchOnWindowFocus: false,
   });
+}
+
+// ─── Vista profesional: reporte Meta → Clasificador → Pedido (§9.7) ──────
+
+/**
+ * Reporte del pipeline con el cruce SIGA × SIAF por clasificador de gasto.
+ * Consume año + CC del contexto interno (igual que el kanban). El backend
+ * aplica el alcance por CC (RN-06) y calcula los montos MEF sin doble conteo.
+ */
+export function useReportePipeline() {
+  const ano = useContextoInterno((s) => s.añoActivo);
+  const cc = useContextoInterno((s) => s.ccActivo);
+  const ccCodigo = cc?.codigo ?? null;
+  return useQuery({
+    queryKey: ['interno', 'pipeline', 'reporte', ano, ccCodigo],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { ano };
+      if (ccCodigo) params.centro_costo = ccCodigo;
+      const { data } = await apiClient.get<ReporteResponse>(
+        '/interno/pipeline/reporte',
+        { params },
+      );
+      return data;
+    },
+  });
+}
+
+/**
+ * Descarga el reporte del pipeline en Excel (auditado en el backend, RN-08).
+ * Dispara la descarga en el navegador con el nombre que envía el servidor.
+ */
+export async function descargarReportePipeline(filtros: {
+  ano: number;
+  centro_costo?: string;
+}): Promise<void> {
+  const { data, headers } = await apiClient.post(
+    '/interno/exportar/excel',
+    { reporte: 'pipeline_reporte', filtros },
+    { responseType: 'blob' },
+  );
+  const disposition = String(headers['content-disposition'] ?? '');
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const nombre = match?.[1] ?? `pipeline_reporte_${filtros.ano}.xlsx`;
+
+  const url = URL.createObjectURL(data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function useAnotacionesPedido({ nroPedido, tipoBien }: UseDetalleParams) {

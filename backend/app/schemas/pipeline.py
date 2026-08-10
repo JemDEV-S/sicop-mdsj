@@ -612,3 +612,111 @@ class AnotacionResponse(BaseModel):
     usuario_id: str
     texto: str
     creado_en: datetime
+
+
+# ─── Reporte profesional (pivote Meta → Clasificador → Pedido, §9.7) ─────
+#
+# Vista para economistas. La regla anti-inflado (§7) se refleja en el modelo:
+# el monto SIGA es por pedido (informativo, sumable por fila); el dinero MEF va
+# por celda/meta (real, sumable 1× por meta); el devengado por pedido es
+# ESTIMADO por reparto y se rotula con `atribucion` — no se suma en un total.
+
+
+class SemaforoCtx(BaseModel):
+    color: str
+    esperado: float
+    real: float | None = None
+    rezago: float | None = None
+    mes_corte: int
+
+
+class MefMeta(BaseModel):
+    pim: float
+    comprometido: float
+    devengado: float
+    porcentaje_devengado: float | None = None
+    semaforo: str
+    semaforo_ctx: SemaforoCtx | None = None
+
+
+class MefCelda(BaseModel):
+    pim: float
+    comprometido: float
+    devengado: float
+
+
+class PedidoReporte(BaseModel):
+    """Fila-pedido del reporte: recorrido + monto SIGA + dinero atribuido."""
+    nro_pedido: int
+    tipo_bien: str
+    tipo_pedido: str | None = None
+    centro_costo: str | None = None
+    motivo: str | None = None
+    identificadores: Identificadores | None = None
+    # Mapa etapa → fecha (el rastro histórico para el mini-timeline por fila).
+    fechas: dict[str, date] = {}
+    etapa: str
+    etapa_label: str
+    macrofase: Macrofase
+    dias_en_etapa: int | None = None
+    estancado: bool = False
+    alerta: Alerta | None = None
+    monto_siga: float = 0
+    # Honestidad del puente (§2.2): >1 candidato ⇒ el avance de bolsa es del grupo.
+    n_candidatos_ccmn: int = 0
+    confianza_ccmn: NivelConfianza | None = None
+    tiene_orden: bool = False
+    # Capa de dinero por pedido. `atribucion`: "directo" (celda de 1 pedido),
+    # "estimado" (reparto), o null (sin orden → sin ejecución atribuible).
+    comprometido_pedido: float | None = None
+    devengado_estimado: float | None = None
+    atribucion: Literal["directo", "estimado"] | None = None
+
+
+class CeldaClasificador(BaseModel):
+    clasificador: str                 # "3.1.10.1.1"
+    clasificador_nombre: str | None = None
+    n_pedidos: int
+    atribucion_directa: bool          # celda de 1 pedido → sin reparto
+    monto_siga: float
+    mef: MefCelda | None = None       # dinero MEF real de la celda (null si no cruza)
+    pedidos: list[PedidoReporte] = []
+
+
+class MetaReporte(BaseModel):
+    sec_func: int
+    nombre_meta: str | None = None
+    centros_costo: list[str] = []
+    n_pedidos: int
+    en_contratacion: int
+    en_ejecucion: int
+    monto_siga: float
+    mef: MefMeta
+    n_celdas: int
+    n_celdas_directas: int
+    celdas: list[CeldaClasificador] = []
+
+
+class ReporteTotales(BaseModel):
+    n_metas: int
+    n_pedidos: int
+    total_siga_pedidos: float         # suma por pedido (informativo)
+    total_mef_devengado: float        # suma 1× por meta (real, anti-inflado)
+
+
+class CentroCostoInfo(BaseModel):
+    """Nombre y sigla de un CC, para el filtro (nombre) y la tabla (sigla)."""
+    codigo: str
+    nombre: str | None = None
+    sigla: str
+
+
+class ReporteResponse(BaseModel):
+    ano: int
+    mes_corte: int
+    avance_esperado: float
+    sincronizado_siga: datetime | None = None
+    sincronizado_mef: datetime | None = None
+    centros_costo: list[CentroCostoInfo] = []
+    metas: list[MetaReporte] = []
+    totales: ReporteTotales

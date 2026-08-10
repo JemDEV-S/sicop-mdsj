@@ -259,3 +259,98 @@ def devengado_mef_por_sec_func(
         db, ano=ano, sec_funcs=sec_funcs
     )
     return {sf: float(v["devengado"]) for sf, v in por_meta.items()}
+
+
+# ─── Clasificador de gasto por pedido (cruce fino §9.7) ──────────────────
+#
+# ACTUALIZA la conclusión de §232-239: el clasificador de la ORDEN no cruza,
+# pero el del PEDIDO-ITEM sí, tras normalizarlo. El clasificador SIGA viene en
+# ancho fijo con espacios ('2.3. 1 10. 1  1'); sus 6 enteros son
+# transaccion.generica.subgenerica.subgen_det.especifica.espec_det. Tomando las
+# posiciones 2-6 se obtiene la llave '3.1.10.1.1', IDÉNTICA a la de
+# siaf.v_ejecucion_normalizada. Verificado sobre 2026: 390 celdas cruzan, 0
+# solo-SIGA, 93.6% del devengado de bienes/servicios cubierto (Docs/
+# pipeline-vista-profesional-v2.md §9.7).
+#
+# Un pedido puede tener ítems de varios clasificadores; se toma el DOMINANTE
+# (mayor valor_soles), que es el que define la específica de gasto del pedido
+# para el reporte. El monto por clasificador se conserva para el reparto.
+
+# regexp_split_to_array(trim(clasificador), '[^0-9]+') parte por cualquier
+# tramo no numérico (espacios y puntos), colapsando los anchos variables. Los
+# 6 enteros salen en orden; [2..6] son generica..especifica_det.
+#
+# El pipeline de pedidos abarca genérica 3 (bienes y servicios) y genérica 6
+# (activos no financieros / compras de proyectos de inversión) — ambas cruzan
+# con SIAF por SEC_FUNC + clasificador (verificado 2026: g3 93.6%, g6 110/112
+# celdas). La genérica 1 (planilla) no pasa por pedidos, así que no aparece.
+_GENERICAS_PIPELINE = ("3", "6")
+_SQL_CLASIF_POR_PEDIDO = """
+    WITH parts AS (
+        SELECT
+            pi.tipo_bien, pi.tipo_pedido, pi.nro_pedido,
+            pi.valor_soles,
+            regexp_split_to_array(trim(pi.clasificador), '[^0-9]+') AS p
+        FROM siga.pedido_items pi
+        WHERE pi.ano_eje = :ano AND pi.sec_ejec = :sec_ejec
+          AND pi.clasificador IS NOT NULL AND trim(pi.clasificador) <> ''
+    ),
+    clasif AS (
+        SELECT
+            trim(tipo_bien) AS tipo_bien,
+            trim(tipo_pedido) AS tipo_pedido,
+            nro_pedido,
+            p[2] || '.' || p[3] || '.' || p[4] || '.' || p[5] || '.' || p[6]
+                AS clasificador,
+            COALESCE(valor_soles, 0) AS valor_soles
+        FROM parts
+        WHERE p[2] IN ('3', '6')
+          AND p[3] IS NOT NULL AND p[4] IS NOT NULL
+          AND p[5] IS NOT NULL AND p[6] IS NOT NULL
+    ),
+    por_clasif AS (
+        SELECT tipo_bien, tipo_pedido, nro_pedido, clasificador,
+               SUM(valor_soles) AS monto
+        FROM clasif
+        GROUP BY tipo_bien, tipo_pedido, nro_pedido, clasificador
+    ),
+    -- Clasificador dominante del pedido = el de mayor monto (desempate: menor
+    -- código, determinista).
+    ranked AS (
+        SELECT *,
+               ROW_NUMBER() OVER (
+                   PARTITION BY tipo_bien, tipo_pedido, nro_pedido
+                   ORDER BY monto DESC, clasificador ASC
+               ) AS rn
+        FROM por_clasif
+    )
+    SELECT tipo_bien, tipo_pedido, nro_pedido, clasificador, monto
+    FROM ranked
+    WHERE rn = 1
+"""
+
+
+def clasificador_por_pedido(
+    db: Session, ano: int
+) -> dict[tuple[str, str, int], dict[str, Any]]:
+    """Clasificador de gasto DOMINANTE de cada pedido, normalizado a la llave
+    SIAF ('3.1.10.1.1').
+
+    Returns:
+        `{(tipo_bien, tipo_pedido, nro_pedido): {"clasificador": str,
+        "monto": float}}`. Solo pedidos con al menos un ítem de genérica 3
+        (bienes y servicios). Los pedidos sin clasificador cruzable no aparecen
+        — el consumidor los agrupa bajo "sin clasificador".
+    """
+    rows = db.execute(
+        text(_SQL_CLASIF_POR_PEDIDO),
+        {"ano": ano, "sec_ejec": int(settings.SEC_EJEC)},
+    ).mappings().all()
+    return {
+        (
+            (r["tipo_bien"] or "").strip(),
+            (r["tipo_pedido"] or "").strip(),
+            int(r["nro_pedido"]),
+        ): {"clasificador": r["clasificador"], "monto": float(r["monto"] or 0)}
+        for r in rows
+    }

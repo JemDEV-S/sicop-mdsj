@@ -31,6 +31,20 @@ export function formatearMoneda(valor: number | null, compact = false): string {
 }
 
 /**
+ * Formatea un monto como número con separador de miles, SIN símbolo de moneda
+ * ni abreviaturas (ej. 17,620,464.00). Pensado para tablas densas tipo Excel
+ * donde el economista necesita la cifra exacta y las columnas ya rotulan la unidad.
+ * Devuelve '—' para null.
+ */
+export function formatearNumero(valor: number | null, decimales = 2): string {
+  if (valor === null || valor === undefined || isNaN(valor)) return '—';
+  return new Intl.NumberFormat('es-PE', {
+    minimumFractionDigits: decimales,
+    maximumFractionDigits: decimales,
+  }).format(valor);
+}
+
+/**
  * Calcula un porcentaje de forma segura evitando división por cero o resultados NaN/Infinity.
  * Devuelve el porcentaje redondeado a 2 decimales (ej. 45.23).
  * Si alguna parte de la división es null o total es 0, devuelve null.
