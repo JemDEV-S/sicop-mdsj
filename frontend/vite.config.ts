@@ -24,7 +24,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       // Habilita la PWA también en `vite dev` para poder probar la instalación.
       devOptions: { enabled: true },
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      includeAssets: ['favicon.png', 'favicon-32.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Municipalidad de San Jerónimo — Transparencia',
         short_name: 'MDSJ',
