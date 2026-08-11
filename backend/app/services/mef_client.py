@@ -24,7 +24,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_S = 90.0
+TIMEOUT_S = 180.0
 PAGE_LIMIT = 100
 
 
@@ -61,8 +61,8 @@ class MefClient:
 
     @retry(
         retry=retry_if_exception_type(MefApiTransientError),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=10, min=10, max=90),
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=5, min=5, max=60),
         reraise=True,
     )
     def datastore_search(
