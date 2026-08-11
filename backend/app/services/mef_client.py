@@ -88,12 +88,16 @@ class MefClient:
 
         if resp.status_code >= 500:
             raise MefApiTransientError(
-                f"HTTP {resp.status_code} desde MEF: {resp.text[:200]}"
+                f"HTTP {resp.status_code} desde MEF: {resp.content[:200]!r}"
             )
         if resp.status_code >= 400:
-            raise MefApiError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            raise MefApiError(f"HTTP {resp.status_code}: {resp.content[:200]!r}")
 
-        payload = resp.json()
+        try:
+            payload = resp.json()
+        except Exception:
+            import json
+            payload = json.loads(resp.content.decode("latin-1", errors="replace"))
         
         # La API MEF a veces devuelve "sucess" en vez de "success"
         is_success = payload.get("success") or payload.get("sucess")
