@@ -43,27 +43,21 @@ export const router = createBrowserRouter([
         }
       },
       {
-        path: 'proveedores',
-        lazy: async () => {
-          const { default: DirectorioProveedores } = await import('../pages/publico/DirectorioProveedores');
-          return { Component: DirectorioProveedores };
-        }
-      },
-      {
         path: 'mapa',
         lazy: async () => {
           const { default: Mapa } = await import('../pages/publico/Mapa');
           return { Component: Mapa };
         }
-      },
-      {
-        path: 'login',
-        lazy: async () => {
-          const { default: Login } = await import('../pages/auth/Login');
-          return { Component: Login };
-        }
       }
     ]
+  },
+  {
+    // Login fuera del PublicLayout: pantalla completa sin header/footer público.
+    path: '/login',
+    lazy: async () => {
+      const { default: Login } = await import('../pages/auth/Login');
+      return { Component: Login };
+    }
   },
   {
     path: '/interno',

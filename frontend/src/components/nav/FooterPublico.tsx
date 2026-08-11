@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { GrecaAndina } from '@/components/decor/GrecaAndina';
-import { Building2, BarChart3, Users, MapPin, ExternalLink } from 'lucide-react';
+import { Building2, BarChart3, MapPin, ExternalLink, Cpu } from 'lucide-react';
+import logoMdsj from '@/assets/logo.png';
 
 /**
  * Footer institucional del portal público.
@@ -23,12 +24,11 @@ export function FooterPublico() {
             {/* Branding */}
             <div className="md:col-span-5">
               <div className="flex items-center gap-3">
-                <span
-                  aria-hidden="true"
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-md bg-primary-foreground text-primary text-sm font-bold shrink-0"
-                >
-                  MDSJ
-                </span>
+                <img
+                  src={logoMdsj}
+                  alt="Escudo de la Municipalidad Distrital de San Jerónimo"
+                  className="h-12 w-12 shrink-0 object-contain"
+                />
                 <div>
                   <p className="text-base font-semibold leading-tight">
                     Municipalidad Distrital de San Jerónimo
@@ -40,12 +40,12 @@ export function FooterPublico() {
               </div>
 
               <p className="mt-5 text-sm text-primary-foreground/80 leading-relaxed max-w-sm">
-                Portal de Transparencia. Consulta obras públicas, ejecución del presupuesto y
-                proveedores de la gestión municipal en tiempo real.
+                Portal de Transparencia. Consulta las obras públicas y la ejecución del
+                presupuesto de la gestión municipal en tiempo real.
               </p>
 
               <a
-                href="https://www.munisanjeronimo.gob.pe/"
+                href="https://www.gob.pe/munisanjeronimo-cusco"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mt-5 inline-flex items-center gap-2 text-sm font-medium text-primary-foreground border-b border-primary-foreground/30 hover:border-primary-foreground pb-0.5 transition-colors focus-visible:outline-none focus-visible:border-primary-foreground"
@@ -63,7 +63,6 @@ export function FooterPublico() {
               <ul className="space-y-3 text-sm">
                 <FooterLink to="/obras" icono={Building2} label="Directorio de obras" />
                 <FooterLink to="/ejecucion" icono={BarChart3} label="Ejecución presupuestal" />
-                <FooterLink to="/proveedores" icono={Users} label="Padrón de proveedores" />
                 <FooterLink to="/mapa" icono={MapPin} label="Mapa del distrito" />
               </ul>
             </div>
@@ -85,12 +84,18 @@ export function FooterPublico() {
           </div>
 
           {/* Copyright */}
-          <div className="mt-12 pt-6 border-t border-primary-foreground/15 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <p className="text-xs text-primary-foreground/70">
-              © {anio} Municipalidad Distrital de San Jerónimo. Todos los derechos reservados.
-            </p>
-            <p className="text-xs text-primary-foreground/70">
-              Cumple con la Ley de Transparencia y Acceso a la Información Pública.
+          <div className="mt-12 pt-6 border-t border-primary-foreground/15 flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <p className="text-xs text-primary-foreground/70">
+                © {anio} Municipalidad Distrital de San Jerónimo. Todos los derechos reservados.
+              </p>
+              <p className="text-xs text-primary-foreground/70">
+                Cumple con la Ley de Transparencia y Acceso a la Información Pública.
+              </p>
+            </div>
+            <p className="text-xs text-primary-foreground/60 inline-flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 text-primary-foreground/50" aria-hidden="true" />
+              Desarrollado por la Oficina de Tecnologías de la Información — MDSJ
             </p>
           </div>
         </div>

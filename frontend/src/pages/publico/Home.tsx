@@ -12,7 +12,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { useEjecucionResumen } from '@/features/ejecucion/hooks';
 import { useObras, useObrasMapa } from '@/features/obras/hooks';
-import { useProveedoresPublico } from '@/features/proveedores/hooks';
 import { PublicHero } from '@/components/publico/PublicHero';
 import { SectionBand } from '@/components/publico/SectionBand';
 import { SectionHeader } from '@/components/publico/SectionHeader';
@@ -51,11 +50,6 @@ function formatoPorcentaje(valor: string | number | null | undefined): string {
 export default function Home() {
   const { data: resumen, isLoading: cargandoResumen } = useEjecucionResumen({ ano: ANIO_VIGENTE });
   const { data: obras, isLoading: cargandoObras } = useObras({ ano: ANIO_VIGENTE, page: 1, size: 1 });
-  const { data: proveedores, isLoading: cargandoProveedores } = useProveedoresPublico({
-    ano: ANIO_VIGENTE,
-    page: 1,
-    size: 1,
-  });
   const { data: mapa, isLoading: cargandoMapa } = useObrasMapa({ ano: ANIO_VIGENTE });
 
   const pim = parseMonto(resumen?.pim);
@@ -80,7 +74,7 @@ export default function Home() {
             <span className="text-primary">San Jerónimo</span>
           </>
         }
-        subtitulo="Consulta obras públicas, ejecución del presupuesto distrital y proveedores. Los datos provienen directamente de SIAF, SIGA e Invierte.pe."
+        subtitulo="Consulta las obras públicas y la ejecución del presupuesto distrital. Los datos provienen directamente de SIAF, SIGA e Invierte.pe."
         acciones={
           <>
             <Button asChild size="lg">
@@ -227,18 +221,6 @@ export default function Home() {
             kpiLabel="proyectos"
             cargando={cargandoObras}
             cta="Ver directorio"
-          />
-
-          <FeatureCard
-            to="/proveedores"
-            icono={Users}
-            acento="accent"
-            titulo="Proveedores"
-            descripcion="Padrón de empresas y personas que brindan bienes y servicios a la municipalidad."
-            kpi={proveedores?.total !== undefined ? formatoEntero(proveedores.total) : null}
-            kpiLabel="proveedores con órdenes"
-            cargando={cargandoProveedores}
-            cta="Ver padrón"
           />
 
           <FeatureCard

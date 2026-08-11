@@ -3,6 +3,8 @@ import { NavLink, Link, useLocation } from 'react-router-dom';
 import { Menu, X, LogIn } from 'lucide-react';
 import { navPublica } from '@/app/nav-config';
 import { cn } from '@/lib/utils';
+import { BotonInstalarApp } from '@/components/pwa/BotonInstalarApp';
+import logoMdsj from '@/assets/logo.png';
 
 /**
  * Header institucional del portal público.
@@ -28,12 +30,11 @@ export function HeaderPublico() {
             className="flex items-center gap-3 min-w-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground rounded-md"
             onClick={cerrarMenu}
           >
-            <span
-              aria-hidden="true"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary-foreground text-primary text-sm font-bold shrink-0"
-            >
-              MDSJ
-            </span>
+            <img
+              src={logoMdsj}
+              alt="Escudo de la Municipalidad Distrital de San Jerónimo"
+              className="h-10 w-10 shrink-0 object-contain"
+            />
             <span className="flex flex-col leading-tight min-w-0">
               <span className="text-sm font-semibold truncate">
                 Municipalidad de San Jerónimo
@@ -71,6 +72,7 @@ export function HeaderPublico() {
 
           {/* Acciones desktop */}
           <div className="hidden md:flex items-center gap-2">
+            <BotonInstalarApp />
             <Link
               to="/login"
               className="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium rounded-md border border-primary-foreground/40 hover:bg-primary-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground"
@@ -122,6 +124,7 @@ export function HeaderPublico() {
                 </Link>
               );
             })}
+            <BotonInstalarApp className="mt-2 w-full justify-center" onInstalado={cerrarMenu} />
             <Link
               to="/login"
               onClick={cerrarMenu}

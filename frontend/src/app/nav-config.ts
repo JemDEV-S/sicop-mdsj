@@ -35,7 +35,6 @@ export interface NavSection {
 export const navPublica: NavItem[] = [
   { label: 'Obras', to: '/obras', icono: Building2 },
   { label: 'Ejecución', to: '/ejecucion', icono: BarChart3 },
-  { label: 'Proveedores', to: '/proveedores', icono: Users },
   { label: 'Mapa', to: '/mapa', icono: MapPin },
 ];
 

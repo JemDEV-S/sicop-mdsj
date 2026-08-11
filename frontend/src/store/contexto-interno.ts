@@ -10,8 +10,15 @@ export type AñoActivo = (typeof AÑOS_COBERTURA)[number];
 interface ContextoInternoState {
   añoActivo: AñoActivo;
   ccActivo: CentroCostoBreve | null;
+  sidebarColapsado: boolean;
+  /** Estado del drawer de navegación en móvil. Efímero — no se persiste. */
+  drawerAbierto: boolean;
   setAño: (año: AñoActivo) => void;
   setCc: (cc: CentroCostoBreve | null) => void;
+  toggleSidebar: () => void;
+  setSidebarColapsado: (colapsado: boolean) => void;
+  abrirDrawer: () => void;
+  cerrarDrawer: () => void;
   hidratarDesdePerfil: (centros: CentroCostoBreve[]) => void;
   reset: () => void;
 }
@@ -24,8 +31,14 @@ export const useContextoInterno = create<ContextoInternoState>()(
     (set, get) => ({
       añoActivo: AÑO_DEFAULT,
       ccActivo: null,
+      sidebarColapsado: false,
+      drawerAbierto: false,
       setAño: (año) => set({ añoActivo: año }),
       setCc: (cc) => set({ ccActivo: cc }),
+      toggleSidebar: () => set((s) => ({ sidebarColapsado: !s.sidebarColapsado })),
+      setSidebarColapsado: (colapsado) => set({ sidebarColapsado: colapsado }),
+      abrirDrawer: () => set({ drawerAbierto: true }),
+      cerrarDrawer: () => set({ drawerAbierto: false }),
       hidratarDesdePerfil: (centros) => {
         const actual = get().ccActivo;
         const sigueDisponible =
@@ -38,6 +51,8 @@ export const useContextoInterno = create<ContextoInternoState>()(
     {
       name: 'presupuesto:contexto-interno',
       storage: createJSONStorage(() => localStorage),
+      // El drawer es estado efímero de la vista: nunca debe rehidratarse abierto.
+      partialize: ({ drawerAbierto: _drawer, ...resto }) => resto,
     },
   ),
 );

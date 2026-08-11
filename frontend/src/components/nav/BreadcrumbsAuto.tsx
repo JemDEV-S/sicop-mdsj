@@ -31,13 +31,24 @@ export function BreadcrumbsAuto() {
   const items = matches
     .filter((m) => m.pathname.startsWith('/interno') || m.pathname.startsWith('/admin'))
     .map((m) => {
+      // Normalizamos la barra final: los layouts anidados sin `path` heredan el
+      // mismo pathname que su padre, a veces con "/" al final. Sin normalizar,
+      // "/interno" y "/interno/" cuentan como rutas distintas y el crumb se duplica.
+      const pathname = m.pathname.replace(/\/+$/, '') || '/';
       const explicito = m.handle?.breadcrumb;
-      if (explicito) return { pathname: m.pathname, label: explicito };
-      const segs = m.pathname.split('/').filter(Boolean);
+      if (explicito) return { pathname, label: explicito };
+      const segs = pathname.split('/').filter(Boolean);
       const ultimo = segs[segs.length - 1] ?? '';
-      return { pathname: m.pathname, label: etiquetarSegmento(ultimo) };
+      return { pathname, label: etiquetarSegmento(ultimo) };
     })
-    .filter((it, i, arr) => arr.findIndex((x) => x.pathname === it.pathname) === i);
+    // Colapsamos crumbs consecutivos con el mismo destino o la misma etiqueta:
+    // las rutas de layout (RequireAuth, InternoLayout) resuelven al mismo
+    // segmento que el índice y producirían "Panel > Panel".
+    .filter((it, i, arr) => {
+      const prev = arr[i - 1];
+      if (!prev) return true;
+      return prev.pathname !== it.pathname && prev.label !== it.label;
+    });
 
   if (items.length === 0) {
     return <span className="text-sm text-muted-foreground">Panel Interno</span>;

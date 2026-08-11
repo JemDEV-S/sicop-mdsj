@@ -20,7 +20,7 @@ interface PublicHeroProps {
 /**
  * Hero canónico del portal público. Estructura asimétrica con muro inca
  * como enmarque decorativo en el borde derecho. Se usa en Home, ObrasListado,
- * EjecucionDashboard, DirectorioProveedores, Mapa y Obra.
+ * EjecucionDashboard, Mapa y Obra.
  */
 export function PublicHero({
   eyebrow,
