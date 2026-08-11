@@ -62,17 +62,17 @@ services:
   # ─── Nginx (reverse proxy + estáticos frontend) ───────────────
   nginx:
     build:
-      context: ./nginx
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: nginx/Dockerfile
     container_name: sicop_nginx
     depends_on:
       - backend
     ports:
-      - "80:80"
-      - "443:443"
+      - "8090:80"
+      # - "443:443" # Reservado para SSL futuro si se requiere certbot/SSL local (desactivado para despliegue local / Cloudflare Tunnel)
     volumes:
       - uploads:/var/data/uploads:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
+      # - ./nginx/certs:/etc/nginx/certs:ro # Reservado para certificados SSL futuros
     networks:
       - sicop_internal
     restart: unless-stopped

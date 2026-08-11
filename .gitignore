@@ -43,6 +43,8 @@ secrets/
 postgres_data/
 uploads/
 backups/
+scripts/siga-backup/
+*.bak
 logs/
 var/
 _data/
