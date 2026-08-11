@@ -35,6 +35,7 @@ RUN pip install --upgrade pip \
 
 # ─── Código de la app ────────────────────────────────────────────────────
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
 
