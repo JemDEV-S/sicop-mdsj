@@ -6,6 +6,7 @@ WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
+RUN rm -f .env.local .env*.local .env.development
 RUN npm run build
 
 FROM nginx:alpine

@@ -1,0 +1,20 @@
+# .dockerignore
+.git
+.gitignore
+node_modules
+**/node_modules
+dist
+**/dist
+.env.local
+.env.*.local
+*.local
+frontend/.env.local
+frontend/.env.*.local
+frontend/.env.development
+**/.env.local
+**/.env.*.local
+scripts/siga-backup/
+postgres_data/
+uploads/
+backups/
+logs/

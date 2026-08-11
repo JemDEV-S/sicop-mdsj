@@ -22,7 +22,7 @@ export async function fetchDocumentosObra(
  * `/media/uploads/{ruta}` va SIN prefix `/api/v1` (registro directo en el backend).
  */
 export function urlDescargaMedia(rutaRelativa: string): string {
-  const base = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
+  const base = import.meta.env.VITE_API_URL ?? '';
   const rutaLimpia = rutaRelativa.replace(/^\/+/, '');
   return `${base}/media/uploads/${rutaLimpia}`;
 }
