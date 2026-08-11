@@ -103,17 +103,17 @@ export default function EjecucionDashboard() {
           </>
         }
         destacado={
-          <div className="relative rounded-2xl bg-card border border-border p-8 shadow-sm">
-            <div className="flex items-center gap-2 mb-2">
+          <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-card via-card to-primary/5 border border-border/50 p-8 shadow-md hover:shadow-lg transition-shadow">
+            <div className="flex items-center gap-2 mb-4">
               <span
                 className="inline-block w-1.5 h-1.5 rounded-full bg-primary"
                 aria-hidden="true"
               />
-              <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
                 Ejecución del año
               </span>
             </div>
-            <div className="flex items-center justify-center py-4">
+            <div className="flex items-center justify-center py-6">
               {cargandoResumen ? (
                 <div
                   className="w-[200px] h-[200px] rounded-full bg-muted animate-pulse"
@@ -130,20 +130,20 @@ export default function EjecucionDashboard() {
                 />
               )}
             </div>
-            <div className="mt-4 pt-4 border-t border-border grid grid-cols-2 gap-4 text-center">
+            <div className="mt-6 pt-6 border-t border-border/50 grid grid-cols-2 gap-5 text-center">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Devengado
                 </p>
-                <p className="mt-1 text-base font-bold text-foreground tabular-nums">
+                <p className="mt-2 text-lg font-bold text-foreground tabular-nums">
                   {cargandoResumen ? '—' : formatoMillones(devengado)}
                 </p>
               </div>
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   De un PIM de
                 </p>
-                <p className="mt-1 text-base font-bold text-foreground tabular-nums">
+                <p className="mt-2 text-lg font-bold text-foreground tabular-nums">
                   {cargandoResumen ? '—' : formatoMillones(pim)}
                 </p>
               </div>
@@ -154,7 +154,7 @@ export default function EjecucionDashboard() {
 
       {/* KPIs */}
       <SectionBand tono="muted" denso>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-8 md:gap-10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 md:gap-12">
           <StatBig
             icono={Wallet}
             acento="primary"
@@ -202,7 +202,7 @@ export default function EjecucionDashboard() {
             titulo="Las 4 etapas de la ejecución"
             descripcion="Cada peso del presupuesto atraviesa cuatro etapas antes de ser pagado. Aquí puedes ver cuánto ha avanzado cada una."
           />
-          <div className="rounded-2xl border border-border bg-card p-6 md:p-10">
+          <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-secondary/5 p-6 shadow-sm md:p-10">
             <BarraEjecucion
               pim={pim}
               certificado={certificado}
@@ -212,7 +212,7 @@ export default function EjecucionDashboard() {
               formatoMonto={(v) => formatearMoneda(v, true)}
             />
           </div>
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-5 text-sm">
             <NotaEtapa titulo="Certificado" descripcion="El dinero está reservado para un fin específico." />
             <NotaEtapa titulo="Comprometido" descripcion="Se firmó un contrato u orden de compra." />
             <NotaEtapa titulo="Devengado" descripcion="La entidad reconoce la obligación de pago." />
@@ -249,14 +249,14 @@ export default function EjecucionDashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Rubros */}
-          <div className="rounded-2xl border border-border bg-card p-6 md:p-8">
-            <div className="flex items-center gap-2.5 mb-6">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Coins className="w-4 h-4" aria-hidden="true" />
+          <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-primary/5 p-6 shadow-sm transition-shadow hover:shadow-md md:p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shadow-sm">
+                <Coins className="w-5 h-5" aria-hidden="true" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-foreground">¿De dónde viene el dinero?</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-base font-bold text-foreground">¿De dónde viene el dinero?</p>
+                <p className="mt-1 text-xs text-muted-foreground">
                   Rubros de financiamiento — origen específico del presupuesto
                 </p>
               </div>
@@ -276,14 +276,14 @@ export default function EjecucionDashboard() {
           </div>
 
           {/* Genéricas */}
-          <div className="rounded-2xl border border-border bg-card p-6 md:p-8">
-            <div className="flex items-center gap-2.5 mb-6">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-secondary/10 text-secondary">
-                <Package className="w-4 h-4" aria-hidden="true" />
+          <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-secondary/5 p-6 shadow-sm transition-shadow hover:shadow-md md:p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-secondary/20 via-secondary/10 to-primary/15 text-secondary shadow-sm">
+                <Package className="w-5 h-5" aria-hidden="true" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-foreground">¿En qué tipo de gasto?</p>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-base font-bold text-foreground">¿En qué tipo de gasto?</p>
+                <p className="mt-1 text-xs text-muted-foreground">
                   Genérica — categoría económica de uso del dinero
                 </p>
               </div>
@@ -319,9 +319,9 @@ export default function EjecucionDashboard() {
 
 function NotaEtapa({ titulo, descripcion }: { titulo: string; descripcion: string }) {
   return (
-    <div className="rounded-lg bg-muted/30 border border-border p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-foreground">{titulo}</p>
-      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{descripcion}</p>
+    <div className="rounded-lg bg-gradient-to-br from-card via-muted/20 to-primary/5 border border-border/50 p-5 shadow-sm transition-all hover:border-border/70 hover:shadow-md">
+      <p className="text-xs font-bold uppercase tracking-wider text-foreground">{titulo}</p>
+      <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{descripcion}</p>
     </div>
   );
 }

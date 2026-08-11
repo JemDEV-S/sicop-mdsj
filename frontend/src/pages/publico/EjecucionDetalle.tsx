@@ -312,7 +312,7 @@ export default function EjecucionDetalle() {
             placeholder="Buscar por nombre de meta, producto o sector..."
             value={filtros.busqueda}
             onChange={(e) => setFiltros((prev) => ({ ...prev, busqueda: e.target.value }))}
-            className="pl-10"
+            className="pl-10 bg-gradient-to-r from-background via-background to-primary/5 shadow-sm hover:shadow-md focus-visible:ring-primary/30"
             aria-label="Buscar metas"
           />
         </div>
@@ -343,7 +343,7 @@ export default function EjecucionDetalle() {
           </div>
         </div>
 
-        <div className="bg-card border border-border rounded-2xl overflow-hidden">
+        <div className="bg-gradient-to-br from-card via-card to-muted/25 border border-border rounded-2xl overflow-hidden shadow-md hover:shadow-lg transition-shadow duration-300">
           {isError ? (
             <div className="p-10 text-center text-sm text-destructive">
               No se pudieron cargar los datos. Intenta recargar la página.

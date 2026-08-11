@@ -26,9 +26,21 @@ const acentoBorde: Record<NonNullable<FeatureCardProps['acento']>, string> = {
 };
 
 const acentoIcono: Record<NonNullable<FeatureCardProps['acento']>, string> = {
-  primary: 'bg-primary/10 text-primary group-hover:bg-primary group-hover:text-primary-foreground',
-  secondary: 'bg-secondary/10 text-secondary group-hover:bg-secondary group-hover:text-secondary-foreground',
-  accent: 'bg-accent/20 text-accent-foreground group-hover:bg-accent',
+  primary: 'bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary group-hover:from-primary group-hover:via-primary group-hover:to-secondary group-hover:text-primary-foreground',
+  secondary: 'bg-gradient-to-br from-secondary/20 via-secondary/10 to-primary/15 text-secondary group-hover:from-secondary group-hover:via-secondary group-hover:to-primary group-hover:text-secondary-foreground',
+  accent: 'bg-gradient-to-br from-accent/35 via-accent/20 to-primary/15 text-accent-foreground group-hover:from-accent group-hover:via-accent group-hover:to-primary/20',
+};
+
+const acentoFondo: Record<NonNullable<FeatureCardProps['acento']>, string> = {
+  primary: 'bg-gradient-to-br from-card via-card to-primary/10',
+  secondary: 'bg-gradient-to-br from-card via-card to-secondary/10',
+  accent: 'bg-gradient-to-br from-card via-card to-accent/25',
+};
+
+const acentoKpi: Record<NonNullable<FeatureCardProps['acento']>, string> = {
+  primary: 'bg-gradient-to-r from-primary/10 to-secondary/10 border-primary/20',
+  secondary: 'bg-gradient-to-r from-secondary/10 to-primary/10 border-secondary/20',
+  accent: 'bg-gradient-to-r from-accent/25 to-primary/10 border-accent/40',
 };
 
 /**
@@ -49,32 +61,36 @@ export function FeatureCard({
   acento = 'primary',
   className,
 }: FeatureCardProps) {
+  const mostrarKpi = kpi !== undefined && (cargando || Boolean(kpi));
+
   return (
     <Link
       to={to}
       className={cn(
-        'group relative flex flex-col overflow-hidden rounded-xl bg-card border border-border border-t-4 border-t-transparent',
-        'transition-all duration-200',
-        'hover:-translate-y-0.5 hover:shadow-sm hover:border-border/80',
+        'group relative flex flex-col overflow-hidden rounded-lg border border-border border-t-4 border-t-transparent',
+        'transition-all duration-300 ease-out',
+        'hover:-translate-y-1 hover:shadow-lg hover:border-border/60',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         acentoBorde[acento],
+        acentoFondo[acento],
         destacado ? 'md:col-span-2 md:flex-row md:items-stretch' : '',
         className,
       )}
     >
       <div
         className={cn(
-          'flex flex-col p-6 md:p-7 flex-1 min-w-0',
-          destacado ? 'md:p-8' : '',
+          'flex flex-col p-7 md:p-8 flex-1 min-w-0',
+          destacado ? 'md:p-10' : '',
         )}
       >
         <div
           className={cn(
-            'inline-flex h-12 w-12 items-center justify-center rounded-lg transition-colors',
+            'inline-flex h-14 w-14 items-center justify-center rounded-lg transition-all duration-200',
             acentoIcono[acento],
+            'group-hover:scale-110',
           )}
         >
-          <Icono className="w-6 h-6" aria-hidden="true" />
+          <Icono className="w-7 h-7" aria-hidden="true" />
         </div>
 
         <h3
@@ -95,41 +111,38 @@ export function FeatureCard({
           {descripcion}
         </p>
 
+        {mostrarKpi ? (
+          <div
+            className={cn(
+              'mt-6 inline-flex w-fit max-w-full items-center gap-3 rounded-lg border px-3.5 py-2.5',
+              acentoKpi[acento],
+            )}
+          >
+            {cargando ? (
+              <div className="space-y-1.5" aria-hidden="true">
+                <div className="h-5 w-20 bg-muted animate-pulse rounded-md" />
+                <div className="h-3 w-28 bg-muted animate-pulse rounded-md" />
+              </div>
+            ) : (
+              <>
+                <span className="text-2xl font-bold leading-none text-foreground tabular-nums">
+                  {kpi}
+                </span>
+                {kpiLabel ? (
+                  <span className="max-w-[150px] text-[11px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">
+                    {kpiLabel}
+                  </span>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+
         <span className="mt-6 inline-flex items-center gap-1.5 text-sm font-semibold text-primary group-hover:gap-2.5 transition-all">
           {cta}
           <ArrowRight className="w-4 h-4" aria-hidden="true" />
         </span>
       </div>
-
-      {/* Panel de KPI */}
-      {kpi !== undefined ? (
-        <div
-          className={cn(
-            'border-t border-border bg-muted/30 p-6 md:p-7',
-            destacado ? 'md:border-t-0 md:border-l md:w-64 md:flex md:flex-col md:justify-center' : '',
-          )}
-        >
-          {cargando ? (
-            <div className="space-y-2" aria-hidden="true">
-              <div className="h-8 w-28 bg-muted animate-pulse rounded-md" />
-              <div className="h-3 w-32 bg-muted animate-pulse rounded-md" />
-            </div>
-          ) : kpi ? (
-            <>
-              <p className="text-3xl font-bold text-foreground leading-none tabular-nums">
-                {kpi}
-              </p>
-              {kpiLabel ? (
-                <p className="mt-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  {kpiLabel}
-                </p>
-              ) : null}
-            </>
-          ) : (
-            <p className="text-xs text-muted-foreground">Consulta el detalle completo</p>
-          )}
-        </div>
-      ) : null}
     </Link>
   );
 }

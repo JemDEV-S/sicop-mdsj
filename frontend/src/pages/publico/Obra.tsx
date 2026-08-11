@@ -300,7 +300,7 @@ function DestacadoAvance({ obra, tieneAvanceFisico, tienePresupuesto }: Destacad
   // Si no hay avance físico ni presupuesto: tarjeta de estado del ciclo
   if (!tieneAvanceFisico && !tienePresupuesto) {
     return (
-      <div className="relative rounded-2xl bg-card border border-border p-6 shadow-sm">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-card via-card to-accent/10 border border-border p-6 shadow-sm">
         <div className="flex items-center gap-2 mb-3">
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent" aria-hidden="true" />
           <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
@@ -343,7 +343,7 @@ function DestacadoAvance({ obra, tieneAvanceFisico, tienePresupuesto }: Destacad
     estado === 'critico' ? 'primary' : estado === 'alerta' ? 'accent' : 'secondary';
 
   return (
-    <div className="relative rounded-2xl bg-card border border-border p-6 shadow-sm">
+    <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-card via-card to-primary/5 border border-border p-6 shadow-sm">
       <div className="flex items-center gap-2 mb-2">
         <span
           className={cn(
@@ -425,7 +425,7 @@ function KpiCompacto({ icono: Icono, label, valor, ayuda, acento }: KpiCompactoP
   return (
     <div
       className={cn(
-        'relative rounded-xl bg-card border border-border p-5 pl-6',
+        'relative rounded-xl bg-gradient-to-br from-card via-card to-muted/25 border border-border p-5 pl-6 shadow-sm',
         'before:absolute before:left-0 before:top-4 before:bottom-4 before:w-1 before:rounded-r-full',
         acentoBar[acento],
       )}

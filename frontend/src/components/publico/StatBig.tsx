@@ -20,9 +20,9 @@ const acentoBorder: Record<NonNullable<StatBigProps['acento']>, string> = {
 };
 
 const acentoIcono: Record<NonNullable<StatBigProps['acento']>, string> = {
-  primary: 'text-primary',
-  secondary: 'text-secondary',
-  accent: 'text-accent-foreground',
+  primary: 'bg-gradient-to-br from-primary/15 via-primary/10 to-secondary/10 text-primary',
+  secondary: 'bg-gradient-to-br from-secondary/15 via-secondary/10 to-primary/10 text-secondary',
+  accent: 'bg-gradient-to-br from-accent/30 via-accent/20 to-primary/10 text-accent-foreground',
 };
 
 /**
@@ -41,32 +41,31 @@ export function StatBig({
   return (
     <div
       className={cn(
-        'relative pl-5',
-        'before:absolute before:left-0 before:top-1 before:bottom-1 before:w-1 before:rounded-full',
+        'relative rounded-lg border border-border/50 bg-gradient-to-br from-card/90 via-card/70 to-primary/5 p-5 pl-7 shadow-sm',
+        'before:absolute before:left-0 before:top-2 before:bottom-2 before:w-1.5 before:rounded-full',
         acentoBorder[acento],
         className,
       )}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3">
         {Icono ? (
-          <Icono
-            className={cn('w-4 h-4 shrink-0', acentoIcono[acento])}
-            aria-hidden="true"
-          />
+          <span className={cn('inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg shadow-sm', acentoIcono[acento])}>
+            <Icono className="w-5 h-5" aria-hidden="true" />
+          </span>
         ) : null}
-        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {label}
         </span>
       </div>
       {cargando ? (
-        <div className="mt-2 h-10 w-32 bg-muted animate-pulse rounded-md" aria-hidden="true" />
+        <div className="mt-3 h-10 w-40 bg-muted animate-pulse rounded-md" aria-hidden="true" />
       ) : (
-        <p className="mt-1 text-3xl md:text-4xl font-bold text-foreground leading-none tabular-nums">
+        <p className="mt-2 text-4xl md:text-5xl font-bold text-foreground leading-tight tabular-nums">
           {valor}
         </p>
       )}
       {ayuda ? (
-        <p className="mt-2 text-xs text-muted-foreground">{ayuda}</p>
+        <p className="mt-2.5 text-xs font-medium text-muted-foreground">{ayuda}</p>
       ) : null}
     </div>
   );

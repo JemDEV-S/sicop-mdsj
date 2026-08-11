@@ -5,12 +5,12 @@
 :root {
   /* Blanco institucional: 4to color de la paleta, no un default de librería.
      Domina el espacio negativo (fondo, cards, inputs). */
-  --background: hsl(0 0% 100%);
-  --foreground: hsl(210 15% 15%);
-  --card: hsl(0 0% 100%);
-  --card-foreground: hsl(210 15% 15%);
+  --background: hsl(198 35% 96%);
+  --foreground: hsl(210 28% 12%);
+  --card: hsl(0 0% 99%);
+  --card-foreground: hsl(210 28% 12%);
   --popover: hsl(0 0% 100%);
-  --popover-foreground: hsl(210 15% 15%);
+  --popover-foreground: hsl(210 28% 12%);
 
   /* Azul institucional 3484A5 - Pantone 6797 C */
   --primary: hsl(198 52% 43%);
@@ -24,12 +24,12 @@
   --accent: hsl(45 84% 63%);
   --accent-foreground: hsl(210 15% 15%);
 
-  --muted: hsl(210 16% 95%);
-  --muted-foreground: hsl(210 10% 42%);
+  --muted: hsl(198 34% 90%);
+  --muted-foreground: hsl(210 19% 31%);
   --destructive: hsl(4 70% 48%);
   --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(210 16% 88%);
-  --input: hsl(210 16% 88%);
+  --border: hsl(198 24% 78%);
+  --input: hsl(198 24% 78%);
   --ring: hsl(198 52% 43%);
   --radius: 0.5rem;
 

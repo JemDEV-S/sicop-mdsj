@@ -104,7 +104,7 @@ export default function Home() {
 
       {/* BANDA DE RESUMEN — stats grandes horizontales */}
       <SectionBand tono="muted" denso>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 md:gap-10">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-10 md:gap-14">
           <StatBig
             icono={Wallet}
             acento="primary"
@@ -152,7 +152,7 @@ export default function Home() {
             }
           />
 
-          <div className="rounded-2xl border border-border bg-card p-6 md:p-10">
+          <div className="rounded-2xl border border-border bg-gradient-to-br from-card via-card to-secondary/5 p-6 shadow-sm md:p-10">
             <BarraEjecucion
               pim={pim}
               certificado={parseMonto(resumen.certificado)}
@@ -164,7 +164,7 @@ export default function Home() {
           </div>
 
           {/* Nota pedagógica */}
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-5 text-sm">
             <NotaEtapa
               titulo="Certificado"
               descripcion="El dinero está reservado para un fin específico."
@@ -190,10 +190,10 @@ export default function Home() {
         <SectionHeader
           eyebrow="Explora el portal"
           titulo="¿Qué información encontrarás aquí?"
-          descripcion="Cuatro secciones para explorar la gestión de recursos y proyectos de la municipalidad."
+          descripcion="Tres secciones para explorar la gestión de recursos y proyectos de la municipalidad."
         />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 gap-6">
           <FeatureCard
             to="/ejecucion"
             icono={BarChart3}
@@ -211,34 +211,36 @@ export default function Home() {
             cta="Abrir dashboard"
           />
 
-          <FeatureCard
-            to="/obras"
-            icono={Building2}
-            acento="secondary"
-            titulo="Obras Públicas"
-            descripcion="Directorio de proyectos de inversión con presupuesto, avance físico y semáforo de ejecución."
-            kpi={obras?.total !== undefined ? formatoEntero(obras.total) : null}
-            kpiLabel="proyectos"
-            cargando={cargandoObras}
-            cta="Ver directorio"
-          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FeatureCard
+              to="/obras"
+              icono={Building2}
+              acento="secondary"
+              titulo="Obras Públicas"
+              descripcion="Directorio de proyectos de inversión con presupuesto, avance físico y semáforo de ejecución."
+              kpi={obras?.total !== undefined ? formatoEntero(obras.total) : null}
+              kpiLabel="proyectos"
+              cargando={cargandoObras}
+              cta="Ver directorio"
+            />
 
-          <FeatureCard
-            to="/mapa"
-            icono={MapPin}
-            acento="primary"
-            titulo="Mapa del distrito"
-            descripcion="Ubica visualmente las obras en curso a lo largo de San Jerónimo."
-            kpi={mapa?.total_con_coords !== undefined ? formatoEntero(mapa.total_con_coords) : null}
-            kpiLabel="obras geolocalizadas"
-            cargando={cargandoMapa}
-            cta="Abrir mapa"
-          />
+            <FeatureCard
+              to="/mapa"
+              icono={MapPin}
+              acento="primary"
+              titulo="Mapa del distrito"
+              descripcion="Ubica visualmente las obras en curso a lo largo de San Jerónimo."
+              kpi={mapa?.total_con_coords !== undefined ? formatoEntero(mapa.total_con_coords) : null}
+              kpiLabel="obras geolocalizadas"
+              cargando={cargandoMapa}
+              cta="Abrir mapa"
+            />
+          </div>
         </div>
       </SectionBand>
 
       {/* SELLO INSTITUCIONAL */}
-      <section className="border-t border-border bg-card">
+      <section className="border-t border-border bg-gradient-to-br from-card via-card to-primary/5">
         <div className="mx-auto max-w-6xl px-4 md:px-6 py-8 grid grid-cols-1 md:grid-cols-3 gap-6">
           <SelloItem
             icono={ShieldCheck}
@@ -279,15 +281,15 @@ function DestacadoAnillo({
   formatoMonto,
 }: DestacadoAnilloProps) {
   return (
-    <div className="relative rounded-2xl bg-card border border-border p-8 shadow-sm">
-      <div className="flex items-center gap-2 mb-2">
+    <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-card via-card to-primary/5 border border-border/50 p-8 shadow-md hover:shadow-lg transition-shadow">
+      <div className="flex items-center gap-2 mb-4">
         <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary" aria-hidden="true" />
-        <span className="text-[11px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+        <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
           Ejecución del año
         </span>
       </div>
 
-      <div className="flex items-center justify-center py-4">
+      <div className="flex items-center justify-center py-6">
         {cargando ? (
           <div
             className="w-[200px] h-[200px] rounded-full bg-muted animate-pulse"
@@ -305,20 +307,20 @@ function DestacadoAnillo({
         )}
       </div>
 
-      <div className="mt-4 pt-4 border-t border-border grid grid-cols-2 gap-4 text-center">
+      <div className="mt-6 pt-6 border-t border-border/50 grid grid-cols-2 gap-5 text-center">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Devengado
           </p>
-          <p className="mt-1 text-base font-bold text-foreground tabular-nums">
+          <p className="mt-2 text-lg font-bold text-foreground tabular-nums">
             {cargando ? '—' : formatoMonto(devengado)}
           </p>
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
             De un PIM de
           </p>
-          <p className="mt-1 text-base font-bold text-foreground tabular-nums">
+          <p className="mt-2 text-lg font-bold text-foreground tabular-nums">
             {cargando ? '—' : formatoMonto(pim)}
           </p>
         </div>
@@ -329,9 +331,9 @@ function DestacadoAnillo({
 
 function NotaEtapa({ titulo, descripcion }: { titulo: string; descripcion: string }) {
   return (
-    <div className="rounded-lg bg-muted/30 border border-border p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-foreground">{titulo}</p>
-      <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{descripcion}</p>
+    <div className="rounded-lg bg-gradient-to-br from-card via-muted/20 to-primary/5 border border-border/50 p-5 shadow-sm transition-all hover:border-border/70 hover:shadow-md">
+      <p className="text-xs font-bold uppercase tracking-wider text-foreground">{titulo}</p>
+      <p className="mt-2 text-xs text-muted-foreground leading-relaxed">{descripcion}</p>
     </div>
   );
 }
@@ -345,7 +347,7 @@ interface SelloItemProps {
 function SelloItem({ icono: Icono, titulo, descripcion }: SelloItemProps) {
   return (
     <div className="flex items-start gap-3">
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary/10 text-primary shrink-0">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shrink-0 shadow-sm">
         <Icono className="w-4 h-4" aria-hidden="true" />
       </span>
       <div>

@@ -164,7 +164,7 @@ export function TablaProveedores({
       </div>
 
       {/* Header de columnas */}
-      <div className="hidden md:grid md:grid-cols-[1.6fr_150px_260px] gap-4 px-6 py-3 bg-muted/40 border-b border-border text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="hidden md:grid md:grid-cols-[1.6fr_150px_260px] gap-4 px-6 py-3 bg-gradient-to-r from-muted/55 via-muted/35 to-primary/10 border-b border-border text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         <SortableHeader
           label="Proveedor"
           activo={sortKey === 'nombre'}
@@ -201,19 +201,19 @@ export function TablaProveedores({
               key={prov.ruc ?? `sin-ruc-${idx}`}
               className={cn(
                 'border-b border-border last:border-b-0 md:grid md:grid-cols-[1.6fr_150px_260px] md:gap-4 md:items-center px-5 md:px-6 py-4 md:py-5',
-                filaZebra && 'bg-muted/20',
+                filaZebra && 'bg-gradient-to-r from-muted/25 to-primary/5',
               )}
             >
               {/* Bloque proveedor */}
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap mb-2">
                   {esTop ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-primary/15 to-secondary/15 text-primary px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-sm">
                       <Trophy className="w-3 h-3" aria-hidden="true" />
                       Top proveedor
                     </span>
                   ) : null}
-                  <span className="inline-flex items-center gap-1 rounded-md bg-muted text-muted-foreground px-1.5 py-0.5 text-[10px] font-mono font-semibold">
+                  <span className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-muted to-primary/10 text-muted-foreground px-1.5 py-0.5 text-[10px] font-mono font-semibold">
                     RUC {prov.ruc ?? 'S/N'}
                   </span>
                   <span
@@ -246,7 +246,7 @@ export function TablaProveedores({
                 <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                   {flagMype ? (
                     <span
-                      className="inline-block rounded-full bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      className="inline-block rounded-full bg-gradient-to-r from-primary/15 to-secondary/15 text-primary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                       title="Micro y Pequeña Empresa"
                     >
                       MYPE
@@ -254,7 +254,7 @@ export function TablaProveedores({
                   ) : null}
                   {flagRnp ? (
                     <span
-                      className="inline-block rounded-full bg-secondary/10 text-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      className="inline-block rounded-full bg-gradient-to-r from-secondary/15 to-primary/10 text-secondary px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                       title="Inscrito en el Registro Nacional de Proveedores"
                     >
                       RNP
@@ -262,7 +262,7 @@ export function TablaProveedores({
                   ) : null}
                   {flagConsorcio ? (
                     <span
-                      className="inline-block rounded-full bg-accent/20 text-accent-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                      className="inline-block rounded-full bg-gradient-to-r from-accent/30 to-primary/10 text-accent-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
                       title="Actúa como consorcio"
                     >
                       Consorcio

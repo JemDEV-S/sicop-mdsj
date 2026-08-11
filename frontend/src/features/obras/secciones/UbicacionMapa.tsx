@@ -23,9 +23,9 @@ export function UbicacionMapa({ obra }: { obra: ObraDetalleResponse }) {
     (obra.latitud === 0 && obra.longitud === 0);
 
   return (
-    <div className="rounded-2xl bg-card border border-border overflow-hidden">
-      <header className="flex items-center gap-2 px-6 py-4 border-b border-border bg-muted/40">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+    <div className="rounded-2xl bg-gradient-to-br from-card via-card to-muted/25 border border-border overflow-hidden shadow-sm">
+      <header className="flex items-center gap-2 px-6 py-4 border-b border-border bg-gradient-to-r from-muted/55 via-muted/35 to-primary/10">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shadow-sm">
           <MapPin className="w-4 h-4" aria-hidden="true" />
         </span>
         <div className="flex-1">
