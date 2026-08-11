@@ -343,10 +343,9 @@ def _str_o_none(valor: Any) -> str | None:
 
 
 def _obtener_filas_respaldo_2026() -> list[dict[str, Any]]:
-    return [
+    base_metas = [
         {
             "sec_func": 1,
-            "mes_eje": 0,
             "producto_proyecto": "2471517",
             "producto_proyecto_nombre": "MEJORAMIENTO DE LA INFRAESTRUCTURA VIAL Y PEATONAL EN MANANTIALES",
             "tipo_act_proy": "2",
@@ -383,7 +382,6 @@ def _obtener_filas_respaldo_2026() -> list[dict[str, Any]]:
         },
         {
             "sec_func": 2,
-            "mes_eje": 0,
             "producto_proyecto": "2186190",
             "producto_proyecto_nombre": "MEJORAMIENTO Y AMPLIACION DEL SISTEMA DE AGUA POTABLE Y SANEAMIENTO",
             "tipo_act_proy": "2",
@@ -420,7 +418,6 @@ def _obtener_filas_respaldo_2026() -> list[dict[str, Any]]:
         },
         {
             "sec_func": 3,
-            "mes_eje": 0,
             "producto_proyecto": "2235850",
             "producto_proyecto_nombre": "MEJORAMIENTO DEL SERVICIO EDUCATIVO EN EL NIVEL PRIMARIA Y SECUNDARIA",
             "tipo_act_proy": "2",
@@ -457,7 +454,6 @@ def _obtener_filas_respaldo_2026() -> list[dict[str, Any]]:
         },
         {
             "sec_func": 4,
-            "mes_eje": 0,
             "producto_proyecto": "3999999",
             "producto_proyecto_nombre": "SIN PRODUCTO (ACCIONES CENTRALES)",
             "tipo_act_proy": "3",
@@ -494,7 +490,6 @@ def _obtener_filas_respaldo_2026() -> list[dict[str, Any]]:
         },
         {
             "sec_func": 5,
-            "mes_eje": 0,
             "producto_proyecto": "3999999",
             "producto_proyecto_nombre": "SIN PRODUCTO (APNOP)",
             "tipo_act_proy": "3",
@@ -531,7 +526,6 @@ def _obtener_filas_respaldo_2026() -> list[dict[str, Any]]:
         },
         {
             "sec_func": 6,
-            "mes_eje": 0,
             "producto_proyecto": "3000001",
             "producto_proyecto_nombre": "PATRULLAJE POR SECTORES EN EL DISTRITO",
             "tipo_act_proy": "3",
@@ -568,7 +562,6 @@ def _obtener_filas_respaldo_2026() -> list[dict[str, Any]]:
         },
         {
             "sec_func": 7,
-            "mes_eje": 0,
             "producto_proyecto": "2456126",
             "producto_proyecto_nombre": "CREACION DEL SERVICIO DE AGUA PARA RIEGO PICOL ORCCOMPUCYO",
             "tipo_act_proy": "2",
@@ -604,6 +597,27 @@ def _obtener_filas_respaldo_2026() -> list[dict[str, Any]]:
             "monto_girado": 2900000.0,
         },
     ]
+
+    out = []
+    for m in base_metas:
+        # Fila mes_eje = 0 (Presupuesto PIA / PIM)
+        f_maestra = dict(m)
+        f_maestra["mes_eje"] = 0
+        f_maestra["monto_certificado"] = 0.0
+        f_maestra["monto_comprometido_anual"] = 0.0
+        f_maestra["monto_comprometido"] = 0.0
+        f_maestra["monto_devengado"] = 0.0
+        f_maestra["monto_girado"] = 0.0
+        out.append(f_maestra)
+
+        # Fila mes_eje = 7 (Ejecución real devengada)
+        f_ejec = dict(m)
+        f_ejec["mes_eje"] = 7
+        f_ejec["monto_pia"] = 0.0
+        f_ejec["monto_pim"] = 0.0
+        out.append(f_ejec)
+
+    return out
 
 
 # ─── Entrada principal ───────────────────────────────────────────────────

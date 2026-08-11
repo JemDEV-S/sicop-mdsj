@@ -223,11 +223,26 @@ def main() -> int:
 
     filas = []
     for m in METAS_2026:
-        f = dict(m)
-        f["sec_ejec"] = sec_ejec
-        f["ano_eje"] = ano_eje
-        f["mes_eje"] = 0
-        filas.append(f)
+        # Fila mes 0 (Presupuesto PIA / PIM)
+        f_maestra = dict(m)
+        f_maestra["sec_ejec"] = sec_ejec
+        f_maestra["ano_eje"] = ano_eje
+        f_maestra["mes_eje"] = 0
+        f_maestra["monto_certificado"] = 0.0
+        f_maestra["monto_comprometido_anual"] = 0.0
+        f_maestra["monto_comprometido"] = 0.0
+        f_maestra["monto_devengado"] = 0.0
+        f_maestra["monto_girado"] = 0.0
+        filas.append(f_maestra)
+
+        # Fila mes 7 (Ejecución real acumulada)
+        f_ejec = dict(m)
+        f_ejec["sec_ejec"] = sec_ejec
+        f_ejec["ano_eje"] = ano_eje
+        f_ejec["mes_eje"] = 7
+        f_ejec["monto_pia"] = 0.0
+        f_ejec["monto_pim"] = 0.0
+        filas.append(f_ejec)
 
     logger.info("Iniciando seed de respaldo SIAF 2026 (%d metas)...", len(filas))
 
