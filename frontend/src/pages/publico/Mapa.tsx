@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   MapPin,
@@ -33,6 +33,7 @@ export default function Mapa() {
   const [ano, setAno] = useState<number | ''>(ANIO_VIGENTE);
   const [busqueda, setBusqueda] = useState('');
   const [mostrarAyuda, setMostrarAyuda] = useState(false);
+  const bloqueMapaRef = useRef<HTMLDivElement>(null);
 
   const { data, isLoading, isError, refetch } = useObrasMapa(
     ano ? { ano } : {},
@@ -63,6 +64,20 @@ export default function Mapa() {
   const totalConCoords = itemsValidos.length;
   const totalSinCoords = data?.total_sin_coords ?? 0;
 
+  function desplazarABloqueMapa() {
+    const bloque = bloqueMapaRef.current;
+    if (!bloque) return;
+
+    const offsetHeader = 80;
+    const top = bloque.getBoundingClientRect().top + window.scrollY - offsetHeader;
+    if (Math.abs(window.scrollY - top) < 24) return;
+
+    window.scrollTo({
+      top: Math.max(0, top),
+      behavior: 'smooth',
+    });
+  }
+
   if (isError) {
     return (
       <div className="mx-auto max-w-6xl px-4 py-16 md:px-6">
@@ -78,10 +93,10 @@ export default function Mapa() {
   return (
     <div className="bg-background">
       {/* Encabezado compacto */}
-      <header className="border-b border-border bg-card">
+      <header className="border-b border-border bg-gradient-to-br from-card via-card to-primary/5">
         <div className="mx-auto flex max-w-[1600px] flex-col gap-5 px-4 py-6 md:px-8 md:py-8 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
-            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-gradient-to-r from-primary/10 to-secondary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary shadow-sm">
               <MapPin className="h-3 w-3" aria-hidden="true" />
               Mapa de Obras · {ano ? `Año ${ano}` : 'Todos los años'}
             </div>
@@ -124,11 +139,11 @@ export default function Mapa() {
 
       {/* Mapa protagonista */}
       <main className="mx-auto max-w-[1600px] px-4 py-6 md:px-8 md:py-8">
-        <div className="relative">
+        <div ref={bloqueMapaRef} className="relative">
           {/* Barra superior sobre el mapa */}
           <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5 shadow-sm">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-gradient-to-br from-card via-card to-primary/5 px-4 py-2.5 shadow-sm">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shadow-sm">
                 <MapPin className="h-4 w-4" aria-hidden="true" />
               </span>
               <div>
@@ -158,7 +173,7 @@ export default function Mapa() {
                   value={busqueda}
                   onChange={(e) => setBusqueda(e.target.value)}
                   placeholder="Buscar por nombre, código o sector"
-                  className="h-10 pl-9 pr-9"
+                  className="h-10 pl-9 pr-9 bg-gradient-to-r from-background via-background to-primary/5 shadow-sm hover:shadow-md focus-visible:ring-primary/30"
                   aria-label="Buscar obra en el mapa"
                 />
                 {busqueda ? (
@@ -187,14 +202,19 @@ export default function Mapa() {
 
           {/* Contenedor del mapa a pantalla casi completa */}
           <div className="relative h-[calc(100vh-16rem)] min-h-[600px] w-full">
-            <MapaObras items={itemsFiltrados} isLoading={isLoading} height="100%" />
+            <MapaObras
+              items={itemsFiltrados}
+              isLoading={isLoading}
+              height="100%"
+              onSeleccionarMarcador={desplazarABloqueMapa}
+            />
 
             {/* Card flotante de ayuda */}
             {mostrarAyuda ? (
-              <div className="pointer-events-auto absolute bottom-6 left-6 z-[1000] w-[320px] max-w-[calc(100%-3rem)] rounded-2xl border border-border bg-card p-5 shadow-xl ring-1 ring-black/5 animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="pointer-events-auto absolute bottom-6 left-6 z-[1000] w-[320px] max-w-[calc(100%-3rem)] rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 p-5 shadow-xl ring-1 ring-black/5 animate-in fade-in slide-in-from-bottom-2 duration-200">
                 <div className="mb-3 flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shadow-sm">
                       <Info className="h-4 w-4" aria-hidden="true" />
                     </span>
                     <h3 className="text-sm font-semibold text-foreground">Cómo usar el mapa</h3>
@@ -231,7 +251,7 @@ export default function Mapa() {
                     </span>
                   </li>
                 </ul>
-                <p className="mt-4 rounded-lg bg-muted/50 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                <p className="mt-4 rounded-lg bg-gradient-to-r from-muted/60 to-primary/10 p-3 text-[11px] leading-relaxed text-muted-foreground">
                   Cada obra tiene su propio ritmo. El porcentaje mostrado es el avance físico
                   reportado; no compara obras entre sí porque cada una tiene una complejidad y
                   duración distintas.
@@ -242,7 +262,7 @@ export default function Mapa() {
             {/* Estado vacío tras búsqueda */}
             {!isLoading && itemsFiltrados.length === 0 && busqueda ? (
               <div className="pointer-events-none absolute inset-0 z-[1000] flex items-center justify-center">
-                <div className="pointer-events-auto rounded-2xl border border-border bg-card px-6 py-5 text-center shadow-lg">
+                <div className="pointer-events-auto rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 px-6 py-5 text-center shadow-lg">
                   <Search className="mx-auto mb-2 h-6 w-6 text-muted-foreground" aria-hidden="true" />
                   <p className="text-sm font-semibold text-foreground">Sin resultados</p>
                   <p className="mt-1 text-xs text-muted-foreground">

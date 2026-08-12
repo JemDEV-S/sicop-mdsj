@@ -33,6 +33,9 @@ frontend/build/
 .env
 .env.local
 .env.*.local
+.env.bak*
+.env.*.bak*
+*.env.bak*
 !.env.example
 *.pem
 *.key
@@ -67,3 +70,13 @@ Desktop.ini
 # ─── Claude / IA ──────────────────────────────────────────────────
 .claude/
 memory/
+
+# ─── Documentacion, hallazgos y diagnosticos internos (solo local) ─
+# Notas de diseno, exploracion de SIGA y scripts de diagnostico con
+# datos reales de la muni. Se mantienen en el disco local, fuera del repo.
+Docs/
+exploracion-siga/
+Resultados.txt
+backend/scripts/diagnostico_*/
+backend/scripts/diagnostico_*.py
+backend/scripts/diagnostico_*.sql

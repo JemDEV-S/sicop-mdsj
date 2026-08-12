@@ -90,26 +90,26 @@ export function NavegadorJerarquia({
   };
 
   return (
-    <div className="rounded-2xl border border-border bg-card overflow-hidden">
+    <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-muted/25 overflow-hidden shadow-sm">
       {/* Cabecera con breadcrumb y meta del nivel */}
-      <div className="border-b border-border bg-muted/30 px-5 md:px-6 py-4">
+      <div className="border-b border-border/50 bg-gradient-to-r from-muted/45 via-muted/25 to-primary/10 px-5 md:px-6 py-5">
         <Breadcrumb ruta={ruta} onVolver={handleVolver} />
 
-        <div className="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Icono className="w-4 h-4" aria-hidden="true" />
+        <div className="mt-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shadow-sm">
+              <Icono className="w-5 h-5" aria-hidden="true" />
             </span>
             <div>
-              <p className="text-sm font-semibold text-foreground">{info.titulo}</p>
-              <p className="text-xs text-muted-foreground">{info.hint}</p>
+              <p className="text-base font-bold text-foreground">{info.titulo}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{info.hint}</p>
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-primary/5 px-4 py-3 md:text-right shadow-sm">
+            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
               Total del nivel
             </p>
-            <p className="text-lg font-bold text-foreground tabular-nums">
+            <p className="mt-1 text-xl font-bold text-foreground tabular-nums">
               {formatearMoneda(totalNivel, true)}
             </p>
           </div>
@@ -119,7 +119,7 @@ export function NavegadorJerarquia({
       </div>
 
       {/* Lista de items */}
-      <div className="divide-y divide-border">
+      <div className="divide-y divide-border/60">
         {isLoading ? (
           <ListaEsqueleto />
         ) : isError ? (
@@ -232,9 +232,9 @@ function NodoFila({ nodo, onAbrir, nivel }: NodoFilaProps) {
     <Container
       {...containerProps}
       className={cn(
-        'group w-full text-left px-5 md:px-6 py-4 md:py-5 flex items-start gap-4',
+        'group w-full text-left px-5 md:px-6 py-4 md:py-5 flex items-start gap-4 transition-colors',
         clickeable
-          ? 'hover:bg-muted/40 focus-visible:outline-none focus-visible:bg-muted/60 cursor-pointer'
+          ? 'hover:bg-gradient-to-r hover:from-primary/5 hover:to-secondary/5 focus-visible:outline-none focus-visible:bg-muted/60 cursor-pointer'
           : '',
       )}
     >
@@ -252,7 +252,7 @@ function NodoFila({ nodo, onAbrir, nivel }: NodoFilaProps) {
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 mb-1.5">
           {nivel !== 'meta' ? (
-            <span className="text-[10px] font-mono font-semibold text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+            <span className="text-[10px] font-mono font-semibold text-muted-foreground bg-gradient-to-r from-muted to-primary/10 px-1.5 py-0.5 rounded-md">
               {nodo.codigo}
             </span>
           ) : null}
@@ -264,14 +264,14 @@ function NodoFila({ nodo, onAbrir, nivel }: NodoFilaProps) {
         {/* Barra de ejecución */}
         <div className="mt-3">
           <div
-            className="h-1.5 w-full rounded-full bg-muted overflow-hidden"
+            className="h-2 w-full rounded-full bg-muted overflow-hidden"
             role="progressbar"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(barra)}
           >
             <div
-              className="h-full bg-primary transition-all"
+              className="h-full bg-primary transition-all duration-500"
               style={{ width: `${barra}%` }}
               aria-hidden="true"
             />

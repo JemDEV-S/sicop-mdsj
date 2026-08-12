@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Marker, Popup } from 'react-leaflet';
+import { useEffect, useMemo, useState } from 'react';
+import { Marker, Popup, Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import { Link } from 'react-router-dom';
 import { Camera, ChevronLeft, ChevronRight, ArrowRight, Wallet, Navigation } from 'lucide-react';
@@ -16,6 +16,7 @@ interface MapaObrasProps {
   items: ObraMapaItem[];
   isLoading?: boolean;
   height?: string | number;
+  onSeleccionarMarcador?: () => void;
 }
 
 // --- Estilos globales del marcador (inyectados una sola vez por módulo) ---
@@ -34,6 +35,25 @@ const MARKER_STYLES = `
     transform: translateY(-2px) scale(1.08);
     filter: drop-shadow(0 8px 12px rgba(15, 23, 42, 0.35));
     z-index: 1000 !important;
+  }
+  .mapa-marker-obra.is-selected {
+    transform: translateY(-3px) scale(1.12);
+    filter:
+      drop-shadow(0 0 0 rgba(255,255,255,1))
+      drop-shadow(0 10px 16px rgba(15, 23, 42, 0.38));
+  }
+  .mapa-marker-obra.is-selected::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -1px;
+    width: 18px;
+    height: 8px;
+    border-radius: 999px;
+    border: 2px solid white;
+    background: color-mix(in srgb, var(--primary) 70%, transparent);
+    transform: translateX(-50%);
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--primary) 18%, transparent);
   }
   .mapa-marker-obra .marker-inner-icon {
     position: absolute;
@@ -62,26 +82,115 @@ const MARKER_STYLES = `
     box-shadow: 0 1px 2px rgba(0,0,0,.12);
     letter-spacing: -0.02em;
   }
-  /* Popup — quitar el "salto" y suavizar apariencia */
+  /* Popup — compacto, sin saltos ni placeholders vacíos */
   .leaflet-popup.mapa-popup-obra .leaflet-popup-content-wrapper {
-    border-radius: 14px;
+    border-radius: 12px;
     padding: 0;
     box-shadow: 0 10px 30px rgba(15,23,42,.18), 0 2px 6px rgba(15,23,42,.08);
     overflow: hidden;
   }
   .leaflet-popup.mapa-popup-obra .leaflet-popup-content {
-    margin: 12px;
+    margin: 10px;
     line-height: 1.35;
+    max-height: min(420px, 70vh);
+    overflow-y: auto;
   }
   .leaflet-popup.mapa-popup-obra .leaflet-popup-tip {
     box-shadow: 0 2px 6px rgba(15,23,42,.12);
   }
   .leaflet-popup.mapa-popup-obra .leaflet-popup-close-button {
-    top: 8px;
-    right: 8px;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
     color: var(--muted-foreground);
-    font-size: 20px;
-    padding: 4px 7px;
+    font-size: 18px;
+    padding: 2px 6px;
+  }
+  .mapa-marker-obra .marker-spread-dot {
+    position: absolute;
+    left: 50%;
+    bottom: -9px;
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: white;
+    border: 2px solid color-mix(in srgb, var(--primary) 72%, transparent);
+    transform: translateX(-50%);
+    box-shadow: 0 1px 4px rgba(15,23,42,.25);
+  }
+  .mapa-marker-obra.is-spread::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -18px;
+    width: 1.5px;
+    height: 14px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--primary) 42%, transparent);
+    transform: translateX(-50%);
+  }
+  /* Cluster: varias obras en el mismo punto → un solo bubble */
+  .mapa-cluster-obra {
+    width: var(--cluster-size, 44px);
+    height: var(--cluster-size, 44px);
+    border-radius: 999px;
+    background: var(--primary);
+    border: 3px solid #fff;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.28);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    user-select: none;
+  }
+  .mapa-cluster-obra:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 18px rgba(15, 23, 42, 0.34);
+  }
+  .mapa-cluster-obra__count {
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .mapa-cluster-obra__label {
+    font-size: 8px;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.92;
+    line-height: 1;
+    margin-top: 2px;
+  }
+  .leaflet-tooltip.mapa-tooltip-obra {
+    width: 220px;
+    max-width: min(220px, calc(100vw - 48px));
+    white-space: normal;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card);
+    color: var(--foreground);
+    box-shadow: 0 8px 20px rgba(15,23,42,.16), 0 2px 5px rgba(15,23,42,.08);
+    padding: 8px 10px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-align: left;
+    pointer-events: none;
+  }
+  .leaflet-tooltip.mapa-tooltip-obra .mapa-tooltip-obra__texto {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+  }
+  .leaflet-tooltip-top.mapa-tooltip-obra::before {
+    border-top-color: var(--card);
   }
 `;
 
@@ -98,6 +207,20 @@ if (typeof document !== 'undefined' && !document.getElementById('mapa-obras-styl
  * Interpola color del pin entre dos tonos primarios (claro → oscuro).
  * Sin rojos ni amarillos: solo intensidad. Avance nulo = neutro (slate).
  */
+function obtenerNombreTooltip(nombre: string | null | undefined): string {
+  const texto = nombre?.trim();
+  if (!texto) return 'Obra sin nombre registrado';
+
+  const limite = 72;
+  if (texto.length <= limite) return texto;
+
+  const recorte = texto.slice(0, limite).trimEnd();
+  const ultimoEspacio = recorte.lastIndexOf(' ');
+  const base = ultimoEspacio >= 42 ? recorte.slice(0, ultimoEspacio) : recorte;
+
+  return `${base.trimEnd()}...`;
+}
+
 function colorPinPorAvance(avance: number | null): string {
   if (avance == null) return '#94a3b8'; // slate-400 — neutro para "sin dato"
   // Rango: 8FA4D9 (lavanda claro, avance 0) → 1E3A8A (indigo profundo, avance 100)
@@ -158,7 +281,7 @@ function iconoSectorSvg(funcion: string | null | undefined): string {
  * Construye el HTML del marcador tipo pin con anillo de progreso
  * dibujado sobre el contorno mismo del pin.
  */
-function crearIconoPin(obra: ObraMapaItem): L.DivIcon {
+function crearIconoPin(obra: ObraMapaItem, seleccionado = false, separado = false): L.DivIcon {
   const avance =
     obra.avance_fisico != null ? Math.min(100, Math.max(0, Number(obra.avance_fisico))) : null;
   const color = colorPinPorAvance(avance);
@@ -176,7 +299,7 @@ function crearIconoPin(obra: ObraMapaItem): L.DivIcon {
 
   return L.divIcon({
     html: `
-      <div class="mapa-marker-obra" role="button" tabindex="-1">
+      <div class="mapa-marker-obra${seleccionado ? ' is-selected' : ''}${separado ? ' is-spread' : ''}" role="button" tabindex="-1">
         <svg viewBox="0 0 44 54" width="44" height="54" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <defs>
             <linearGradient id="glow-${obra.codigo_unico}" x1="0" x2="0" y1="0" y2="1">
@@ -202,6 +325,7 @@ function crearIconoPin(obra: ObraMapaItem): L.DivIcon {
           </svg>
         </div>
         ${badgePct}
+        ${separado ? '<span class="marker-spread-dot" aria-hidden="true"></span>' : ''}
       </div>
     `,
     className: 'custom-leaflet-icon',
@@ -211,16 +335,255 @@ function crearIconoPin(obra: ObraMapaItem): L.DivIcon {
   });
 }
 
-export default function MapaObras({ items, isLoading = false, height = '100%' }: MapaObrasProps) {
-  const marcadores = useMemo(
-    () => items.map((obra) => ({ obra, icon: crearIconoPin(obra) })),
-    [items],
-  );
+interface MarcadorObraVista {
+  tipo: 'obra';
+  obra: ObraMapaItem;
+  icon: L.DivIcon;
+  position: L.LatLngExpression;
+  posicionReal: L.LatLngExpression;
+  separado: boolean;
+  zIndexOffset: number;
+}
+
+interface MarcadorClusterVista {
+  tipo: 'cluster';
+  id: string;
+  count: number;
+  position: L.LatLngExpression;
+  icon: L.DivIcon;
+  obras: ObraMapaItem[];
+}
+
+type VistaMarcador = MarcadorObraVista | MarcadorClusterVista;
+
+interface ClusterTemporal {
+  indices: number[];
+  centro: L.Point;
+}
+
+/** Distancia en px para considerar obras "en el mismo sitio". */
+const DISTANCIA_COLISION_PX = 48;
+
+function idDeCluster(obras: ObraMapaItem[]): string {
+  return obras
+    .map((o) => o.codigo_unico)
+    .sort()
+    .join('|');
+}
+
+function crearIconoCluster(count: number): L.DivIcon {
+  const size = count >= 10 ? 52 : count >= 5 ? 46 : 42;
+  return L.divIcon({
+    html: `
+      <div class="mapa-cluster-obra" style="--cluster-size:${size}px" role="button" tabindex="-1"
+           aria-label="${count} obras en esta zona. Clic para separarlas.">
+        <span class="mapa-cluster-obra__count">${count}</span>
+        <span class="mapa-cluster-obra__label">obras</span>
+      </div>
+    `,
+    className: 'custom-leaflet-icon',
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
+
+/** Radio de spiderfy generoso: al expandir, los pines no deben solaparse. */
+function obtenerOffsetMarcador(index: number, total: number): [number, number] {
+  if (total <= 1) return [0, 0];
+
+  const radio =
+    total <= 2 ? 42 :
+      total <= 4 ? 56 :
+        total <= 7 ? 72 :
+          total <= 10 ? 88 :
+            100;
+  const anguloInicial = total === 2 ? Math.PI : -Math.PI / 2;
+  const angulo = anguloInicial + (index * 2 * Math.PI) / total;
+
+  return [
+    Math.round(Math.cos(angulo) * radio),
+    Math.round(Math.sin(angulo) * radio),
+  ];
+}
+
+function agruparPorProximidad(
+  items: ObraMapaItem[],
+  map: L.Map,
+): { puntos: { obra: ObraMapaItem; latLng: L.LatLng; punto: L.Point }[]; clusters: ClusterTemporal[] } {
+  const puntos = items.map((obra) => {
+    const latLng = L.latLng(obra.latitud!, obra.longitud!);
+    return {
+      obra,
+      latLng,
+      punto: map.latLngToLayerPoint(latLng),
+    };
+  });
+
+  const clusters: ClusterTemporal[] = [];
+
+  puntos.forEach((item, index) => {
+    const cluster = clusters.find((c) => c.centro.distanceTo(item.punto) < DISTANCIA_COLISION_PX);
+
+    if (!cluster) {
+      clusters.push({
+        indices: [index],
+        centro: item.punto,
+      });
+      return;
+    }
+
+    cluster.indices.push(index);
+    const total = cluster.indices.length;
+    cluster.centro = L.point(
+      (cluster.centro.x * (total - 1) + item.punto.x) / total,
+      (cluster.centro.y * (total - 1) + item.punto.y) / total,
+    );
+  });
+
+  return { puntos, clusters };
+}
+
+/**
+ * Si varias obras caen cerca: un bubble con el conteo.
+ * Solo al expandir (clic) se spiderfían en círculo con líneas al punto real.
+ */
+function calcularVistasMarcadores(
+  items: ObraMapaItem[],
+  map: L.Map,
+  codigoSeleccionado: string | null,
+  clusterExpandidoId: string | null,
+): VistaMarcador[] {
+  const { puntos, clusters } = agruparPorProximidad(items, map);
+  const vistas: VistaMarcador[] = [];
+
+  clusters.forEach((cluster) => {
+    const obrasGrupo = cluster.indices.map((i) => puntos[i]!.obra);
+    const id = idDeCluster(obrasGrupo);
+
+    if (cluster.indices.length === 1) {
+      const item = puntos[cluster.indices[0]!]!;
+      const seleccionado = item.obra.codigo_unico === codigoSeleccionado;
+      vistas.push({
+        tipo: 'obra',
+        obra: item.obra,
+        icon: crearIconoPin(item.obra, seleccionado, false),
+        position: item.latLng,
+        posicionReal: item.latLng,
+        separado: false,
+        zIndexOffset: seleccionado ? 1200 : 0,
+      });
+      return;
+    }
+
+    const expandido = clusterExpandidoId === id;
+
+    if (!expandido) {
+      vistas.push({
+        tipo: 'cluster',
+        id,
+        count: obrasGrupo.length,
+        position: map.layerPointToLatLng(cluster.centro),
+        icon: crearIconoCluster(obrasGrupo.length),
+        obras: obrasGrupo,
+      });
+      return;
+    }
+
+    cluster.indices.forEach((itemIndex, indexEnGrupo) => {
+      const item = puntos[itemIndex]!;
+      const offset = obtenerOffsetMarcador(indexEnGrupo, cluster.indices.length);
+      const puntoSeparado = cluster.centro.add(L.point(offset[0], offset[1]));
+      const position = map.layerPointToLatLng(puntoSeparado);
+      const seleccionado = item.obra.codigo_unico === codigoSeleccionado;
+
+      vistas.push({
+        tipo: 'obra',
+        obra: item.obra,
+        icon: crearIconoPin(item.obra, seleccionado, true),
+        position,
+        posicionReal: item.latLng,
+        separado: true,
+        zIndexOffset: seleccionado ? 1200 : 800 + indexEnGrupo,
+      });
+    });
+  });
+
+  return vistas;
+}
+
+type PopupConMapa = L.Popup & { _map?: L.Map };
+
+function ajustarPopupAlAbrir(event: L.LeafletEvent) {
+  const popup = event.target as L.Popup;
+  window.setTimeout(() => {
+    popup.update();
+
+    const map = (popup as PopupConMapa)._map;
+    const popupEl = popup.getElement();
+    const mapEl = map?.getContainer();
+    if (!map || !popupEl || !mapEl) return;
+
+    const popupRect = popupEl.getBoundingClientRect();
+    const mapRect = mapEl.getBoundingClientRect();
+    const latLng = popup.getLatLng();
+    if (!latLng) return;
+
+    const marcador = map.latLngToContainerPoint(latLng);
+    const marcadorRect = {
+      left: mapRect.left + marcador.x - 28,
+      right: mapRect.left + marcador.x + 28,
+      top: mapRect.top + marcador.y - 66,
+      bottom: mapRect.top + marcador.y + 10,
+    };
+    const margen = 18;
+    const margenInferior = 24;
+    const umbralMovimiento = 18;
+    const areaVisible = {
+      left: Math.min(popupRect.left, marcadorRect.left),
+      right: Math.max(popupRect.right, marcadorRect.right),
+      top: Math.min(popupRect.top, marcadorRect.top),
+      bottom: Math.max(popupRect.bottom, marcadorRect.bottom),
+    };
+
+    let dx = 0;
+    let dy = 0;
+
+    if (areaVisible.left < mapRect.left + margen) {
+      dx = areaVisible.left - mapRect.left - margen;
+    } else if (areaVisible.right > mapRect.right - margen) {
+      dx = areaVisible.right - mapRect.right + margen;
+    }
+
+    if (areaVisible.top < mapRect.top + margen) {
+      dy = areaVisible.top - mapRect.top - margen;
+    } else if (areaVisible.bottom > mapRect.bottom - margenInferior) {
+      dy = areaVisible.bottom - mapRect.bottom + margenInferior;
+    }
+
+    const distancia = Math.hypot(dx, dy);
+    if (distancia > umbralMovimiento) {
+      map.stop();
+      map.panBy([dx, dy], {
+        animate: distancia > 90,
+        duration: 0.18,
+        easeLinearity: 0.75,
+      });
+    }
+  }, 80);
+}
+
+export default function MapaObras({
+  items,
+  isLoading = false,
+  height = '100%',
+  onSeleccionarMarcador,
+}: MapaObrasProps) {
+  const [codigoSeleccionado, setCodigoSeleccionado] = useState<string | null>(null);
 
   if (isLoading) {
     return (
       <div
-        className="flex h-full w-full items-center justify-center rounded-2xl border border-border bg-muted/30 text-sm text-muted-foreground"
+        className="flex h-full w-full items-center justify-center rounded-2xl border border-border bg-gradient-to-br from-muted/45 to-primary/10 text-sm text-muted-foreground"
         style={{ height }}
       >
         Cargando mapa…
@@ -229,25 +592,26 @@ export default function MapaObras({ items, isLoading = false, height = '100%' }:
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-border shadow-lg ring-1 ring-black/5">
-      <WrapperMapa height={height} zoom={ZOOM_DEFAULT_MAPA_GENERAL} estilo="voyager">
-        {marcadores.map(({ obra, icon }) => (
-          <Marker key={obra.codigo_unico} position={[obra.latitud!, obra.longitud!]} icon={icon}>
-            <Popup
-              maxWidth={340}
-              minWidth={300}
-              className="mapa-popup-obra"
-              autoPan={false}
-              closeButton
-            >
-              <PopupContenido obra={obra} />
-            </Popup>
-          </Marker>
-        ))}
+    <div className="relative h-full w-full overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-card via-card to-primary/5 shadow-lg ring-1 ring-black/5">
+      <WrapperMapa
+        height={height}
+        zoom={ZOOM_DEFAULT_MAPA_GENERAL}
+        estilo="voyager"
+        scrollWheelZoom
+      >
+        <MarcadoresObras
+          items={items}
+          codigoSeleccionado={codigoSeleccionado}
+          onSeleccionar={(obra) => {
+            setCodigoSeleccionado(obra.codigo_unico);
+            onSeleccionarMarcador?.();
+          }}
+          onCerrar={() => setCodigoSeleccionado(null)}
+        />
       </WrapperMapa>
 
       {/* Leyenda flotante — intensidad de color = avance físico */}
-      <div className="pointer-events-none absolute bottom-4 left-4 z-[500] rounded-xl border border-border bg-card/95 px-3 py-2.5 shadow-md backdrop-blur">
+      <div className="pointer-events-none absolute bottom-4 left-4 z-[500] rounded-xl border border-border bg-gradient-to-br from-card/95 via-card/95 to-primary/10 px-3 py-2.5 shadow-md backdrop-blur">
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Avance físico
         </p>
@@ -263,17 +627,153 @@ export default function MapaObras({ items, isLoading = false, height = '100%' }:
           <span className="text-[10px] font-semibold text-muted-foreground">100%</span>
         </div>
         <p className="mt-1.5 text-[10px] leading-tight text-muted-foreground">
-          El color varía según el avance reportado.
+          Varias obras juntas se agrupan; haz clic en el número para separarlas.
         </p>
       </div>
     </div>
   );
 }
 
+interface MarcadoresObrasProps {
+  items: ObraMapaItem[];
+  codigoSeleccionado: string | null;
+  onSeleccionar: (obra: ObraMapaItem) => void;
+  onCerrar: () => void;
+}
+
+function MarcadoresObras({
+  items,
+  codigoSeleccionado,
+  onSeleccionar,
+  onCerrar,
+}: MarcadoresObrasProps) {
+  const map = useMap();
+  const [revisionMapa, setRevisionMapa] = useState(0);
+  const [clusterExpandidoId, setClusterExpandidoId] = useState<string | null>(null);
+
+  useMapEvents({
+    zoomend: () => {
+      setClusterExpandidoId(null);
+      setRevisionMapa((v) => v + 1);
+    },
+    moveend: () => setRevisionMapa((v) => v + 1),
+    click: () => setClusterExpandidoId(null),
+  });
+
+  const vistas = useMemo(
+    () => {
+      void revisionMapa;
+      return calcularVistasMarcadores(items, map, codigoSeleccionado, clusterExpandidoId);
+    },
+    [items, map, codigoSeleccionado, clusterExpandidoId, revisionMapa],
+  );
+
+  // Si el grupo expandido ya no aplica (filtro / zoom), limpiar.
+  useEffect(() => {
+    if (!clusterExpandidoId) return;
+    const haySpiderfy = vistas.some((v) => v.tipo === 'obra' && v.separado);
+    const hayCluster = vistas.some(
+      (v) => v.tipo === 'cluster' && v.id === clusterExpandidoId,
+    );
+    if (!haySpiderfy && !hayCluster) setClusterExpandidoId(null);
+  }, [vistas, clusterExpandidoId]);
+
+  const obrasSeparadas = vistas.filter(
+    (v): v is MarcadorObraVista => v.tipo === 'obra' && v.separado,
+  );
+
+  return (
+    <>
+      {obrasSeparadas.map(({ obra, position, posicionReal }) => (
+        <Polyline
+          key={`linea-${obra.codigo_unico}`}
+          positions={[posicionReal, position]}
+          pathOptions={{
+            color: 'var(--primary)',
+            opacity: 0.35,
+            weight: 1.5,
+            dashArray: '3 5',
+          }}
+          interactive={false}
+        />
+      ))}
+
+      {vistas.map((vista) => {
+        if (vista.tipo === 'cluster') {
+          return (
+            <Marker
+              key={`cluster-${vista.id}`}
+              position={vista.position}
+              icon={vista.icon}
+              zIndexOffset={900}
+              eventHandlers={{
+                click: (e) => {
+                  L.DomEvent.stopPropagation(e);
+                  setClusterExpandidoId(vista.id);
+                },
+              }}
+            >
+              <Tooltip
+                className="mapa-tooltip-obra"
+                direction="top"
+                offset={[0, -28]}
+                opacity={1}
+              >
+                <span className="mapa-tooltip-obra__texto">
+                  {vista.count} obras en esta zona — clic para verlas
+                </span>
+              </Tooltip>
+            </Marker>
+          );
+        }
+
+        const { obra, icon, position, zIndexOffset } = vista;
+        return (
+          <Marker
+            key={obra.codigo_unico}
+            position={position}
+            icon={icon}
+            zIndexOffset={zIndexOffset}
+            eventHandlers={{
+              popupopen: () => onSeleccionar(obra),
+              popupclose: onCerrar,
+              click: (e) => L.DomEvent.stopPropagation(e),
+            }}
+          >
+            <Tooltip
+              className="mapa-tooltip-obra"
+              direction="top"
+              offset={[0, -56]}
+              opacity={1}
+            >
+              <span className="mapa-tooltip-obra__texto">
+                {obtenerNombreTooltip(obra.nombre_inversion)}
+              </span>
+            </Tooltip>
+            <Popup
+              maxWidth={300}
+              minWidth={260}
+              className="mapa-popup-obra"
+              autoPan={false}
+              eventHandlers={{
+                add: ajustarPopupAlAbrir,
+              }}
+              closeButton
+            >
+              <PopupContenido obra={obra} />
+            </Popup>
+          </Marker>
+        );
+      })}
+    </>
+  );
+}
+
 // --- Popup enriquecido ---
 
 function PopupContenido({ obra }: { obra: ObraMapaItem }) {
-  const { data: fotos, isLoading: cargandoFotos } = useFotosObra(obra.codigo_unico);
+  const map = useMap();
+  const { data: fotos } = useFotosObra(obra.codigo_unico);
   const [idxFoto, setIdxFoto] = useState(0);
 
   const fotosDisponibles = fotos && fotos.length > 0 ? fotos.slice(0, 5) : [];
@@ -283,34 +783,34 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
 
   const etapa = etiquetaEtapaAvance(obra.avance_fisico);
   const monto = obra.pim_anio_actual != null ? Number(obra.pim_anio_actual) : null;
+  const tieneAvance = obra.avance_fisico != null;
 
   const urlNavegacion =
     obra.latitud != null && obra.longitud != null
       ? `https://www.google.com/maps/dir/?api=1&destination=${obra.latitud},${obra.longitud}`
       : null;
-  const coordFmt =
-    obra.latitud != null && obra.longitud != null
-      ? `${obra.latitud.toFixed(5)}, ${obra.longitud.toFixed(5)}`
-      : null;
+
+  // Recalcular tamaño del popup cuando llegan fotos (sin reservar placeholder vacío).
+  useEffect(() => {
+    map.eachLayer((layer) => {
+      if (layer instanceof L.Marker && layer.isPopupOpen()) {
+        layer.getPopup()?.update();
+      }
+    });
+  }, [map, tieneFotos, idxFoto]);
 
   return (
-    <div className="w-[320px] font-sans">
-      {/* Carrusel de fotos — solo si hay algo que mostrar (o mientras carga) */}
-      {cargandoFotos || tieneFotos ? (
-        <div className="relative -m-3 mb-3 overflow-hidden rounded-t-md bg-muted">
-          <div className="aspect-[16/10] w-full bg-muted">
-            {cargandoFotos ? (
-              <div className="flex h-full w-full items-center justify-center">
-                <div className="h-8 w-8 animate-pulse rounded-full bg-muted-foreground/20" />
-              </div>
-            ) : fotoActual ? (
-              <img
-                src={urlDescargaMedia(fotoActual.ruta_relativa)}
-                alt={fotoActual.nombre_original}
-                className="h-full w-full object-cover"
-                loading="lazy"
-              />
-            ) : null}
+    <div className="w-[276px] font-sans">
+      {/* Carrusel solo con fotos reales — sin skeleton azul si no hay imagen */}
+      {tieneFotos && fotoActual ? (
+        <div className="relative -mx-2.5 -mt-2.5 mb-2 overflow-hidden bg-muted">
+          <div className="aspect-[2/1] w-full max-h-[120px]">
+            <img
+              src={urlDescargaMedia(fotoActual.ruta_relativa)}
+              alt={fotoActual.nombre_original}
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
           </div>
 
           {totalFotos > 1 ? (
@@ -321,10 +821,10 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
                   e.stopPropagation();
                   setIdxFoto((idx) => (idx - 1 + totalFotos) % totalFotos);
                 }}
-                className="absolute left-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-white transition hover:bg-black/60"
+                className="absolute left-1.5 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white transition hover:bg-black/60"
                 aria-label="Foto anterior"
               >
-                <ChevronLeft className="h-4 w-4" />
+                <ChevronLeft className="h-3.5 w-3.5" />
               </button>
               <button
                 type="button"
@@ -332,12 +832,12 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
                   e.stopPropagation();
                   setIdxFoto((idx) => (idx + 1) % totalFotos);
                 }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-white transition hover:bg-black/60"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white transition hover:bg-black/60"
                 aria-label="Foto siguiente"
               >
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-3.5 w-3.5" />
               </button>
-              <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-black/50 px-2 py-1 text-[10px] font-medium text-white">
+              <div className="absolute bottom-1.5 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-black/50 px-1.5 py-0.5 text-[10px] font-medium text-white">
                 <Camera className="h-3 w-3" aria-hidden="true" />
                 <span>
                   {idxFoto + 1} / {totalFotos}
@@ -348,38 +848,30 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
         </div>
       ) : null}
 
-      {/* Contenido textual */}
-      <div className="px-1 pb-1">
+      <div className="px-0.5 pb-0.5">
         <span className="font-mono text-[10px] tracking-tight text-muted-foreground">
           {obra.codigo_unico}
         </span>
-        <h4 className="mt-0.5 break-words text-[13.5px] font-semibold leading-snug text-foreground">
+        <h4 className="mt-0.5 line-clamp-3 break-words text-[13px] font-semibold leading-snug text-foreground">
           {obra.nombre_inversion ?? 'Obra sin nombre registrado'}
         </h4>
 
         {obra.funcion ? (
-          <p className="mt-1 line-clamp-1 text-[11px] text-muted-foreground">{obra.funcion}</p>
+          <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{obra.funcion}</p>
         ) : null}
 
-        {/* Estado + avance neutral */}
-        <div className="mt-3 rounded-lg border border-border bg-muted/40 p-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Estado de la obra
-            </span>
-            {obra.avance_fisico != null ? (
+        {tieneAvance ? (
+          <div className="mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {etapa.titulo}
+              </span>
               <span className="text-[11px] font-bold tabular-nums text-foreground">
                 {Number(obra.avance_fisico).toFixed(0)}%
               </span>
-            ) : null}
-          </div>
-          <p className="mt-1 text-[12px] font-semibold text-foreground">{etapa.titulo}</p>
-          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-            {etapa.descripcion}
-          </p>
-          {obra.avance_fisico != null ? (
+            </div>
             <div
-              className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted"
+              className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted"
               aria-hidden="true"
             >
               <div
@@ -387,27 +879,30 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
                 style={{ width: `${Math.min(100, Math.max(0, Number(obra.avance_fisico)))}%` }}
               />
             </div>
-          ) : null}
-        </div>
+          </div>
+        ) : (
+          <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+            Avance físico aún no reportado
+          </p>
+        )}
 
-        {/* Costo + ubicación */}
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <div className="rounded-lg border border-border bg-card p-2.5">
-            <div className="flex items-center gap-1.5 text-muted-foreground">
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          <div className="rounded-md border border-border px-2 py-1.5">
+            <div className="flex items-center gap-1 text-muted-foreground">
               <Wallet className="h-3 w-3" aria-hidden="true" />
-              <span className="text-[9.5px] font-semibold uppercase tracking-wide">
-                Presupuesto {new Date().getFullYear()}
+              <span className="text-[9px] font-semibold uppercase tracking-wide">
+                Presupuesto
               </span>
             </div>
-            <p className="mt-1 text-[12.5px] font-bold tabular-nums text-foreground">
+            <p className="mt-0.5 text-[12px] font-bold tabular-nums text-foreground">
               {monto != null ? formatearMoneda(monto, true) : 'Sin dato'}
             </p>
           </div>
 
-          <div className="rounded-lg border border-border bg-card p-2.5">
-            <div className="flex items-center gap-1.5 text-muted-foreground">
+          <div className="rounded-md border border-border px-2 py-1.5">
+            <div className="flex items-center gap-1 text-muted-foreground">
               <Navigation className="h-3 w-3" aria-hidden="true" />
-              <span className="text-[9.5px] font-semibold uppercase tracking-wide">
+              <span className="text-[9px] font-semibold uppercase tracking-wide">
                 Ubicación
               </span>
             </div>
@@ -416,20 +911,15 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
                 href={urlNavegacion}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-1 inline-flex items-center gap-1 text-[11.5px] font-semibold text-primary hover:underline"
+                className="mt-0.5 inline-flex items-center gap-0.5 text-[11.5px] font-semibold text-primary hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
                 Cómo llegar
                 <ArrowRight className="h-3 w-3" aria-hidden="true" />
               </a>
             ) : (
-              <p className="mt-1 text-[11px] text-muted-foreground">No disponible</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">No disponible</p>
             )}
-            {coordFmt ? (
-              <p className="mt-0.5 font-mono text-[9.5px] leading-tight text-muted-foreground">
-                {coordFmt}
-              </p>
-            ) : null}
           </div>
         </div>
 
@@ -437,7 +927,7 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
           asChild
           size="sm"
           variant="outline"
-          className="mt-3 w-full border-primary/40 text-primary hover:bg-primary hover:text-primary-foreground"
+          className="mt-2 h-8 w-full border-primary/40 text-primary hover:bg-primary hover:text-primary-foreground"
         >
           <Link to={`/obras/${obra.codigo_unico}`}>
             Ver ficha completa

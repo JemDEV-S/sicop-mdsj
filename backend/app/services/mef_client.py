@@ -9,6 +9,7 @@ Limitaciones documentadas (`Docs/actividad-1-exploracion-mef.md` §4):
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -26,6 +27,24 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT_S = 180.0
 PAGE_LIMIT = 100
+
+
+def _parse_json_mef(resp: httpx.Response) -> dict[str, Any]:
+    """Parsea el JSON de la API MEF tolerando su encoding real.
+
+    Los datasets del MEF devuelven texto en Windows-1252/latin-1 (p.ej. 'Ñ' =
+    byte 0xd1) sin declarar el charset correcto, por lo que `resp.json()` de
+    httpx —que asume UTF-8— revienta con UnicodeDecodeError. Decodificamos los
+    bytes crudos probando UTF-8 y cayendo a cp1252, que cubre las tildes y la Ñ.
+    """
+    raw = resp.content
+    for enc in ("utf-8", "cp1252", "latin-1"):
+        try:
+            return json.loads(raw.decode(enc))
+        except UnicodeDecodeError:
+            continue
+    # Ultimo recurso: reemplazar bytes invalidos para no perder toda la pagina.
+    return json.loads(raw.decode("utf-8", errors="replace"))
 
 
 class MefApiError(RuntimeError):
@@ -93,12 +112,8 @@ class MefClient:
         if resp.status_code >= 400:
             raise MefApiError(f"HTTP {resp.status_code}: {resp.content[:200]!r}")
 
-        try:
-            payload = resp.json()
-        except Exception:
-            import json
-            payload = json.loads(resp.content.decode("latin-1", errors="replace"))
-        
+        payload = _parse_json_mef(resp)
+
         # La API MEF a veces devuelve "sucess" en vez de "success"
         is_success = payload.get("success") or payload.get("sucess")
         if not is_success and str(is_success).lower() != "true":

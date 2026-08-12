@@ -30,9 +30,9 @@ export function DocumentosPublicos({ codigoUnico }: DocumentosPublicosProps) {
   const { data: documentos, isLoading, isError } = useDocumentosObra(codigoUnico);
 
   return (
-    <div className="rounded-2xl bg-card border border-border overflow-hidden">
-      <header className="flex items-center gap-2 px-6 py-4 border-b border-border bg-muted/40">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+    <div className="rounded-2xl bg-gradient-to-br from-card via-card to-muted/25 border border-border overflow-hidden shadow-sm">
+      <header className="flex items-center gap-2 px-6 py-4 border-b border-border bg-gradient-to-r from-muted/55 via-muted/35 to-primary/10">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shadow-sm">
           <FileText className="w-4 h-4" aria-hidden="true" />
         </span>
         <div className="flex-1">
@@ -56,7 +56,7 @@ export function DocumentosPublicos({ codigoUnico }: DocumentosPublicosProps) {
             ))}
           </ul>
         ) : isError || !documentos || documentos.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border bg-muted/30 p-8 text-center">
+          <div className="rounded-xl border border-dashed border-border bg-gradient-to-br from-muted/45 to-primary/10 p-8 text-center">
             <FileArchive
               className="w-7 h-7 text-muted-foreground mx-auto mb-3"
               aria-hidden="true"
@@ -92,9 +92,9 @@ function DocumentoFila({ doc }: { doc: DocumentoPublicoItem }) {
         target="_blank"
         rel="noopener noreferrer"
         download={doc.nombre_original}
-        className="group flex items-center gap-4 p-3 rounded-lg border border-border bg-card hover:border-primary hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
+        className="group flex items-center gap-4 p-3 rounded-lg border border-border bg-gradient-to-br from-card via-card to-muted/25 hover:border-primary hover:from-primary/5 hover:to-secondary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
       >
-        <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
+        <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 via-primary/10 to-secondary/15 text-primary shrink-0 shadow-sm">
           <FileText className="w-5 h-5" aria-hidden="true" />
         </span>
         <div className="flex-1 min-w-0">
