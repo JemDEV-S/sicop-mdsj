@@ -111,12 +111,15 @@ class Settings(BaseSettings):
     RECAPTCHA_SECRET: str = ""
 
     # ─── Jobs ───────────────────────────────────────────────────
-    SYNC_SIAF_HOUR: int = 3
-    SYNC_SIAF_MINUTE: int = 0
+    # SIAF+Invierte una vez al dia. 10:30 America/Lima: a esa hora los datos del
+    # MEF ya suelen estar actualizados (la publicacion diaria del MEF llega tarde;
+    # ver Docs/hallazgos-granularidad-siaf.md). Configurable por env.
+    SYNC_SIAF_HOUR: int = 10
+    SYNC_SIAF_MINUTE: int = 30
 
     # Snapshot SIGA (Guia Pipeline v2 §01.3): cada N minutos en horario laboral,
     # 1 corrida nocturna fuera de ese rango. La reconciliacion corre de madrugada.
-    SYNC_SIGA_INTERVALO_MIN: int = 30
+    SYNC_SIGA_INTERVALO_MIN: int = 15
     SYNC_SIGA_HORA_INICIO: int = 7    # inclusive
     SYNC_SIGA_HORA_FIN: int = 18      # inclusive
     RECONCILIACION_SIGA_HOUR: int = 2

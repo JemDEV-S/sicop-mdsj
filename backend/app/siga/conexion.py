@@ -15,13 +15,55 @@ from contextlib import contextmanager
 from typing import Any
 
 import pyodbc
-from sqlalchemy import Engine, create_engine, text
+from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.engine import Row
 
 from app.config import settings
 
 # Engine SQLAlchemy compartido — pool moderado, sin autocommit (solo lectura).
 _engine: Engine | None = None
+
+
+def _forzar_varchar(dbapi_conn: pyodbc.Connection, _record: Any) -> None:
+    """Envía los strings como VARCHAR (no NVARCHAR) — crítico para el rendimiento.
+
+    Por defecto pyodbc manda los parámetros str como Unicode (NVARCHAR). Las
+    columnas de SIGA son VARCHAR (no-Unicode, code page latin-1), así que
+    comparar `columna_VARCHAR = :param_NVARCHAR` obliga a SQL Server a una
+    conversión implícita que INVALIDA los índices → scans completos. Contra
+    producción, la ficha de pedido (JOINs por GRUPO/CLASE/FAMILIA/ITEM_BIEN)
+    pasaba de <1s a >30s (timeout). Forzando VARCHAR/latin-1 vuelve a <1s.
+
+    latin-1 es el code page real de esta BD (mismo encoding que devuelve la
+    API MEF: la 'Ñ' = byte 0xd1). Ver `app/services/mef_client.py`.
+    """
+    dbapi_conn.setdecoding(pyodbc.SQL_CHAR, encoding="latin-1")
+    dbapi_conn.setdecoding(pyodbc.SQL_WCHAR, encoding="latin-1")
+    dbapi_conn.setencoding(encoding="latin-1")
+
+
+def _lecturas_sucias(dbapi_conn: pyodbc.Connection, _record: Any) -> None:
+    """Fija READ UNCOMMITTED en cada conexión — evita esperar locks de producción.
+
+    SIGA es una BD OLTP VIVA: el sistema municipal escribe sobre ella todo el
+    día. Bajo el nivel de aislamiento por defecto (READ COMMITTED), un SELECT
+    nuestro que toque una fila/página con una transacción abierta se BLOQUEA
+    hasta que esa transacción cierre — o hasta el timeout. Medido contra
+    producción: leer `SIG_PAAC_CONSOLIDADO` filtrando ano+sec_ejec y proyectando
+    una columna del clustered index (p.ej. NRO_EST_MDO) colgaba >30s por lock
+    wait; con `WITH (NOLOCK)` la misma query devolvía en 0.01s. Esto colgaba el
+    sync del pipeline en el extractor `expedientes_ccmn`. En el backup local no
+    pasaba porque nadie más escribe en el backup (sin transacciones concurrentes).
+
+    Somos una réplica de solo-lectura para reporting: leer datos ya escritos con
+    lecturas sucias (dirty reads) es el patrón correcto para NO bloquear ni ser
+    bloqueados por el SIGA operativo. RN-02: solo lectura, nunca escribimos.
+    """
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED")
+    finally:
+        cur.close()
 
 
 def get_engine() -> Engine:
@@ -36,6 +78,10 @@ def get_engine() -> Engine:
             pool_recycle=1800,  # 30 min
             echo=False,
         )
+        # Cada conexión nueva del pool manda strings como VARCHAR (ver arriba)
+        # y lee en READ UNCOMMITTED para no bloquearse con locks de producción.
+        event.listen(_engine, "connect", _forzar_varchar)
+        event.listen(_engine, "connect", _lecturas_sucias)
     return _engine
 
 
@@ -52,7 +98,10 @@ def get_pyodbc_connection() -> pyodbc.Connection:
 
     Preferir `get_connection()` (SQLAlchemy) en el código de la aplicación.
     """
-    return pyodbc.connect(settings.mssql_odbc_connection_string, timeout=10)
+    conn = pyodbc.connect(settings.mssql_odbc_connection_string, timeout=10)
+    _forzar_varchar(conn, None)   # mismo fix VARCHAR/latin-1 que el engine
+    _lecturas_sucias(conn, None)  # READ UNCOMMITTED: no bloquearse con producción
+    return conn
 
 
 def fetch_all(sql: str, params: dict[str, Any] | None = None) -> list[Row]:

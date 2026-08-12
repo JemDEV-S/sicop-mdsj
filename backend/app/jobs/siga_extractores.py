@@ -22,11 +22,53 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
+def _demojibake(s: str) -> str:
+    """Repara texto UTF-8 que quedó guardado dentro de un VARCHAR latin-1.
+
+    El software de SIGA insertó parte del texto ya codificado en UTF-8 dentro
+    de columnas VARCHAR (code page latin-1): CONCEPTO, MOTIVO_PEDIDO,
+    ESPECIFICACIONES, NOMBRE_PROV, etc. Nuestra conexión lee esos bytes como
+    latin-1 (byte a byte), así que la 'Ñ' (bytes UTF-8 0xC3 0x91) llega como
+    'Ã' + '\\x91' → se muestra 'DISEÃO' en vez de 'DISEÑO'.
+
+    El arreglo es des-hacer el doble encoding: re-codificar a latin-1 (recupera
+    los bytes originales) y decodificar como UTF-8. Se aplica SOLO cuando el
+    string efectivamente es UTF-8 mal-metido (re-codifica a latin-1 sin pérdida
+    y decodifica limpio como UTF-8); si no, se deja intacto. Así es seguro aun
+    si en el futuro SIGA guardara texto correcto. Medido 2026 sobre ~6,400
+    strings no-ASCII: repara Ñ/Ú/Í/Ó/° con 0 falsos positivos.
+
+    Se itera porque hay casos raros de triple encoding: una 'Ó' guardada como
+    UTF-8 dos veces necesita dos pasadas. Cada iteración solo procede si el
+    resultado es recuperable; en cuanto queda ASCII, deja de decodificar como
+    UTF-8, o alcanza punto fijo, se detiene. Cota de 3 pasadas por seguridad.
+
+    Límite conocido: 1 fila de MOTIVO_PEDIDO (0.016%) tiene triple encoding con
+    una comilla tipográfica intermedia (U+201C) que no existe en latin-1, así
+    que la 2ª pasada no puede re-codificar y queda a medio reparar. No se
+    persigue: forzarlo (p.ej. vía cp1252) rompería miles de casos dobles buenos.
+    """
+    for _ in range(3):
+        if s.isascii():
+            return s
+        try:
+            reparado = s.encode("latin-1").decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return s
+        if reparado == s:  # punto fijo: no cambió, no seguir
+            return s
+        s = reparado
+    return s
+
+
 def _s(v: Any) -> str | None:
-    """Strip de string SQL Server (char/varchar vienen con padding)."""
+    """Strip de string SQL Server (char/varchar vienen con padding).
+
+    Además repara el doble-encoding UTF-8/latin-1 de SIGA (ver `_demojibake`).
+    """
     if v is None:
         return None
-    s = str(v).strip()
+    s = _demojibake(str(v)).strip()
     return s or None
 
 
