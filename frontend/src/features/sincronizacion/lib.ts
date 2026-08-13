@@ -10,7 +10,9 @@ import type { EstadoCorrida } from './types';
  * tal cual — nunca rompe la UI.
  */
 export function etiquetaJob(job: string): string {
-  const [base, ano] = job.split(':');
+  const partes = job.split(':');
+  const base = partes[0] || '';
+  const ano = partes[1];
   const BASE: Record<string, string> = {
     siaf_ejecucion: 'SIAF · ejecución',
     invierte: 'Invierte.pe · obras',
