@@ -264,6 +264,17 @@ def sync_siga_pipeline(
 ) -> ResultadoSync:
     """Sincroniza las tablas del pipeline (todas o las de `solo`) para un año."""
     ano_ejec = ano if ano is not None else settings.ANO_VIGENTE
+    session = SessionLocal()
+    try:
+        n_cc = session.execute(text("SELECT COUNT(*) FROM ref.centros_costo")).scalar()
+        if not n_cc:
+            from app.jobs.sync_catalogos_siga import sync_catalogos
+            sync_catalogos(ano_ejec)
+    except Exception:
+        logger.warning("No se pudo verificar/sincronizar catalogos de centros de costo", exc_info=True)
+    finally:
+        session.close()
+
     extractores = [e for e in EXTRACTORES if solo is None or e.destino in solo]
     return _correr(extractores, ano_ejec, job_sufijo="pipeline")
 

@@ -70,12 +70,11 @@ def _ejecutar_encadenado_siaf_invierte() -> None:
 
 
 def _ejecutar_sync_siga() -> None:
-    """Snapshot SIGA -> Postgres: pipeline + seguimiento (§01.3).
-
-    Timeout corto y salto silencioso si SIGA esta ocupado: max_instances=1 +
-    coalesce en el trigger ya evitan solapes; aqui solo se registra el fallo y
-    la proxima corrida lo reintenta — nunca se encola presion sobre SIGA.
-    """
+    """Snapshot SIGA -> Postgres: catalogos + pipeline + seguimiento (§01.3)."""
+    try:
+        sync_catalogos()
+    except Exception:
+        logger.exception("scheduler: sync_catalogos FALLO (reintenta al ciclo)")
     try:
         sync_siga_pipeline()
     except Exception:
