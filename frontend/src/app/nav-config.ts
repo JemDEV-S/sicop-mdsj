@@ -5,6 +5,7 @@ import {
   GitBranch,
   LayoutDashboard,
   MapPin,
+  RefreshCw,
   ScrollText,
   Settings,
   UserCog,
@@ -60,6 +61,7 @@ export const navInterna: NavSection[] = [
     items: [
       { label: 'Usuarios', to: '/admin/usuarios', icono: UserCog, roles: ['admin'] },
       { label: 'Auditoría', to: '/admin/auditoria', icono: ScrollText, roles: ['admin'] },
+      { label: 'Sincronización', to: '/admin/sincronizacion', icono: RefreshCw, roles: ['admin'] },
       { label: 'Configuración', to: '/admin/configuracion', icono: Settings, roles: ['admin', 'decisor'] },
     ],
   },

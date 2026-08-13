@@ -62,6 +62,12 @@ export default defineConfig({
   },
   server: {
     host: true,
+    // 5173 (default de Vite) cae en el rango 5141-5240 que Windows reserva
+    // (Hyper-V/WSL/Docker) → EACCES al arrancar. 5180 tambien cae ahi. Usamos
+    // 3000, confirmado libre y fuera de todos los rangos excluidos.
+    // Ver: netsh interface ipv4 show excludedportrange protocol=tcp
+    port: 3000,
+    strictPort: true,
     https: httpsConfig,
     proxy: {
       '/api': {

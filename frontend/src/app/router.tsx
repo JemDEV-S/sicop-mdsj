@@ -170,6 +170,13 @@ export const router = createBrowserRouter([
                   const { default: Auditoria } = await import('../pages/interno/Auditoria');
                   return { Component: Auditoria };
                 }
+              },
+              {
+                path: 'sincronizacion',
+                lazy: async () => {
+                  const { default: Sincronizacion } = await import('../pages/interno/Sincronizacion');
+                  return { Component: Sincronizacion };
+                }
               }
             ]
           }
