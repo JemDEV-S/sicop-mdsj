@@ -169,6 +169,33 @@ def get_scheduler() -> BackgroundScheduler | None:
     return _scheduler
 
 
+def esta_corriendo() -> bool:
+    """True si el scheduler embebido está instanciado y activo."""
+    return _scheduler is not None and _scheduler.running
+
+
+def listar_jobs_programados() -> list[dict[str, Any]]:
+    """Jobs registrados en el scheduler con su próxima ejecución.
+
+    Devuelve `[]` si el scheduler no está corriendo. `proxima_ejecucion` es
+    ISO-8601 en la tz del scheduler (America/Lima) o `None` si está en pausa.
+    """
+    if _scheduler is None or not _scheduler.running:
+        return []
+    jobs: list[dict[str, Any]] = []
+    for job in _scheduler.get_jobs():
+        proxima = job.next_run_time
+        jobs.append(
+            {
+                "id": job.id,
+                "nombre": job.name or job.id,
+                "trigger": str(job.trigger),
+                "proxima_ejecucion": proxima.isoformat() if proxima else None,
+            }
+        )
+    return jobs
+
+
 # ─── Trigger manual (usado por /admin/jobs/*) ────────────────────────────
 
 def _wrap_run(nombre: str, fn: Callable[[], Any]) -> str:
