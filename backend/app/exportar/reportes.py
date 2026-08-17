@@ -332,7 +332,13 @@ def _datos_pipeline_reporte(
                 dev = p.get("devengado_estimado")
                 filas.append({
                     "sec_func": m["sec_func"],
+                    "meta": m.get("meta"),
                     "nombre_meta": m["nombre_meta"],
+                    "categoria": (
+                        "Proyecto de inversión" if m.get("categoria") == "proyecto"
+                        else "Producto / actividad"
+                    ),
+                    "act_proy": m.get("act_proy"),
                     "centro_costo": _cc(p.get("centro_costo")) or cc_meta,
                     "clasificador": c["clasificador"],
                     "clasificador_nombre": c["clasificador_nombre"],
@@ -364,8 +370,11 @@ REPORTE_PIPELINE_PROFESIONAL = Reporte(
     codigo="pipeline_reporte",
     titulo="Pipeline presupuestal — cruce SIGA × SIAF por clasificador (Meta → Clasificador → Pedido)",
     columnas=[
-        Columna("sec_func", "Meta"),
+        Columna("sec_func", "Sec. Func."),
+        Columna("meta", "N° Meta"),
         Columna("nombre_meta", "Nombre de meta"),
+        Columna("categoria", "Producto / Proyecto"),
+        Columna("act_proy", "Cod. Acto/Proy"),
         Columna("centro_costo", "Centro de costo"),
         Columna("clasificador", "Clasificador"),
         Columna("clasificador_nombre", "Específica de gasto"),

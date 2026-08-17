@@ -26,7 +26,10 @@ function textoBuscable(f: FilaPedido): string {
     f.clasificador,
     f.clasificador_nombre ?? '',
     f.sec_func,
+    f.meta ?? '',
     f.nombre_meta ?? '',
+    f.act_proy ?? '',
+    f.categoria,
     f.centro_costo ?? '',
     f.etapa_label,
   ]
@@ -40,11 +43,13 @@ export function filtrar(filas: FilaPedido[], f: FiltrosReporte): FilaPedido[] {
   const setCC = new Set(f.centrosCosto);
   const setMF = new Set(f.macrofases);
   const setMeta = new Set(f.metas);
+  const setCat = new Set(f.categorias);
 
   return filas.filter((fila) => {
     if (setCC.size && (!fila.centro_costo || !setCC.has(fila.centro_costo))) return false;
     if (setMF.size && !setMF.has(fila.macrofase)) return false;
     if (setMeta.size && !setMeta.has(fila.sec_func)) return false;
+    if (setCat.size && !setCat.has(fila.categoria)) return false;
     if (f.soloEstancados && !fila.estancado) return false;
     if (f.soloConOrden && !fila.tiene_orden) return false;
     if (f.soloSinOrden && fila.tiene_orden) return false;
@@ -118,6 +123,8 @@ function claveGrupo(f: FilaPedido, campo: CampoAgrupacion): string {
       return f.centro_costo ?? '(sin centro)';
     case 'meta':
       return String(f.sec_func);
+    case 'categoria':
+      return f.categoria;
     case 'estado':
       return f.estancado ? 'estancado' : 'en_curso';
     case 'ninguno':
@@ -129,6 +136,8 @@ function claveGrupo(f: FilaPedido, campo: CampoAgrupacion): string {
 function pesoGrupo(clave: string, campo: CampoAgrupacion, monto: number): number {
   if (campo === 'macrofase') return ORDEN_MACROFASE[clave as Macrofase] ?? 99;
   if (campo === 'estado') return clave === 'estancado' ? 0 : 1;
+  // Proyectos de inversión primero (la plata "dura" que más se vigila).
+  if (campo === 'categoria') return clave === 'proyecto' ? 0 : 1;
   // CC / meta / ninguno: los de mayor monto primero (negativo para asc-sort).
   return -monto;
 }
@@ -185,7 +194,11 @@ function etiquetaGrupo(
     case 'centro_costo':
       return clave === '(sin centro)' ? 'Sin centro de costo' : ccLabel(clave).nombre;
     case 'meta':
+      // Identificador de meta = SEC_FUNC (la llave de SIGA que la muni usa como
+      // número de meta). `clave` ya es el sec_func (ver claveGrupo).
       return `Meta ${clave}${muestra.nombre_meta ? ` · ${muestra.nombre_meta}` : ''}`;
+    case 'categoria':
+      return clave === 'proyecto' ? 'Proyectos de inversión' : 'Productos / actividades';
     case 'estado':
       return clave === 'estancado' ? 'Pedidos estancados' : 'Pedidos en curso';
     case 'ninguno':

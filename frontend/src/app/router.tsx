@@ -74,17 +74,17 @@ export const router = createBrowserRouter([
             }
           },
           {
-            path: 'saldos',
+            path: 'analisis',
             lazy: async () => {
-              const { default: Saldos } = await import('../pages/interno/Saldos');
-              return { Component: Saldos };
+              const { default: Analisis } = await import('../pages/interno/Analisis');
+              return { Component: Analisis };
             }
           },
           {
-            path: 'pipeline',
+            path: 'cruce',
             lazy: async () => {
-              const { default: Pipeline } = await import('../pages/interno/Pipeline');
-              return { Component: Pipeline };
+              const { default: Analisis } = await import('../pages/interno/Analisis');
+              return { Component: () => <Analisis vistaInicial="cruce" /> };
             }
           },
           {
@@ -100,28 +100,6 @@ export const router = createBrowserRouter([
               const { default: Contratos } = await import('../pages/interno/Contratos');
               return { Component: Contratos };
             }
-          },
-          {
-            path: 'cruce',
-            element: <div>Cruce SIAF-SIGA (Stub · T-50)</div>
-          },
-          {
-            path: 'proveedores',
-            lazy: async () => {
-              const { default: Proveedores } = await import('../pages/interno/Proveedores');
-              return { Component: Proveedores };
-            }
-          },
-          {
-            path: 'proveedores/:ruc',
-            lazy: async () => {
-              const { default: PerfilProveedor } = await import('../pages/interno/PerfilProveedor');
-              return { Component: PerfilProveedor };
-            }
-          },
-          {
-            path: 'cruce/expediente-siaf/:exp',
-            element: <div>Buscador EXP_SIAF (Stub · T-50)</div>
           },
           {
             // TODO T-35: eliminar tras validar funcionalidad

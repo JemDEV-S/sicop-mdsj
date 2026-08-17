@@ -74,7 +74,7 @@ export function PedidoDetalle({ nroPedido, tipoBien, tipoPedido }: PedidoDetalle
             icono={ClipboardList}
             titulo="Pedido no encontrado"
             descripcion={`No existe el pedido ${nroPedido}/${tipoBien} para el año activo. Verifica el número o cambia el año en el topbar.`}
-            accion={{ label: 'Volver al pipeline', href: '/interno/pipeline' }}
+            accion={{ label: 'Volver al análisis', href: '/interno/analisis' }}
           />
         </div>
       );
@@ -149,7 +149,7 @@ function esNivelResuelto(nivel: PedidoDetalleType['confianza_ccmn']): boolean {
 function BreadcrumbVolver() {
   return (
     <Link
-      to="/interno/pipeline"
+      to="/interno/analisis"
       className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
     >
       <ChevronLeft className="w-4 h-4" aria-hidden="true" />

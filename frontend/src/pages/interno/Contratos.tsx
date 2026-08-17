@@ -9,8 +9,7 @@
  * filtran por CC — ver guía §5.2).
  */
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import { FileSignature, CalendarClock, AlertTriangle, ArrowRight } from 'lucide-react';
+import { FileSignature, CalendarClock, AlertTriangle } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SectionCard } from '@/components/layout/SectionCard';
 import { EmptyState } from '@/components/layout/EmptyState';
@@ -147,12 +146,9 @@ function ListaPorVencer({ contratos }: { contratos: ContratoPorVencer[] }) {
                 <span className="tabular-nums">{c.dias_restantes ?? '—'} días</span>
               </div>
               {c.proveedor_ruc ? (
-                <Link
-                  to={`/interno/proveedores/${c.proveedor_ruc}`}
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                  Proveedor <ArrowRight className="h-3 w-3" aria-hidden="true" />
-                </Link>
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  RUC {c.proveedor_ruc}
+                </span>
               ) : null}
             </div>
           </li>
@@ -229,16 +225,7 @@ function TablaContratos({ items, total, page, size, onPageChange, isFetching }: 
                   ) : null}
                 </td>
                 <td className="px-4 py-3">
-                  {c.proveedor_ruc ? (
-                    <Link
-                      to={`/interno/proveedores/${c.proveedor_ruc}`}
-                      className="text-foreground hover:text-primary hover:underline"
-                    >
-                      {c.proveedor_nombre ?? c.proveedor_ruc}
-                    </Link>
-                  ) : (
-                    <span className="text-foreground">{c.proveedor_nombre ?? '—'}</span>
-                  )}
+                  <span className="text-foreground">{c.proveedor_nombre ?? '—'}</span>
                   {c.proveedor_ruc ? (
                     <p className="font-mono text-[11px] text-muted-foreground">RUC {c.proveedor_ruc}</p>
                   ) : null}

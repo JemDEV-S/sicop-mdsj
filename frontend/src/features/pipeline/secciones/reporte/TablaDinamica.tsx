@@ -6,10 +6,12 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { formatearNumero } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
+import type { CategoriaMeta } from '../../reporte-types';
+import { useModales } from '@/features/modales/ModalesContext';
 import { MiniTimeline } from './MiniTimeline';
 import type { CentroCostoLabelFn, FilaPedido, GrupoPedidos, Totales } from './tipos';
 
-const N_COLUMNAS = 8;
+const N_COLUMNAS = 10;
 
 export function TablaDinamica({
   grupos,
@@ -42,24 +44,28 @@ export function TablaDinamica({
 
   return (
     <div className="overflow-x-auto rounded-md border border-border bg-card">
-      <table className="w-full min-w-[1080px] table-fixed border-collapse text-sm">
+      <table className="w-full min-w-[1320px] table-fixed border-collapse text-sm">
         <colgroup>
-          <col className="w-[24%] min-w-[220px]" />
-          <col className="w-[132px]" />
-          <col className="w-[150px]" />
-          <col className="w-[150px]" />
-          <col className="w-[64px]" />
-          <col className="w-[130px]" />
-          <col className="w-[130px]" />
+          <col className="w-[22%] min-w-[240px]" />
+          <col className="w-[96px]" />
+          <col className="w-[118px]" />
           <col className="w-[138px]" />
+          <col className="w-[140px]" />
+          <col className="w-[58px]" />
+          <col className="w-[120px]" />
+          <col className="w-[122px]" />
+          <col className="w-[122px]" />
+          <col className="w-[128px]" />
         </colgroup>
         <thead className="sticky top-0 z-10">
           <tr className="bg-primary text-primary-foreground">
             <Th className="text-left">Pedido / Meta / Clasificador</Th>
+            <Th className="text-left">Tipo</Th>
             <Th className="text-left">Centro de costo</Th>
             <Th className="text-left">Identificadores</Th>
             <Th className="text-left">Recorrido · Etapa</Th>
             <Th className="text-right">Días</Th>
+            <Th className="text-right">Avance meta</Th>
             <Th className="text-right">Monto SIGA (S/)</Th>
             <Th className="text-right">Comprom. MEF (S/)</Th>
             <Th className="text-right">Deveng. MEF (S/)</Th>
@@ -82,7 +88,7 @@ export function TablaDinamica({
         </tbody>
         <tfoot>
           <tr className="border-t-2 border-primary bg-primary/10 font-semibold">
-            <Td colSpan={4} className="text-sm">
+            <Td colSpan={6} className="text-sm">
               Total {agrupado ? 'general' : ''} (filtrado)
               <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {totalGlobal.n_pedidos} pedidos ·{' '}
@@ -129,7 +135,7 @@ function FilasGrupo({
           className="cursor-pointer border-y border-primary/25 bg-primary/10 hover:bg-primary/15"
           onClick={onToggle}
         >
-          <Td colSpan={5} className="font-semibold">
+          <Td colSpan={7} className="font-semibold">
             <div className="flex items-center gap-2">
               {cerrado ? (
                 <ChevronRight className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
@@ -173,7 +179,7 @@ function FilasGrupo({
           pidió el total "debajo" de los pedidos, como Excel. */}
       {mostrarCabecera && !cerrado ? (
         <tr className="border-b border-border bg-muted/40 text-[13px]">
-          <Td colSpan={5} className="text-right text-xs font-medium text-muted-foreground">
+          <Td colSpan={7} className="text-right text-xs font-medium text-muted-foreground">
             Subtotal · {grupo.etiqueta}
           </Td>
           <Td className="text-right font-mono font-semibold tabular-nums">
@@ -211,8 +217,19 @@ function FilaPedidoRow({
   ccLabel: CentroCostoLabelFn;
   sangria: boolean;
 }) {
+  const { abrir } = useModales();
   return (
-    <tr className="border-b border-border/60 hover:bg-muted/30">
+    <tr
+      onClick={() =>
+        abrir({
+          tipo: 'pedido',
+          nroPedido: fila.nro_pedido,
+          tipoBien: fila.tipo_bien,
+          tipoPedido: fila.tipo_pedido ?? '',
+        })
+      }
+      className="cursor-pointer border-b border-border/60 hover:bg-muted/30"
+    >
       <Td>
         <div className={cn('min-w-0', sangria && 'pl-6')}>
           <div className="font-mono text-[13px] text-foreground">
@@ -221,19 +238,35 @@ function FilaPedidoRow({
               {fila.tipo_bien === 'B' ? 'bien' : fila.tipo_bien === 'S' ? 'servicio' : fila.tipo_bien}
             </span>
           </div>
-          <div className="truncate text-xs text-muted-foreground" title={`Meta ${fila.sec_func} · ${fila.nombre_meta ?? ''}`}>
-            Meta {fila.sec_func}
-            {fila.clasificador !== '(sin clasificador)' ? (
-              <span className="ml-1 font-mono">· {fila.clasificador}</span>
+          <div
+            className="truncate text-xs font-medium text-foreground"
+            title={`Meta ${fila.sec_func} · ${fila.nombre_meta ?? ''}`}
+          >
+            <span className="font-mono">Meta {fila.sec_func}</span>
+            {fila.nombre_meta ? <span className="font-normal text-muted-foreground"> · {fila.nombre_meta}</span> : null}
+          </div>
+          <div className="truncate text-[11px] text-muted-foreground/80">
+            {fila.act_proy ? (
+              <span className="font-mono" title={`${fila.categoria === 'proyecto' ? 'Proyecto' : 'Producto'} ${fila.act_proy}`}>
+                {fila.categoria === 'proyecto' ? 'Proy.' : 'Prod.'} {fila.act_proy}
+              </span>
             ) : null}
-            {fila.clasificador_nombre ? ` · ${fila.clasificador_nombre}` : ''}
+            {fila.clasificador !== '(sin clasificador)' ? (
+              <span className="ml-1 font-mono">· clasif. {fila.clasificador}</span>
+            ) : null}
+            {fila.clasificador_nombre ? (
+              <span className="text-muted-foreground/70"> {fila.clasificador_nombre}</span>
+            ) : null}
           </div>
           {fila.motivo ? (
-            <div className="truncate text-[11px] text-muted-foreground/80" title={fila.motivo}>
+            <div className="truncate text-[11px] text-muted-foreground/70" title={fila.motivo}>
               {fila.motivo}
             </div>
           ) : null}
         </div>
+      </Td>
+      <Td>
+        <BadgeCategoria categoria={fila.categoria} />
       </Td>
       <Td>{fila.centro_costo ? <ChipCC codigo={fila.centro_costo} ccLabel={ccLabel} /> : <Dash />}</Td>
       <Td>
@@ -247,6 +280,9 @@ function FilaPedidoRow({
       </Td>
       <Td className={cn('text-right font-mono tabular-nums', fila.estancado && 'font-semibold text-destructive')}>
         {fila.dias_en_etapa ?? '—'}
+      </Td>
+      <Td className="text-right">
+        <AvanceMeta pct={fila.pct_devengado_meta} color={fila.semaforo_meta} />
       </Td>
       <Td className="text-right font-mono tabular-nums text-[13px]">{formatearNumero(fila.monto_siga)}</Td>
       <Td className="text-right font-mono tabular-nums text-[13px]">
@@ -282,6 +318,47 @@ function FilaPedidoRow({
 }
 
 // ─── Piezas ──────────────────────────────────────────────────────────────
+
+/** Badge de naturaleza del gasto: proyecto de inversión vs producto/actividad. */
+function BadgeCategoria({ categoria }: { categoria: CategoriaMeta }) {
+  const esProyecto = categoria === 'proyecto';
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
+        esProyecto
+          ? 'bg-primary/10 text-primary ring-primary/30'
+          : 'bg-secondary/15 text-secondary-foreground ring-secondary/30',
+      )}
+      title={esProyecto ? 'Proyecto de inversión (act. 2xxxxxx)' : 'Producto / actividad (gasto corriente)'}
+    >
+      {esProyecto ? 'Proyecto' : 'Producto'}
+    </span>
+  );
+}
+
+/**
+ * Avance devengado/PIM de la META (no del pedido). Punto de color del semáforo
+ * temporal + el %. Es contexto: mide cómo va la meta completa, nunca se suma.
+ */
+function AvanceMeta({ pct, color }: { pct: number | null; color: string }) {
+  const punto: Record<string, string> = {
+    verde: 'bg-semaforo-ok',
+    amarillo: 'bg-semaforo-alerta',
+    rojo: 'bg-semaforo-critico',
+  };
+  const dot = punto[color] ?? 'bg-muted-foreground';
+  if (pct == null) return <Dash />;
+  return (
+    <span
+      className="inline-flex items-center justify-end gap-1.5 font-mono text-[13px] tabular-nums"
+      title={`Devengado ${formatearNumero(pct, 1)}% del PIM de la meta (avance de la meta completa, no del pedido)`}
+    >
+      <span className={cn('inline-block h-2 w-2 shrink-0 rounded-full', dot)} aria-hidden="true" />
+      {formatearNumero(pct, 1)}%
+    </span>
+  );
+}
 
 function Identificadores({ fila }: { fila: FilaPedido }) {
   return (

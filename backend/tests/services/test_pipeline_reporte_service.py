@@ -57,12 +57,16 @@ def _patchers(cards, clasif, mef_meta, mef_celda):
     """Aplica todos los mocks; devuelve el resultado del reporte."""
     with patch.object(svc.pipeline_service, "clasificar_pedidos", return_value=cards), \
          patch.object(svc.pipeline_read_repo, "clasificador_por_pedido", return_value=clasif), \
+         patch.object(svc.pipeline_read_repo, "ordenes_pecosas_por_meta", return_value=({}, {})), \
          patch.object(svc.ejecucion_mef_repo, "ejecucion_por_meta", return_value=mef_meta), \
          patch.object(svc.ejecucion_mef_repo, "ejecucion_por_celda_clasificador", return_value=mef_celda), \
          patch.object(svc.ejecucion_mef_repo, "mes_maximo_ejecutado", return_value=7), \
          patch.object(svc.semaforo_service, "color_temporal", return_value=_ctx()), \
          patch.object(svc.semaforo_service, "avance_esperado", return_value=58.33), \
-         patch.object(svc, "_nombres_meta", return_value={73: "Meta 73"}), \
+         patch.object(svc, "_info_meta", return_value={73: {
+             "nombre": "Meta 73", "meta": "0073",
+             "tipo_meta": "actividad_generica", "act_proy": "3999999",
+         }}), \
          patch.object(svc, "_catalogo_cc", return_value=[]), \
          patch.object(svc, "_sincronizado", return_value={"siga": None, "mef": None}):
         return svc.reporte_profesional(db=None, ano=2026, centros=None)
@@ -189,6 +193,69 @@ def test_conteo_en_contratacion_y_ejecucion():
     assert meta["n_pedidos"] == 4
 
 
+# ─── Órdenes y PECOSAS por meta (pestañas O/C, O/S, PECOSAS) ─────────────
+
+def test_ordenes_y_pecosas_se_adjuntan_a_su_meta_sin_tocar_mef():
+    # La meta 73 tiene una O/C, una O/S y una PECOSA en el snapshot. Deben
+    # colgarse de la meta tal cual, y NO alterar los totales MEF (son trámite,
+    # no presupuesto).
+    cards = [_card(1, 73, monto=100)]
+    clasif = {("B", "2", 1): {"clasificador": "3.1.1.1.1", "monto": 100.0}}
+    mef_meta = {73: _mef_meta(2000, 900, 800)}
+    mef_celda = {(73, "3.1.1.1.1"): _mef_celda(2000, 900, 800)}
+
+    ordenes = {73: [
+        {"nro_orden": 501, "tipo_bien": "B", "estado": "Emitida",
+         "total_fact_soles": 5500.0, "proveedor_nombre": "PROV SAC"},
+        {"nro_orden": 77, "tipo_bien": "S", "estado": "Devengada",
+         "total_fact_soles": 3200.0, "proveedor_nombre": "SERV EIRL"},
+    ]}
+    pecosas = {73: [
+        {"nro_pecosa": 9001, "nro_orden": 501, "tipo_bien": "B",
+         "fecha_movimto": None, "total_fact_soles": 5500.0},
+    ]}
+
+    with patch.object(svc.pipeline_service, "clasificar_pedidos", return_value=cards), \
+         patch.object(svc.pipeline_read_repo, "clasificador_por_pedido", return_value=clasif), \
+         patch.object(svc.pipeline_read_repo, "ordenes_pecosas_por_meta",
+                      return_value=(ordenes, pecosas)) as opm, \
+         patch.object(svc.ejecucion_mef_repo, "ejecucion_por_meta", return_value=mef_meta), \
+         patch.object(svc.ejecucion_mef_repo, "ejecucion_por_celda_clasificador", return_value=mef_celda), \
+         patch.object(svc.ejecucion_mef_repo, "mes_maximo_ejecutado", return_value=7), \
+         patch.object(svc.semaforo_service, "color_temporal", return_value=_ctx()), \
+         patch.object(svc.semaforo_service, "avance_esperado", return_value=58.33), \
+         patch.object(svc, "_info_meta", return_value={73: {
+             "nombre": "Meta 73", "meta": "0073",
+             "tipo_meta": "actividad_generica", "act_proy": "3999999",
+         }}), \
+         patch.object(svc, "_catalogo_cc", return_value=[]), \
+         patch.object(svc, "_sincronizado", return_value={"siga": None, "mef": None}):
+        r = svc.reporte_profesional(db=None, ano=2026, centros=None)
+
+    # Se consultó el lote con las metas visibles.
+    opm.assert_called_once()
+    assert opm.call_args.args[2] == [73]
+
+    meta = r["metas"][0]
+    assert [o["nro_orden"] for o in meta["ordenes"]] == [501, 77]
+    assert [p["nro_pecosa"] for p in meta["pecosas"]] == [9001]
+    # El trámite operativo NO altera el total MEF real (devengado 1× por meta).
+    assert r["totales"]["total_mef_devengado"] == 800.0
+
+
+def test_metas_sin_ordenes_ni_pecosas_traen_listas_vacias():
+    cards = [_card(1, 73, monto=100)]
+    clasif = {("B", "2", 1): {"clasificador": "3.1.1.1.1", "monto": 100.0}}
+    mef_meta = {73: _mef_meta(500, 200, 150)}
+    mef_celda = {(73, "3.1.1.1.1"): _mef_celda(500, 200, 150)}
+
+    r = _patchers(cards, clasif, mef_meta, mef_celda)  # órdenes/pecosas = ({}, {})
+    meta = r["metas"][0]
+
+    assert meta["ordenes"] == []
+    assert meta["pecosas"] == []
+
+
 # ─── Catálogo de CC en la respuesta (nombre/sigla para filtro y tabla) ───
 
 def test_catalogo_cc_se_incluye_en_la_respuesta():
@@ -201,12 +268,16 @@ def test_catalogo_cc_se_incluye_en_la_respuesta():
     cc_info = [{"codigo": "080104", "nombre": "Gerencia Municipal", "sigla": "GM"}]
     with patch.object(svc.pipeline_service, "clasificar_pedidos", return_value=cards), \
          patch.object(svc.pipeline_read_repo, "clasificador_por_pedido", return_value=clasif), \
+         patch.object(svc.pipeline_read_repo, "ordenes_pecosas_por_meta", return_value=({}, {})), \
          patch.object(svc.ejecucion_mef_repo, "ejecucion_por_meta", return_value=mef_meta), \
          patch.object(svc.ejecucion_mef_repo, "ejecucion_por_celda_clasificador", return_value=mef_celda), \
          patch.object(svc.ejecucion_mef_repo, "mes_maximo_ejecutado", return_value=7), \
          patch.object(svc.semaforo_service, "color_temporal", return_value=_ctx()), \
          patch.object(svc.semaforo_service, "avance_esperado", return_value=58.33), \
-         patch.object(svc, "_nombres_meta", return_value={73: "Meta 73"}), \
+         patch.object(svc, "_info_meta", return_value={73: {
+             "nombre": "Meta 73", "meta": "0073",
+             "tipo_meta": "actividad_generica", "act_proy": "3999999",
+         }}), \
          patch.object(svc, "_catalogo_cc", return_value=cc_info) as cat, \
          patch.object(svc, "_sincronizado", return_value={"siga": None, "mef": None}):
         r = svc.reporte_profesional(db=None, ano=2026, centros=None)

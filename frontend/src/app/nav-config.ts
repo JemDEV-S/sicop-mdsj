@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  ArrowLeftRight,
   BarChart3,
   Building2,
   GitBranch,
@@ -9,8 +10,6 @@ import {
   ScrollText,
   Settings,
   UserCog,
-  Users,
-  Wallet,
 } from 'lucide-react';
 
 export type Rol = 'ciudadano' | 'operativo' | 'decisor' | 'admin';
@@ -49,9 +48,8 @@ export const navInterna: NavSection[] = [
     id: 'principal',
     items: [
       { label: 'Panel', to: '/interno', icono: LayoutDashboard },
-      { label: 'Pipeline', to: '/interno/pipeline', icono: GitBranch },
-      { label: 'Saldos', to: '/interno/saldos', icono: Wallet },
-      { label: 'Proveedores', to: '/interno/proveedores', icono: Users },
+      { label: 'Análisis por meta', to: '/interno/analisis', icono: GitBranch },
+      { label: 'Cruce SIAF ↔ SIGA', to: '/interno/cruce', icono: ArrowLeftRight },
     ],
   },
   {

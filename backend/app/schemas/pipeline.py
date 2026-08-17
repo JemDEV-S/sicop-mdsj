@@ -683,9 +683,49 @@ class CeldaClasificador(BaseModel):
     pedidos: list[PedidoReporte] = []
 
 
+class OrdenReporte(BaseModel):
+    """Orden de compra (O/C, bien) o de servicio (O/S) de una meta.
+
+    Sale del snapshot `siga.ordenes` (misma fuente que el puente pedido↔orden),
+    keyed por `sec_func`. `tipo_bien` separa O/C ('B') de O/S ('S').
+    """
+    nro_orden: int
+    tipo_bien: str                    # 'B' → O/C · 'S' → O/S
+    clasificador: str | None = None
+    estado: str | None = None         # estado SIGA de la orden
+    estado_siaf: str | None = None
+    exp_siaf: int | None = None
+    total_fact_soles: float = 0
+    concepto: str | None = None
+    proveedor_nombre: str | None = None
+    proveedor_ruc: str | None = None
+    fecha_orden: date | None = None
+    # Recepción de la orden ('1'=pendiente, '2'=parcial, '3'=completa).
+    flag_recep: str | None = None
+
+
+class PecosaReporte(BaseModel):
+    """PECOSA (despacho de almacén) de una meta, vía la orden que la origina."""
+    nro_pecosa: int
+    nro_orden: int | None = None
+    tipo_bien: str
+    nro_guia: str | None = None
+    fecha_movimto: date | None = None
+    proveedor_nombre: str | None = None
+    total_fact_soles: float = 0
+
+
 class MetaReporte(BaseModel):
     sec_func: int
     nombre_meta: str | None = None
+    # Nº de meta legible (ref.metas.meta, p.ej. "0001") — no la llave interna.
+    meta: str | None = None
+    # Clasificación SIAF cruda por naturaleza del gasto (4 valores) y su vista
+    # binaria: "proyecto" (inversión) vs "producto" (actividad/gasto corriente).
+    tipo_meta: str | None = None
+    categoria: Literal["producto", "proyecto"] = "producto"
+    # Código de la actividad/proyecto (act_proy, 7 díg.) — para verificar en SIAF.
+    act_proy: str | None = None
     centros_costo: list[str] = []
     n_pedidos: int
     en_contratacion: int
@@ -695,6 +735,10 @@ class MetaReporte(BaseModel):
     n_celdas: int
     n_celdas_directas: int
     celdas: list[CeldaClasificador] = []
+    # Trámite operativo SIGA de la meta (pestañas O/C, O/S, PECOSAS del reporte).
+    # Salen del snapshot PG keyed por sec_func — no inflan ningún total MEF.
+    ordenes: list[OrdenReporte] = []
+    pecosas: list[PecosaReporte] = []
 
 
 class ReporteTotales(BaseModel):

@@ -34,7 +34,7 @@ export function SectionCard({
   return (
     <section
       className={cn(
-        'bg-gradient-to-br from-card via-card to-muted/25 border border-border rounded-md shadow-sm',
+        'bg-card border border-border rounded-lg shadow-sm',
         className,
       )}
     >
