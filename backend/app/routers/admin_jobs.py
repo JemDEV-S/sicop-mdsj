@@ -7,14 +7,24 @@ Requieren rol `admin` (Depends require_role). Ver `Docs/actividad-3-arquitectura
 from __future__ import annotations
 
 from datetime import datetime
+from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.jobs import scheduler as sched
+from app.jobs.import_formato_a import importar_formato_a
 from app.models.enums import CodigoRol
 from app.security.deps import CurrentUser, require_role
 from app.services import auditoria_service
@@ -26,6 +36,22 @@ class TriggerResponse(BaseModel):
     job_id: str
     nombre: str
     estado: str
+
+
+class CargaFormatoAResponse(BaseModel):
+    """Resultado de subir un Excel SIAF Formato A (carga provisional)."""
+
+    archivo: str
+    ano: int
+    registros: int          # filas cargadas (del ano de corte)
+    descartadas: int        # filas ignoradas (sin fase / de otro ano)
+    ejecutora: str | None
+    periodo: str | None
+    resumen_por_fase: dict[str, float]  # monto S/. por fase, estado 'A'
+
+
+_EXT_PERMITIDAS = (".xlsx", ".xlsm")
+_MAX_BYTES = 25 * 1024 * 1024  # 25 MB: el Formato A ronda 1-3 MB.
 
 
 class RunEstadoResponse(BaseModel):
@@ -83,6 +109,7 @@ class EstadoSincronizacionResponse(BaseModel):
 # aisladas en try/except para que una tabla ausente no tumbe todo el endpoint.
 _SNAPSHOTS: list[tuple[str, str, str]] = [
     ("SIAF ejecución", "sincronizado_en", "siaf.ejecucion_presupuestal"),
+    ("SIAF detalle (Formato A)", "cargado_en", "siaf.ejecucion_detalle_siaf"),
     ("Invierte.pe (obras)", "sincronizado_en", "siaf.inversiones"),
     ("SIGA pedidos", "sincronizado_en", "siga.pedidos"),
     ("Catálogos (metas)", "sincronizado_en", "ref.metas"),
@@ -162,6 +189,79 @@ def trigger_revisar_resoluciones(
     db.commit()
     return TriggerResponse(
         job_id=job_id, nombre="revisar_resoluciones", estado="en_curso"
+    )
+
+
+@router.post(
+    "/cargar-formato-a",
+    response_model=CargaFormatoAResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def cargar_formato_a(
+    request: Request,
+    archivo: UploadFile = File(...),
+    ano: int | None = None,
+    user: CurrentUser = Depends(require_role(CodigoRol.admin)),
+    db: Session = Depends(get_db),
+) -> CargaFormatoAResponse:
+    """Sube el Excel SIAF "Formato A" y lo carga en siaf.ejecucion_detalle_siaf.
+
+    Carga PROVISIONAL: complementa la ejecucion agregada de la API MEF con el
+    detalle por documento (expediente, fase, proveedor, clasificador). Reemplaza
+    las filas del ano de corte (swap atomico por ano). Requiere rol admin.
+
+    `ano` es opcional: si se omite, se deduce de la cabecera del reporte
+    (PERIODO) y, en su defecto, del ano mas frecuente en las filas.
+    """
+    nombre = archivo.filename or "formato_a.xlsx"
+    if not nombre.lower().endswith(_EXT_PERMITIDAS):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Formato no soportado. Se esperaba {' o '.join(_EXT_PERMITIDAS)}.",
+        )
+
+    contenido = archivo.file.read()
+    if not contenido:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo esta vacio.",
+        )
+    if len(contenido) > _MAX_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="El archivo excede el limite de 25 MB.",
+        )
+
+    try:
+        resultado = importar_formato_a(BytesIO(contenido), nombre, ano)
+    except Exception as exc:  # noqa: BLE001 — se reporta al cliente y se audita.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"No se pudo procesar el Excel: {exc}",
+        ) from exc
+
+    auditoria_service.registrar_desde_request(
+        db,
+        request,
+        accion="cargar_formato_a",
+        usuario_id=user.id,
+        detalle={
+            "archivo": nombre,
+            "ano": resultado.ano,
+            "registros": resultado.registros,
+            "descartadas": resultado.descartadas,
+        },
+    )
+    db.commit()
+
+    return CargaFormatoAResponse(
+        archivo=nombre,
+        ano=resultado.ano,
+        registros=resultado.registros,
+        descartadas=resultado.descartadas,
+        ejecutora=resultado.ejecutora,
+        periodo=resultado.periodo,
+        resumen_por_fase=resultado.resumen_por_fase,
     )
 
 

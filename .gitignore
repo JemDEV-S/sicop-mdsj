@@ -50,6 +50,12 @@ logs/
 var/
 _data/
 
+# ─── Cargas provisionales SIAF (Formato A) ────────────────────────
+# Excel crudos del SIAF (Modulo Administrativo, Formato A) con datos
+# reales de la muni. Se cargan al PG via endpoint de admin; el archivo
+# fuente se mantiene local, fuera del repo.
+excel/
+
 # ─── Logs y artefactos runtime ────────────────────────────────────
 *.log
 openapi.json

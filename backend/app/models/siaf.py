@@ -87,6 +87,94 @@ class EjecucionPresupuestal(Base):
     )
 
 
+class EjecucionDetalleSiaf(Base):
+    """Detalle a nivel de DOCUMENTO del SIAF (reporte "Formato A").
+
+    Carga PROVISIONAL desde el Excel del Modulo Administrativo (subido por un
+    admin). Complementa `ejecucion_presupuestal` (que viene agregada por
+    sec_func/mes desde la API MEF) con lo que la API no publica: expediente,
+    fase (C/D/G/P/R) con su documento, proveedor (RUC + razon social),
+    clasificador completo y fechas por fase.
+
+    Regla anti-inflado: esta tabla NO es fuente de totales de presupuesto. Los
+    montos autoritativos siguen siendo del SIAF/MEF via `ejecucion_presupuestal`
+    (ver memoria `feedback-mef-unica-fuente-presupuesto`). Aqui los montos son
+    por documento y llevan signo (las rectificaciones se netean).
+    """
+
+    __tablename__ = "ejecucion_detalle_siaf"
+    __table_args__ = (
+        Index("ix_ejec_det_ano_exp", "ano_eje", "expediente"),
+        Index("ix_ejec_det_ano_sec_func", "ano_eje", "sec_func"),
+        Index("ix_ejec_det_ano_fase", "ano_eje", "fase"),
+        Index("ix_ejec_det_proveedor", "proveedor_ruc"),
+        Index("ix_ejec_det_clasificador", "ano_eje", "clasificador"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(BIGINT, primary_key=True, autoincrement=True)
+
+    # Identidad del documento-fase.
+    expediente: Mapped[str] = mapped_column(String(20), nullable=False)
+    ano_eje: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    sec_ejec: Mapped[str | None] = mapped_column(String(10))
+    ciclo: Mapped[str | None] = mapped_column(String(2))
+    fase: Mapped[str | None] = mapped_column(String(2))
+    fase_nombre: Mapped[str | None] = mapped_column(String(20))
+    sub_reg: Mapped[str | None] = mapped_column(String(8))
+    correlativo: Mapped[str | None] = mapped_column(String(8))
+    secuencia_padre: Mapped[str | None] = mapped_column(String(8))
+    origen: Mapped[str | None] = mapped_column(String(4))
+
+    tipo_op: Mapped[str | None] = mapped_column(String(4))
+    mod_compra: Mapped[str | None] = mapped_column(String(4))
+
+    # Cadena programatica / clasificador.
+    producto_proyecto: Mapped[str | None] = mapped_column(String(20))
+    funcion: Mapped[str | None] = mapped_column(String(6))
+    meta: Mapped[str | None] = mapped_column(String(10))
+    sec_func: Mapped[int | None] = mapped_column(BIGINT)
+    clasificador: Mapped[str | None] = mapped_column(String(30))
+
+    # Fuente de financiamiento.
+    rubro: Mapped[str | None] = mapped_column(String(4))
+    rubro_nombre: Mapped[str | None] = mapped_column(String(160))
+    tipo_financ: Mapped[str | None] = mapped_column(String(120))
+
+    # Documento sustento.
+    cod_doc: Mapped[str | None] = mapped_column(String(6))
+    num_doc: Mapped[str | None] = mapped_column(String(60))
+    fecha_doc: Mapped[date | None] = mapped_column(Date)
+    tipo_giro: Mapped[str | None] = mapped_column(String(4))
+
+    # Proveedor / beneficiario.
+    tipo_prov: Mapped[str | None] = mapped_column(String(4))
+    proveedor_ruc: Mapped[str | None] = mapped_column(String(20))
+    proveedor_nombre: Mapped[str | None] = mapped_column(Text)
+
+    # Montos (por documento, con signo).
+    monto_origen: Mapped[float] = mapped_column(
+        Numeric(18, 2), nullable=False, server_default=text("0")
+    )
+    monto_soles: Mapped[float] = mapped_column(
+        Numeric(18, 2), nullable=False, server_default=text("0")
+    )
+
+    # Fechas por fase y estado del registro.
+    fecha_aprobacion: Mapped[date | None] = mapped_column(Date)
+    fecha_proceso: Mapped[date | None] = mapped_column(Date)
+    sec_est: Mapped[str | None] = mapped_column(String(4))
+    est_registro: Mapped[str | None] = mapped_column(String(4))
+    certificado: Mapped[str | None] = mapped_column(String(20))
+    certificado_secuencia: Mapped[str | None] = mapped_column(String(8))
+
+    # Procedencia de la carga (provisional): archivo + momento.
+    origen_archivo: Mapped[str | None] = mapped_column(Text)
+    cargado_en: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class Inversion(Base):
     __tablename__ = "inversiones"
     __table_args__ = (
