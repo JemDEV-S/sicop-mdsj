@@ -308,6 +308,20 @@ def _datos_pipeline_reporte(
     data = pipeline_reporte_service.reporte_profesional(
         db, ano=filtros.get("ano") or settings.ANO_VIGENTE, centros=centros
     )
+
+    # Alcance del reporte: los mismos dos recortes que la vista aplica en el
+    # cliente (ModalReporte), para que el PDF/Excel coincida con lo mostrado —
+    # una meta puntual (sec_func) o la naturaleza del gasto (categoría). Si no
+    # se envía ninguno, se exporta todo el ámbito visible del CC.
+    metas = data["metas"]
+    sec_func_filtro = filtros.get("sec_func")
+    if sec_func_filtro is not None:
+        metas = [m for m in metas if m["sec_func"] == int(sec_func_filtro)]
+    else:
+        categoria = filtros.get("categoria")
+        if categoria in ("producto", "proyecto"):
+            metas = [m for m in metas if m.get("categoria") == categoria]
+
     # Catálogo código → etiqueta (nombre + sigla) para que el CC del Excel sea
     # legible, igual que en la vista. Cae al código si no hay nombre.
     cc_label = {
@@ -321,7 +335,7 @@ def _datos_pipeline_reporte(
         return cc_label.get(codigo, codigo) if codigo else None
 
     filas: list[dict[str, Any]] = []
-    for m in data["metas"]:
+    for m in metas:
         mef_meta = m["mef"]
         cc_meta = ", ".join(_cc(c) or c for c in m["centros_costo"]) or None
         for c in m["celdas"]:

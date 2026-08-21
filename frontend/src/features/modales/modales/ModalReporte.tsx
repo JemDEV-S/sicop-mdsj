@@ -3,15 +3,23 @@
 // ejecución, distribución por macrofase (dona), ejecución por clasificador
 // (doble barra PIM/devengado), embudo de fases, y la lista de requerimientos.
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Download, Loader2 } from 'lucide-react';
 import { formatearMoneda, formatearNumero } from '@/lib/formatters';
-import { useEjecucionSiafAgregada, useReportePipeline } from '@/features/pipeline/api';
+import { cn } from '@/lib/utils';
+import {
+  descargarReportePipelinePdf,
+  useEjecucionSiafAgregada,
+  useReportePipeline,
+} from '@/features/pipeline/api';
 import type { MetaReporte, PedidoReporte } from '@/features/pipeline/reporte-types';
 import type { Macrofase } from '@/features/dashboard/types';
 import { selloDetalleSiaf } from '@/features/pipeline/siaf-cobertura';
-import { EstadoChip, TileFase } from '@/features/panel/ui/primitivas';
+import { EstadoChip, type Tono } from '@/features/panel/ui/primitivas';
+import { TileFase } from '@/features/panel/ui/primitivas';
 import { tonoDeColor, ETIQUETA_SEMAFORO } from '@/features/panel/lib/semaforo';
 import { LABEL_MACROFASE, MACROFASES } from '@/features/pipeline/secciones/reporte/constantes';
+import { useContextoInterno } from '@/store/contexto-interno';
 import { useModales, type EntradaModal } from '../ModalesContext';
 import { CargandoModal, ErrorModal } from '../EstadoModal';
 import { ModalBloque, ModalHead } from '../ui';
@@ -32,6 +40,29 @@ export function ModalReporte({ entrada }: { entrada: Entrada }) {
   const { secFunc, categoria = 'todas' } = entrada;
   const { data, isLoading, isError, error, refetch } = useReportePipeline();
   const { abrir } = useModales();
+  const año = useContextoInterno((s) => s.añoActivo);
+  const ccActivo = useContextoInterno((s) => s.ccActivo);
+  const [descargando, setDescargando] = useState(false);
+  const [errorDescarga, setErrorDescarga] = useState(false);
+
+  // Descarga el PDF oficial (auditado en el backend, RN-08) con los MISMOS
+  // recortes que el modal muestra, para que el documento sea fiel a lo visto.
+  const descargarPdf = async () => {
+    setDescargando(true);
+    setErrorDescarga(false);
+    try {
+      await descargarReportePipelinePdf({
+        ano: año,
+        centro_costo: ccActivo?.codigo,
+        sec_func: secFunc ?? undefined,
+        categoria: categoria === 'producto' || categoria === 'proyecto' ? categoria : undefined,
+      });
+    } catch {
+      setErrorDescarga(true);
+    } finally {
+      setDescargando(false);
+    }
+  };
 
   // Detalle SIAF agregado (Formato A) del ámbito visible: girado/pagado que el
   // snapshot MEF no expone. Solo tiene sentido a nivel de ámbito (no de una meta
@@ -94,9 +125,44 @@ export function ModalReporte({ entrada }: { entrada: Entrada }) {
     { label: 'Devengado', valor: totales.devengado, barra: 'bg-secondary' },
   ];
 
+  // Salud de metas del ámbito: reparto por semáforo temporal (dato nuevo, no
+  // está en la dona ni el embudo). Solo tiene sentido con más de una meta.
+  const saludMetas = resumenSemaforo(metas);
+
   return (
     <div className="flex flex-col gap-4">
-      <ModalHead overline="Reporte de ejecución" titulo={titulo} descripcion={sub} />
+      <ModalHead
+        overline="Reporte de ejecución"
+        titulo={titulo}
+        descripcion={sub}
+        aside={
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={descargarPdf}
+              disabled={descargando}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md border border-primary bg-card px-3 py-1.5 text-[12.5px] font-medium text-primary transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                descargando ? 'cursor-wait opacity-70' : 'hover:bg-primary/5',
+              )}
+            >
+              {descargando ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Download className="h-4 w-4" aria-hidden="true" />
+              )}
+              {descargando ? 'Generando PDF…' : 'Descargar PDF'}
+            </button>
+            {errorDescarga ? (
+              <span className="text-[10.5px] text-destructive">
+                No se pudo generar el PDF. Intentá de nuevo.
+              </span>
+            ) : (
+              <span className="text-[10px] text-muted-foreground">Documento oficial · auditado</span>
+            )}
+          </div>
+        }
+      />
 
       {/* Cards */}
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
@@ -137,6 +203,17 @@ export function ModalReporte({ entrada }: { entrada: Entrada }) {
           </div>
         </ModalBloque>
       </div>
+
+      {/* Salud de metas del ámbito (semáforo temporal). Dato de decisión: dónde
+          hay atraso. Solo con más de una meta (con una, su estado va al pie). */}
+      {saludMetas && saludMetas.total > 1 ? (
+        <ModalBloque
+          titulo="Salud de metas del ámbito"
+          nota={`Avance de devengado contra lo esperado (${data.avance_esperado}% al mes ${data.mes_corte}). Metas sin PIM o sin ejecución quedan «sin dato».`}
+        >
+          <SaludMetas resumen={saludMetas} />
+        </ModalBloque>
+      ) : null}
 
       {/* Rastro de tesorería del ámbito (Formato A) — sólo a nivel de ámbito,
           no de una meta puntual, para que el agregado coincida con lo mostrado. */}
@@ -277,6 +354,69 @@ function CajaSiaf({ totales }: { totales: Record<string, number> }) {
           resaltar={t.resaltar}
         />
       ))}
+    </div>
+  );
+}
+
+// ─── Salud de metas del ámbito (reparto por semáforo temporal) ───────────
+
+// Orden y presentación de los estados. El color CODIFICA y el texto siempre
+// acompaña (sistema de diseño §3: nunca color solo). "Sin dato" al final.
+const ESTADOS_SALUD: { tono: Tono; barra: string }[] = [
+  { tono: 'critico', barra: 'bg-semaforo-critico' },
+  { tono: 'alerta', barra: 'bg-semaforo-alerta' },
+  { tono: 'ok', barra: 'bg-semaforo-ok' },
+  { tono: 'neutral', barra: 'bg-muted-foreground/40' },
+];
+
+interface ResumenSemaforo {
+  total: number;
+  conteo: Record<Tono, number>;
+}
+
+function resumenSemaforo(metas: MetaReporte[]): ResumenSemaforo | null {
+  if (metas.length === 0) return null;
+  const conteo = { ok: 0, alerta: 0, accent: 0, critico: 0, neutral: 0, primary: 0 } as Record<Tono, number>;
+  for (const m of metas) {
+    conteo[tonoDeColor(m.mef.semaforo)] += 1;
+  }
+  return { total: metas.length, conteo };
+}
+
+function SaludMetas({ resumen }: { resumen: ResumenSemaforo }) {
+  const { total, conteo } = resumen;
+  const visibles = ESTADOS_SALUD.filter((e) => conteo[e.tono] > 0);
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Barra apilada proporcional */}
+      <div className="flex h-6 w-full overflow-hidden rounded-md bg-muted" role="img" aria-label="Reparto de metas por estado">
+        {visibles.map((e) => {
+          const pct = (conteo[e.tono] / total) * 100;
+          return (
+            <div
+              key={e.tono}
+              className={cn('h-full', e.barra)}
+              style={{ width: `${pct}%` }}
+              title={`${ETIQUETA_SEMAFORO[e.tono]}: ${conteo[e.tono]} de ${total}`}
+            />
+          );
+        })}
+      </div>
+      {/* Leyenda con conteo + % (color + texto, nunca color solo) */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-4">
+        {ESTADOS_SALUD.map((e) => {
+          const n = conteo[e.tono];
+          const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+          return (
+            <div key={e.tono} className={cn('flex items-center gap-2', n === 0 && 'opacity-40')}>
+              <span className={cn('h-2.5 w-2.5 shrink-0 rounded-[2px]', e.barra)} aria-hidden="true" />
+              <span className="text-dato flex-1 text-foreground">{ETIQUETA_SEMAFORO[e.tono]}</span>
+              <span className="font-mono text-[12px] font-semibold tabular-nums text-foreground">{n}</span>
+              <span className="w-9 text-right font-mono text-[10.5px] tabular-nums text-muted-foreground">{pct}%</span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
