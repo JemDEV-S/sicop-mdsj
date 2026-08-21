@@ -88,6 +88,13 @@ export const router = createBrowserRouter([
             }
           },
           {
+            path: 'ejecucion-siaf',
+            lazy: async () => {
+              const { default: Analisis } = await import('../pages/interno/Analisis');
+              return { Component: () => <Analisis vistaInicial="ejecucion" /> };
+            }
+          },
+          {
             path: 'pedidos/:nroPedido/:tipoBien/:tipoPedido',
             lazy: async () => {
               const { default: Pedido } = await import('../pages/interno/Pedido');

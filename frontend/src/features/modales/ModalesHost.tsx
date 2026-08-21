@@ -15,7 +15,7 @@ import { ModalReporte } from './modales/ModalReporte';
 const ANCHO: Record<TipoModal, string> = {
   pedido: 'max-w-5xl',
   orden: 'max-w-3xl',
-  siaf: 'max-w-3xl',
+  siaf: 'max-w-5xl',
   pecosa: 'max-w-2xl',
   reporte: 'max-w-6xl',
 };

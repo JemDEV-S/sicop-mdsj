@@ -105,6 +105,7 @@ class EjecucionDetalleSiaf(Base):
     __tablename__ = "ejecucion_detalle_siaf"
     __table_args__ = (
         Index("ix_ejec_det_ano_exp", "ano_eje", "expediente"),
+        Index("ix_ejec_det_ano_mes", "ano_eje", "mes_corte"),
         Index("ix_ejec_det_ano_sec_func", "ano_eje", "sec_func"),
         Index("ix_ejec_det_ano_fase", "ano_eje", "fase"),
         Index("ix_ejec_det_proveedor", "proveedor_ruc"),
@@ -117,6 +118,10 @@ class EjecucionDetalleSiaf(Base):
     # Identidad del documento-fase.
     expediente: Mapped[str] = mapped_column(String(20), nullable=False)
     ano_eje: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    # Mes del corte (1-12), del PERIODO de la cabecera del Formato A. Llave del
+    # swap por (año, mes): cada carga reemplaza solo su mes. El Formato A se
+    # exporta por mes; el rastro completo se arma acumulando meses.
+    mes_corte: Mapped[int | None] = mapped_column(SmallInteger)
     sec_ejec: Mapped[str | None] = mapped_column(String(10))
     ciclo: Mapped[str | None] = mapped_column(String(2))
     fase: Mapped[str | None] = mapped_column(String(2))
@@ -173,6 +178,9 @@ class EjecucionDetalleSiaf(Base):
     cargado_en: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )
+    # Fecha de emision del reporte Formato A (cabecera). El mes de corte puede
+    # diferir del MEF; la UI la muestra como sello del dato provisional.
+    emitido_en: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
 
 class Inversion(Base):

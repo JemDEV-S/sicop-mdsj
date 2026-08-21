@@ -13,8 +13,24 @@ import type {
   ReporteResponse,
 } from '../../reporte-types';
 
-/** Filtro de naturaleza del gasto de la barra de ámbito. */
+/**
+ * Filtro de naturaleza del gasto de la barra de ámbito. Es la primera bandera
+ * de la vista: siempre está activa y condiciona qué metas son buscables/
+ * elegibles. 'todas' no filtra por naturaleza. Por defecto arranca en 'proyecto'.
+ */
 export type FiltroCategoria = 'todas' | CategoriaMeta;
+
+/** Naturaleza del gasto por defecto al abrir la vista: proyectos de inversión. */
+export const CATEGORIA_DEFECTO: FiltroCategoria = 'proyecto';
+
+/** Metas visibles de una naturaleza. 'todas' devuelve el universo. Base de buscador y chips. */
+export function metasDeCategoria(
+  data: ReporteResponse,
+  categoria: FiltroCategoria,
+): MetaReporte[] {
+  if (categoria === 'todas') return data.metas;
+  return data.metas.filter((m) => m.categoria === categoria);
+}
 
 /**
  * Identificador de meta que ve el funcionario: el SEC_FUNC (llave de SIGA que
@@ -55,21 +71,29 @@ export interface AgregadoAmbito {
 }
 
 /**
- * Metas del ámbito tras aplicar la naturaleza del gasto. Si hay meta elegida,
- * el ámbito se restringe a esa meta (la selección manda sobre el filtro).
+ * Metas del ámbito. La naturaleza del gasto (categoría) SIEMPRE filtra — es la
+ * primera bandera y manda. Si además hay una meta elegida, el ámbito se refina
+ * a esa meta (que ya es de la categoría activa; ver `metaEsDeCategoria`).
  */
 export function metasDelAmbito(
   data: ReporteResponse,
   metaSel: number | null,
   categoria: FiltroCategoria,
 ): MetaReporte[] {
-  let metas = data.metas;
-  if (metaSel != null) {
-    metas = metas.filter((m) => m.sec_func === metaSel);
-  } else if (categoria !== 'todas') {
-    metas = metas.filter((m) => m.categoria === categoria);
-  }
-  return metas;
+  const deCategoria = metasDeCategoria(data, categoria);
+  if (metaSel == null) return deCategoria;
+  return deCategoria.filter((m) => m.sec_func === metaSel);
+}
+
+/** True si la meta elegida pertenece a la naturaleza activa (para auto-limpiar). */
+export function metaEsDeCategoria(
+  data: ReporteResponse,
+  metaSel: number | null,
+  categoria: FiltroCategoria,
+): boolean {
+  if (metaSel == null || categoria === 'todas') return true;
+  const m = data.metas.find((x) => x.sec_func === metaSel);
+  return m != null && m.categoria === categoria;
 }
 
 /** La meta seleccionada, o null si el ámbito es "todo lo visible". */

@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
-import type { EstadoSincronizacion, TriggerManual } from './types';
+import type {
+  CargaFormatoAResultado,
+  EstadoSincronizacion,
+  TriggerManual,
+} from './types';
 
 /**
  * Hooks de la vista de estado de sincronizaciones (admin-only).
@@ -42,6 +46,35 @@ export function useTriggerSync() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'sincronizacion', 'estado'] });
+    },
+  });
+}
+
+/**
+ * Sube un Excel del "Formato A" del SIAF (carga provisional del detalle por
+ * documento). El backend deduce año y mes de la cabecera del reporte y reemplaza
+ * solo ese mes (swap por año+mes): así se carga el histórico mes a mes y el mes
+ * en curso se recarga a diario sin duplicar. Al terminar, invalida el estado de
+ * sincronización para que la corrida aparezca en el historial.
+ */
+export function useCargarFormatoA() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (archivo: File): Promise<CargaFormatoAResultado> => {
+      const form = new FormData();
+      form.append('archivo', archivo);
+      const { data } = await apiClient.post<CargaFormatoAResultado>(
+        '/admin/jobs/cargar-formato-a',
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      );
+      return data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'sincronizacion', 'estado'] });
+      // El detalle SIAF cambió: refrescar lo que lo consume (modales, reportes).
+      qc.invalidateQueries({ queryKey: ['interno', 'expediente-siaf'] });
+      qc.invalidateQueries({ queryKey: ['interno', 'ejecucion-siaf-agregada'] });
     },
   });
 }

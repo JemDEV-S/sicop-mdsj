@@ -4,7 +4,9 @@ Modelo jerarquico en dos niveles (ver Docs/exploracion-siga-pipeline-extendido.m
 
     Macrofases (6): solicitud, programacion, certificacion, contratacion,
                     ejecucion, cierre.
-    Etapas detalladas: 13 para servicios, 16 para bienes.
+    Etapas detalladas: 15 para servicios, 18 para bienes. Girado y Pagado
+    (SIAF, del Formato A) aplican a ambos; solo Kardex/Pedido interno/PECOSA
+    (12-14) son exclusivas de bienes.
 
 Un pedido cae en la etapa mas avanzada cuya evidencia existe en SIGA.
 El widget del dashboard consume por macrofase; el pipeline detallado
@@ -29,8 +31,8 @@ Macrofase = Literal[
     "contratacion", "ejecucion", "cierre",
 ]
 
-# Etapas detalladas (codigo estable). Servicios usan 1-11 + 15-16.
-# Bienes usan las 16.
+# Etapas detalladas (codigo estable). Servicios usan 1-11 + 15-18.
+# Bienes usan las 18 (incluyen 12-14: kardex, pedido interno, PECOSA).
 ETAPA_PEDIDO_REGISTRADO      = "pedido_registrado"        # [1]
 ETAPA_PEDIDO_APROBADO        = "pedido_aprobado"          # [2]
 ETAPA_CUADRO_NECESIDAD       = "cuadro_necesidad"         # [3]
@@ -46,7 +48,13 @@ ETAPA_RECEPCION_KARDEX       = "recepcion_kardex"         # [12] solo B
 ETAPA_PEDIDO_INTERNO         = "pedido_interno"           # [13] solo B
 ETAPA_DESPACHO_PECOSA        = "despacho_pecosa"          # [14] solo B
 ETAPA_DEVENGADO              = "devengado"                # [15]
-ETAPA_CIERRE                 = "cierre"                   # [16]
+# Girado y Pagado (SIAF): la salida real de caja hacia el proveedor. No existen
+# en SIGA (que llega hasta orden + recepcion); su dato duro viene del Formato A
+# (siaf.ejecucion_detalle_siaf, carga provisional). Sin Formato A cargado quedan
+# `sin_dato`. Ver Docs/plan-trazabilidad-siaf-formato-a.md §4.2.
+ETAPA_GIRADO                 = "girado"                   # [16]
+ETAPA_PAGADO                 = "pagado"                   # [17]
+ETAPA_CIERRE                 = "cierre"                   # [18]
 
 ETAPAS_ORDEN: tuple[str, ...] = (
     ETAPA_PEDIDO_REGISTRADO,
@@ -64,6 +72,8 @@ ETAPAS_ORDEN: tuple[str, ...] = (
     ETAPA_PEDIDO_INTERNO,
     ETAPA_DESPACHO_PECOSA,
     ETAPA_DEVENGADO,
+    ETAPA_GIRADO,
+    ETAPA_PAGADO,
     ETAPA_CIERRE,
 )
 
@@ -83,6 +93,8 @@ ETAPA_A_MACROFASE: dict[str, Macrofase] = {
     ETAPA_PEDIDO_INTERNO:     "ejecucion",
     ETAPA_DESPACHO_PECOSA:    "ejecucion",
     ETAPA_DEVENGADO:          "ejecucion",
+    ETAPA_GIRADO:             "ejecucion",
+    ETAPA_PAGADO:             "ejecucion",
     ETAPA_CIERRE:             "cierre",
 }
 
@@ -110,6 +122,8 @@ ETAPA_A_LABEL: dict[str, str] = {
     ETAPA_PEDIDO_INTERNO:     "Pedido interno",
     ETAPA_DESPACHO_PECOSA:    "Despacho (PECOSA)",
     ETAPA_DEVENGADO:          "Devengado",
+    ETAPA_GIRADO:             "Girado",
+    ETAPA_PAGADO:             "Pagado",
     ETAPA_CIERRE:             "Cierre",
 }
 
@@ -448,7 +462,7 @@ class DocumentoEtapa(BaseModel):
 
 
 class TimelineEvento(BaseModel):
-    """Un evento verificable del timeline del pedido (13/16 hitos posibles)."""
+    """Un evento verificable del timeline del pedido (15/18 hitos posibles)."""
     etapa: str
     etapa_numero: int
     etapa_label: str
@@ -461,6 +475,10 @@ class TimelineEvento(BaseModel):
     estado: EstadoEtapa = "sin_dato"
     # Compatibilidad: excluye `grupo` — un avance ajeno no es de este pedido.
     alcanzada: bool = False
+    # Monto neto de la fase, cuando el dato es duro del Formato A (Devengado,
+    # Girado, Pagado). null en las etapas SIGA (que no llevan monto por fase).
+    # Carga PROVISIONAL: nunca es un KPI de tablero (RN §3, anti-inflado).
+    monto: float | None = None
 
 
 class PedidoDetalleResponse(BaseModel):
@@ -510,6 +528,58 @@ class PedidoDetalleResponse(BaseModel):
     conformidades: list[Conformidad]
     movimientos_almacen: list[MovimientoAlmacen] = []
     timeline: list[TimelineEvento] = []
+
+
+# ─── Detalle SIAF por expediente (Formato A, carga provisional) ──────────
+#
+# Rompe la ceguera SIAF del pipeline: el rastro duro llega hasta orden +
+# recepcion (SIGA); de ahi al pago el sistema era ciego. El Formato A trae el
+# detalle por documento (fase, proveedor, monto) que la API MEF no publica.
+# Regla anti-inflado (RN §3): esto es SOLO trazabilidad; los totales de tablero
+# siguen saliendo del snapshot MEF agregado. La UI lo rotula "detalle SIAF ·
+# carga provisional" con la fecha de emision del reporte.
+
+
+class DocumentoFaseSiaf(BaseModel):
+    """Un documento sustento de una fase (con su monto neteado)."""
+    cod_doc: str | None = None
+    num_doc: str | None = None
+    fecha_doc: date | None = None
+    monto_soles: float = 0
+
+
+class FaseExpedienteSiaf(BaseModel):
+    """Una fase del ciclo de gasto de un expediente, ya neteada (§4.1).
+
+    `monto_neto` suma los registros vigentes (est_registro='A' AND sec_est='N');
+    las rectificaciones/anulaciones ya se cancelaron.
+    """
+    fase: str                         # 'C' | 'D' | 'G' | 'P' | 'R'
+    fase_nombre: str
+    monto_neto: float = 0
+    fecha_min: date | None = None
+    fecha_max: date | None = None
+    n_documentos: int = 0
+    proveedor_ruc: str | None = None
+    proveedor_nombre: str | None = None
+    documentos: list[DocumentoFaseSiaf] = []
+
+
+class DetalleExpedienteSiafResponse(BaseModel):
+    """Fases netadas de un expediente SIAF + procedencia del dato."""
+    exp_siaf: int
+    ano_eje: int
+    # True si hay Formato A cargado para el año (degradacion limpia: si no,
+    # `fases` va vacio y la UI muestra "aun no se ha cargado el Formato A").
+    tiene_datos: bool = False
+    # Meses (1-12) cargados del año. El Formato A se carga por mes; el rastro se
+    # arma acumulando meses. La UI lo rotula para no confundir "sin dato" con
+    # "mes no cargado".
+    meses_cargados: list[int] = []
+    # Fecha de emision del reporte Formato A (mes de corte puede diferir del MEF).
+    emitido_en: datetime | None = None
+    cargado_en: datetime | None = None
+    fases: list[FaseExpedienteSiaf] = []
 
 
 # ─── Vista de bolsa y resolucion manual (§5, §8.2) ───────────────────────

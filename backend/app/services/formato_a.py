@@ -93,6 +93,15 @@ FASES = {
 }
 
 
+# Meses del PERIODO de la cabecera ("2026 - AGOSTO"). Incluye variantes de
+# ortografia (SETIEMBRE/SEPTIEMBRE) que aparecen en los reportes del SIAF.
+MESES_PERIODO = {
+    "ENERO": 1, "FEBRERO": 2, "MARZO": 3, "ABRIL": 4, "MAYO": 5, "JUNIO": 6,
+    "JULIO": 7, "AGOSTO": 8, "SETIEMBRE": 9, "SEPTIEMBRE": 9, "OCTUBRE": 10,
+    "NOVIEMBRE": 11, "DICIEMBRE": 12,
+}
+
+
 @dataclass
 class CabeceraFormatoA:
     """Metadatos del reporte (filas 3-6 + fecha de emision)."""
@@ -100,6 +109,7 @@ class CabeceraFormatoA:
     ejecutora: str | None = None
     periodo: str | None = None          # p.ej. "2026 - AGOSTO"
     ano: int | None = None
+    mes: int | None = None              # 1-12, derivado del PERIODO
     emitido_en: datetime | None = None
 
 
@@ -163,6 +173,19 @@ def _ruc(v: Any) -> str | None:
     return _s(v)
 
 
+def _codigo(v: Any) -> str | None:
+    """Codigo numerico que Excel entrega como float (sec_ejec = 300687.0).
+
+    Lo devolvemos como texto entero sin el `.0` para que cruce con
+    `settings.SEC_EJEC` ('300687') y con el resto del sistema. Un codigo con
+    ceros a la izquierda no aplica aqui (sec_ejec es el pliego, no lleva pad)."""
+    if v in (None, "", " "):
+        return None
+    if isinstance(v, (int, float)):
+        return str(int(v))
+    return _s(v)
+
+
 # ─── Nucleo del parseo ───────────────────────────────────────────────────────
 
 def _es_fila_dato(fila: tuple[Any, ...]) -> bool:
@@ -184,6 +207,9 @@ def _cabecera_reporte(por_fila: dict[int, tuple[Any, ...]]) -> CabeceraFormatoA:
             cab.periodo = valor
             if valor:
                 cab.ano = _i(valor.split("-")[0].strip())
+                # El mes va tras el "-": "2026 - AGOSTO" -> 8.
+                nombre_mes = valor.split("-")[-1].strip().upper()
+                cab.mes = MESES_PERIODO.get(nombre_mes)
         # Fecha de emision: primer datetime de la fila 1.
         if fila and fila is por_fila.get(1):
             for celda in fila:
@@ -203,7 +229,7 @@ def _mapear_fila(fila: tuple[Any, ...]) -> dict[str, Any]:
     return {
         "expediente": _s(g("expediente")),
         "ano_eje": _i(g("ano_eje")),
-        "sec_ejec": _s(g("sec_ejec")),
+        "sec_ejec": _codigo(g("sec_ejec")),
         "tipo_op": _s(g("tipo_op")),
         "mod_compra": _s(g("mod_compra")),
         "ciclo": _s(g("ciclo")),

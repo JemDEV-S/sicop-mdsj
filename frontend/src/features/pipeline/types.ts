@@ -134,6 +134,8 @@ export interface TimelineEvento {
   documentos: DocumentoEtapa[];
   /** Excluye `grupo`: un avance ajeno no es avance de este pedido. */
   alcanzada: boolean;
+  /** Monto neto de la fase cuando el dato es duro del Formato A (D/G/P). */
+  monto: number | null;
 }
 
 // ─── Bolsa (SEC_CUA_MOD_SAL) ─────────────────────────────────────────────
@@ -244,6 +246,76 @@ export interface PedidoDetalle {
   conformidades: Conformidad[];
   movimientos_almacen: MovimientoAlmacen[];
   timeline: TimelineEvento[];
+}
+
+// ─── Detalle SIAF por expediente (Formato A, carga provisional) ──────────
+//
+// Rompe la ceguera SIAF del pipeline: el rastro duro llega hasta orden +
+// recepción (SIGA); de ahí al pago era ciego. El Formato A trae el detalle por
+// documento (fase, proveedor, monto) que la API MEF no publica. Es SOLO
+// trazabilidad — nunca un total de tablero. La UI lo rotula "detalle SIAF ·
+// carga provisional" con la fecha de emisión.
+
+export interface DocumentoFaseSiaf {
+  cod_doc: string | null;
+  num_doc: string | null;
+  fecha_doc: string | null;
+  monto_soles: number;
+}
+
+export interface FaseExpedienteSiaf {
+  fase: string; // 'C' | 'D' | 'G' | 'P' | 'R'
+  fase_nombre: string;
+  monto_neto: number;
+  fecha_min: string | null;
+  fecha_max: string | null;
+  n_documentos: number;
+  proveedor_ruc: string | null;
+  proveedor_nombre: string | null;
+  documentos: DocumentoFaseSiaf[];
+}
+
+export interface DetalleExpedienteSiaf {
+  exp_siaf: number;
+  ano_eje: number;
+  /** false si nadie cargó el Formato A del año (degradación limpia). */
+  tiene_datos: boolean;
+  /** Meses (1-12) cargados del año. El rastro se arma acumulando meses. */
+  meses_cargados: number[];
+  /** Fecha de emisión del reporte (mes de corte puede diferir del MEF). */
+  emitido_en: string | null;
+  cargado_en: string | null;
+  fases: FaseExpedienteSiaf[];
+}
+
+// ─── Ejecución SIAF agregada (Fase 2: proveedor / clasificador / rubro) ──
+
+export interface FilaEjecucionAgregada {
+  proveedor_ruc?: string | null;
+  proveedor_nombre?: string | null;
+  clasificador?: string | null;
+  rubro?: string | null;
+  rubro_nombre?: string | null;
+  certificado: number;
+  devengado: number;
+  girado: number;
+  pagado: number;
+  /** devengado − pagado: brecha de tesorería (dinero comprometido sin salir). */
+  en_transito: number;
+  n_expedientes: number;
+  n_metas: number;
+}
+
+export interface EjecucionAgregadaSiaf {
+  ano: number;
+  group_by: 'proveedor' | 'clasificador' | 'rubro';
+  tiene_datos: boolean;
+  /** Meses (1-12) cargados del año. */
+  meses_cargados: number[];
+  emitido_en: string | null;
+  cargado_en: string | null;
+  totales_por_fase: Record<string, number>;
+  filas: FilaEjecucionAgregada[];
 }
 
 // ─── Anotaciones internas (HU-10 AC-10.4) ────────────────────────────────

@@ -1,16 +1,23 @@
 // Modal · Orden (O/C u O/S). Datos reales de useDetallePedido → OrdenAsociada.
 // Estructura de la plantilla v2: cabecera con total facturado + estado a la
-// derecha, "Avance SIAF de esta orden" (fases en columnas) con enlace al
-// expediente, y "Datos de la orden" + "Documentos ligados".
+// derecha, "Avance SIAF de esta orden" con enlace al expediente, y "Datos de la
+// orden" + "Documentos ligados".
+//
+// El avance SIAF usa el detalle real del Formato A del expediente de la orden
+// (monto por fase, girado/pagado/en tránsito) cuando está cargado; si no hay
+// Formato A, cae a las fases binarias derivadas del estado SIAF (degradación
+// limpia) — nunca inventa el desglose que el SIGA no da.
 
 import { formatearMoneda, formatFecha } from '@/lib/formatters';
-import { useDetallePedido } from '@/features/pipeline/api';
+import { useDetalleExpedienteSiaf, useDetallePedido } from '@/features/pipeline/api';
 import { EstadoChip } from '@/features/panel/ui/primitivas';
 import type { MovimientoAlmacen, OrdenAsociada } from '@/features/pipeline/types';
 import { useModales, type EntradaModal } from '../ModalesContext';
 import { CargandoModal, ErrorModal } from '../EstadoModal';
 import { ChipInfo, FilaDato, ModalBloque, ModalHead } from '../ui';
 import { FasesColumnas, type FaseCol } from '../componentes/Fases';
+import { BarrasFasesSiaf, CajaTesoreria } from '../componentes/DetalleFasesSiaf';
+import { ordenarFases, selloDeDetalle } from '../componentes/detalle-fases-siaf-lib';
 import { ListaLigados, type Ligado } from '../componentes/FilaLigado';
 import { fasesDeEstadoSiaf, tonoEstadoSiaf } from '../lib/estados';
 
@@ -20,6 +27,10 @@ export function ModalOrden({ entrada }: { entrada: Entrada }) {
   const { nroPedido, tipoBien, tipoPedido, nroOrden } = entrada;
   const { data, isLoading, isError, error, refetch } = useDetallePedido({ nroPedido, tipoBien, tipoPedido });
   const { abrir } = useModales();
+
+  const ordenPrev = data?.ordenes.find((o) => o.nro_orden === nroOrden);
+  const expSiaf = ordenPrev?.exp_siaf ?? null;
+  const siaf = useDetalleExpedienteSiaf(expSiaf);
 
   if (isLoading) return <CargandoModal texto={`Cargando orden ${nroOrden}…`} />;
   if (isError || !data) {
@@ -37,8 +48,14 @@ export function ModalOrden({ entrada }: { entrada: Entrada }) {
   const tipoLabel = orden.tipo_bien === 'S' ? 'Orden de servicio' : 'Orden de compra';
   const total = orden.total_fact_soles;
 
-  // Fases derivadas del estado SIAF real; el monto solo se muestra en las
-  // alcanzadas (no inventamos desglose por fase que el SIGA no da).
+  // Detalle real por fase del expediente (Formato A). Cuando está cargado,
+  // reemplaza las fases binarias por el monto real (girado/pagado/en tránsito).
+  const detalle = siaf.data;
+  const { fases: fasesReales } = ordenarFases(detalle);
+  const tieneDetalleReal = Boolean(detalle?.tiene_datos) && fasesReales.length > 0;
+
+  // Fallback: fases binarias derivadas del estado SIAF real; el monto solo se
+  // muestra en las alcanzadas (no inventamos desglose que el SIGA no da).
   const fasesEstado = fasesDeEstadoSiaf(orden.estado_siaf);
   const fases: FaseCol[] = fasesEstado.map((f) => ({
     label: f.label,
@@ -102,9 +119,20 @@ export function ModalOrden({ entrada }: { entrada: Entrada }) {
             </button>
           ) : null
         }
-        nota="Las fases marcadas reflejan el estado SIAF actual de la orden. El SIGA no desglosa el monto por fase; el total facturado es el dato operativo."
+        nota={
+          tieneDetalleReal
+            ? `${selloDeDetalle(detalle)}. Monto real por fase del expediente; el total facturado (arriba) es el dato operativo del SIGA.`
+            : 'Las fases marcadas reflejan el estado SIAF actual de la orden. El total facturado es el dato operativo; para ver el monto real por fase, carga el Formato A del SIAF.'
+        }
       >
-        <FasesColumnas fases={fases} />
+        {tieneDetalleReal ? (
+          <div className="flex flex-col gap-3">
+            <CajaTesoreria detalle={detalle!} />
+            <BarrasFasesSiaf detalle={detalle!} />
+          </div>
+        ) : (
+          <FasesColumnas fases={fases} />
+        )}
       </ModalBloque>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

@@ -19,7 +19,13 @@ import { ErrorState } from '@/components/layout/ErrorState';
 import Timeline, { type HitoTimeline } from '@/components/Timeline';
 import { formatearMoneda, formatFecha } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
-import { useBolsaPedido, useDetallePedido, useRefrescarPedido } from './api';
+import {
+  useBolsaPedido,
+  useDetalleExpedienteSiaf,
+  useDetallePedido,
+  useRefrescarPedido,
+} from './api';
+import { avisoHistoriaIncompleta, selloDetalleSiaf } from './siaf-cobertura';
 import { Anotaciones } from './Anotaciones';
 import { BolsaPedido } from './BolsaPedido';
 import { CopyChip } from './pipeline-ui';
@@ -622,21 +628,93 @@ function BloqueOrdenes({ ordenes }: { ordenes: OrdenAsociada[] }) {
               ) : null}
             </dl>
 
-            {o.exp_siaf ? (
-              <div className="mt-3">
-                <Link
-                  to={`/interno/cruce/expediente-siaf/${o.exp_siaf}`}
-                  className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                >
-                  Ver ejecución SIAF
-                  <ArrowRight className="w-3 h-3" aria-hidden="true" />
-                </Link>
-              </div>
-            ) : null}
+            {o.exp_siaf ? <EjecucionSiafInline expSiaf={o.exp_siaf} /> : null}
           </li>
         ))}
       </ul>
     </SectionCard>
+  );
+}
+
+// ─── Ejecución SIAF inline (detalle por fase del expediente) ─────────────
+//
+// Rompe la ceguera SIAF del pipeline: expande el rastro Certificado→Devengado→
+// Girado→Pagado con montos reales del Formato A (carga provisional). Se abre
+// bajo demanda para no consultar el detalle de cada expediente al cargar.
+
+const FASE_LABEL_SIAF: Record<string, string> = {
+  C: 'Certificado',
+  D: 'Devengado',
+  G: 'Girado',
+  P: 'Pagado',
+  R: 'Regularización',
+};
+
+function EjecucionSiafInline({ expSiaf }: { expSiaf: number }) {
+  const [abierto, setAbierto] = React.useState(false);
+  const { data, isLoading, isError } = useDetalleExpedienteSiaf(abierto ? expSiaf : null);
+
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        className="inline-flex items-center gap-1 text-xs text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+        aria-expanded={abierto}
+      >
+        {abierto ? 'Ocultar ejecución SIAF' : 'Ver ejecución SIAF'}
+        <ArrowRight
+          className={cn('w-3 h-3 transition-transform', abierto && 'rotate-90')}
+          aria-hidden="true"
+        />
+      </button>
+
+      {abierto ? (
+        <div className="mt-2 border border-border rounded-md p-3 bg-muted/20">
+          {isLoading ? (
+            <p className="text-xs text-muted-foreground">Cargando detalle SIAF…</p>
+          ) : isError ? (
+            <p className="text-xs text-muted-foreground">
+              No se pudo cargar el detalle SIAF. Intentá de nuevo más tarde.
+            </p>
+          ) : !data?.tiene_datos ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Aún no se ha cargado el Formato A del SIAF para este año. Un
+              administrador puede subirlo para ver el monto real por fase.
+            </p>
+          ) : data.fases.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              El expediente aún no registra fases de gasto en el detalle SIAF.
+            </p>
+          ) : (
+            <>
+              <ul className="space-y-1.5">
+                {data.fases.map((f) => (
+                  <li key={f.fase} className="flex items-baseline justify-between gap-3 text-xs">
+                    <span className="text-foreground">{FASE_LABEL_SIAF[f.fase] ?? f.fase_nombre}</span>
+                    <span className="text-muted-foreground">
+                      {f.fecha_max ? formatFecha(f.fecha_max) : ''}
+                    </span>
+                    <span className="font-mono tabular-nums text-foreground ml-auto">
+                      {formatearMoneda(f.monto_neto)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {avisoHistoriaIncompleta(data.fases) ? (
+                <p className="mt-2 rounded-md border border-accent/40 bg-accent/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-accent-foreground">
+                  {avisoHistoriaIncompleta(data.fases)}
+                </p>
+              ) : null}
+              <p className="mt-2 text-[10.5px] leading-relaxed text-muted-foreground">
+                {selloDetalleSiaf(data.meses_cargados)}. Los totales oficiales del
+                tablero salen del MEF.
+              </p>
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -731,7 +809,12 @@ function BloqueTimeline({
   const hitos: HitoTimeline[] = eventos.map((e) => ({
     key: e.etapa,
     titulo: e.etapa_label,
-    detalle: e.detalle,
+    // Las fases con dato duro del Formato A (Devengado/Girado/Pagado) llevan su
+    // monto neto real; se antepone al texto para que se vea en el recorrido.
+    detalle:
+      e.monto != null && e.alcanzada
+        ? `${formatearMoneda(e.monto)} · ${e.detalle ?? ''}`.trim().replace(/·\s*$/, '')
+        : e.detalle,
     fecha: e.fecha,
     estado: e.estado,
     numero: e.etapa_numero,

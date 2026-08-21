@@ -10,6 +10,7 @@ import {
   ScrollText,
   Settings,
   UserCog,
+  Wallet,
 } from 'lucide-react';
 
 export type Rol = 'ciudadano' | 'operativo' | 'decisor' | 'admin';
@@ -50,6 +51,7 @@ export const navInterna: NavSection[] = [
       { label: 'Panel', to: '/interno', icono: LayoutDashboard },
       { label: 'Análisis por meta', to: '/interno/analisis', icono: GitBranch },
       { label: 'Cruce SIAF ↔ SIGA', to: '/interno/cruce', icono: ArrowLeftRight },
+      { label: 'Ejecución SIAF', to: '/interno/ejecucion-siaf', icono: Wallet },
     ],
   },
   {

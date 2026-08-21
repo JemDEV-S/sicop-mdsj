@@ -25,7 +25,9 @@ export type EtapaCodigo =
   | 'pedido_interno'       // [13] solo B
   | 'despacho_pecosa'      // [14] solo B
   | 'devengado'            // [15]
-  | 'cierre';              // [16]
+  | 'girado'               // [16] SIAF (Formato A)
+  | 'pagado'               // [17] SIAF (Formato A)
+  | 'cierre';              // [18]
 
 // ─── Puente pedido<->CCMN y alertas v2 (Guía Pipeline v2 §02) ────────────
 

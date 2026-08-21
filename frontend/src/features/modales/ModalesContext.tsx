@@ -15,7 +15,11 @@ export type EntradaModal =
   | { tipo: 'orden'; nroPedido: number; tipoBien: string; tipoPedido: string; nroOrden: number }
   | { tipo: 'siaf'; nroPedido: number; tipoBien: string; tipoPedido: string; expSiaf: number }
   | { tipo: 'pecosa'; nroPedido: number; tipoBien: string; tipoPedido: string; nroMovimiento: number }
-  | { tipo: 'reporte'; secFunc: number | null };
+  // El reporte agrega una meta puntual (secFunc) o el ámbito completo. Cuando
+  // no hay meta, `categoria` respeta el filtro Producto/Proyecto de la vista:
+  // 'proyecto' | 'producto' agregan solo esa naturaleza; 'todas' (o ausente),
+  // el universo visible.
+  | { tipo: 'reporte'; secFunc: number | null; categoria?: 'todas' | 'producto' | 'proyecto' };
 
 export type TipoModal = EntradaModal['tipo'];
 

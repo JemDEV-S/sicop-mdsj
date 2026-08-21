@@ -74,6 +74,11 @@ class Accion:
     # de una dependencia, sin auditar cada request (eso seria ruido y volumen).
     CONSULTA_CRUCE_META = "consulta_cruce_meta"
     CONSULTA_SALDOS_CC = "consulta_saldos_cc"
+    # Detalle SIAF por documento (Formato A): expone proveedor (RUC) y montos
+    # por fase que la API MEF no publica. Ver quien mira el rastro pago de un
+    # expediente o los reportes agregados por proveedor cuenta como sensible.
+    CONSULTA_DETALLE_SIAF = "consulta_detalle_siaf"
+    CONSULTA_EJECUCION_AGREGADA_SIAF = "consulta_ejecucion_agregada_siaf"
     # Gestion de usuarios (admin-only, HU-17). Alta/edicion/estado, reset de
     # contrasena y asignacion de centros de costo: quien administra el acceso de
     # quien queda registrado.

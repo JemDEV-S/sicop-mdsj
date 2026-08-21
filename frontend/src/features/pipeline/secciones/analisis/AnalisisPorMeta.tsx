@@ -37,9 +37,11 @@ import { TablaPecosas } from './TablaPecosas';
 import { ArbolClasificadores } from './ArbolClasificadores';
 import {
   agregarAmbito,
+  CATEGORIA_DEFECTO,
   esOC,
   esOS,
   indicePedidoPorOrden,
+  metaEsDeCategoria,
   metaSeleccionada,
   metasDelAmbito,
   ordenesDelAmbito,
@@ -64,7 +66,9 @@ export function AnalisisPorMeta({
   const { abrir } = useModales();
 
   const [metaSel, setMetaSel] = useState<number | null>(metaInicial ?? null);
-  const [categoria, setCategoria] = useState<FiltroCategoria>('todas');
+  // La naturaleza del gasto es la primera bandera y arranca en Proyecto. Si se
+  // entra con una meta puntual (metaInicial), se ajusta a la de esa meta abajo.
+  const [categoria, setCategoria] = useState<FiltroCategoria>(CATEGORIA_DEFECTO);
   const [tab, setTab] = useState<TabAnalisis>(tabInicial);
   const [modoReq, setModoReq] = useState<ModoReq>(modoReqInicial);
   const [busqueda, setBusqueda] = useState('');
@@ -77,10 +81,24 @@ export function AnalisisPorMeta({
   const [exportando, setExportando] = useState(false);
   const [errorExport, setErrorExport] = useState<string | null>(null);
 
-  // Si el origen (Panel/Cruce) trae una meta, se re-siembra la selección.
+  // Si el origen (Panel/Cruce) trae una meta, se re-siembra la selección y se
+  // ajusta la naturaleza del gasto a la de esa meta (para que el enlace entrante
+  // funcione tal cual). Ambos setState en el MISMO efecto evitan la carrera con
+  // la coherencia (que aquí no aplica: la meta y su categoría entran juntas).
   useEffect(() => {
-    if (metaInicial != null) setMetaSel(metaInicial);
-  }, [metaInicial]);
+    if (metaInicial == null || !data) return;
+    const m = data.metas.find((x) => x.sec_func === metaInicial);
+    setMetaSel(metaInicial);
+    if (m) setCategoria(m.categoria);
+  }, [metaInicial, data]);
+
+  // Cambiar la naturaleza del gasto (bandera principal) manda sobre la meta: si
+  // la elegida no es de esa naturaleza, se limpia. Se hace en el handler (no en
+  // un efecto reactivo) para no pisar la meta inicial del enlace entrante.
+  const cambiarCategoria = (c: FiltroCategoria) => {
+    setCategoria(c);
+    if (data && !metaEsDeCategoria(data, metaSel, c)) setMetaSel(null);
+  };
 
   const ccLabel = useCentroCostoLabel(data);
 
@@ -168,9 +186,14 @@ export function AnalisisPorMeta({
     );
   }
 
+  // Cuando no hay meta elegida, el ámbito son las metas de la naturaleza activa;
+  // el placeholder del buscador refleja ese conteo (no el universo completo).
+  const nCategoria = metaObj ? 0 : metasAmbito.length;
+  const etiquetaCategoria =
+    categoria === 'proyecto' ? 'proyecto' : categoria === 'producto' ? 'producto' : 'meta';
   const ambitoLabel = metaObj
     ? `Meta ${metaObj.sec_func} — ${metaObj.nombre_meta ?? 'Sin nombre'}`
-    : `Buscar una meta · ${data.metas.length} en el ámbito`;
+    : `Buscar una meta · ${nCategoria} ${etiquetaCategoria}${nCategoria === 1 ? '' : 's'} en el ámbito`;
   const ambitoAyuda = metaObj
     ? metaObj.categoria === 'proyecto'
       ? `Proyecto de inversión ${metaObj.act_proy ?? ''}`.trim()
@@ -199,12 +222,9 @@ export function AnalisisPorMeta({
         data={data}
         metaSel={metaSel}
         categoria={categoria}
-        onMeta={(sf) => {
-          setMetaSel(sf);
-          if (sf != null) setCategoria('todas');
-        }}
-        onCategoria={setCategoria}
-        onReporte={() => abrir({ tipo: 'reporte', secFunc: metaSel })}
+        onMeta={setMetaSel}
+        onCategoria={cambiarCategoria}
+        onReporte={() => abrir({ tipo: 'reporte', secFunc: metaSel, categoria })}
         ambitoLabel={ambitoLabel}
         ambitoAyuda={ambitoAyuda}
       />

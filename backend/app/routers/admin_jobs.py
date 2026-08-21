@@ -43,6 +43,7 @@ class CargaFormatoAResponse(BaseModel):
 
     archivo: str
     ano: int
+    mes: int | None         # mes de corte (1-12) del PERIODO de la cabecera
     registros: int          # filas cargadas (del ano de corte)
     descartadas: int        # filas ignoradas (sin fase / de otro ano)
     ejecutora: str | None
@@ -201,6 +202,7 @@ def cargar_formato_a(
     request: Request,
     archivo: UploadFile = File(...),
     ano: int | None = None,
+    mes: int | None = None,
     user: CurrentUser = Depends(require_role(CodigoRol.admin)),
     db: Session = Depends(get_db),
 ) -> CargaFormatoAResponse:
@@ -208,10 +210,12 @@ def cargar_formato_a(
 
     Carga PROVISIONAL: complementa la ejecucion agregada de la API MEF con el
     detalle por documento (expediente, fase, proveedor, clasificador). Reemplaza
-    las filas del ano de corte (swap atomico por ano). Requiere rol admin.
+    las filas del (ano, mes) de corte (swap por mes): asi se acumula el rastro
+    cargando varios meses y el mes en curso se recarga a diario sin duplicar.
+    Requiere rol admin.
 
-    `ano` es opcional: si se omite, se deduce de la cabecera del reporte
-    (PERIODO) y, en su defecto, del ano mas frecuente en las filas.
+    `ano`/`mes` son opcionales: si se omiten, se deducen de la cabecera del
+    reporte (PERIODO) y, en su defecto, de las fechas mas frecuentes en las filas.
     """
     nombre = archivo.filename or "formato_a.xlsx"
     if not nombre.lower().endswith(_EXT_PERMITIDAS):
@@ -233,7 +237,7 @@ def cargar_formato_a(
         )
 
     try:
-        resultado = importar_formato_a(BytesIO(contenido), nombre, ano)
+        resultado = importar_formato_a(BytesIO(contenido), nombre, ano, mes)
     except Exception as exc:  # noqa: BLE001 — se reporta al cliente y se audita.
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -248,6 +252,7 @@ def cargar_formato_a(
         detalle={
             "archivo": nombre,
             "ano": resultado.ano,
+            "mes": resultado.mes,
             "registros": resultado.registros,
             "descartadas": resultado.descartadas,
         },
@@ -257,6 +262,7 @@ def cargar_formato_a(
     return CargaFormatoAResponse(
         archivo=nombre,
         ano=resultado.ano,
+        mes=resultado.mes,
         registros=resultado.registros,
         descartadas=resultado.descartadas,
         ejecutora=resultado.ejecutora,
