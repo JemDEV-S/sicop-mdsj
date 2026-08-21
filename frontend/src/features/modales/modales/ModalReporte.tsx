@@ -5,10 +5,11 @@
 
 import { useMemo } from 'react';
 import { formatearMoneda, formatearNumero } from '@/lib/formatters';
-import { useReportePipeline } from '@/features/pipeline/api';
+import { useEjecucionSiafAgregada, useReportePipeline } from '@/features/pipeline/api';
 import type { MetaReporte, PedidoReporte } from '@/features/pipeline/reporte-types';
 import type { Macrofase } from '@/features/dashboard/types';
-import { EstadoChip } from '@/features/panel/ui/primitivas';
+import { selloDetalleSiaf } from '@/features/pipeline/siaf-cobertura';
+import { EstadoChip, TileFase } from '@/features/panel/ui/primitivas';
 import { tonoDeColor, ETIQUETA_SEMAFORO } from '@/features/panel/lib/semaforo';
 import { LABEL_MACROFASE, MACROFASES } from '@/features/pipeline/secciones/reporte/constantes';
 import { useModales, type EntradaModal } from '../ModalesContext';
@@ -28,14 +29,25 @@ const COLOR_MACRO: Record<Macrofase, string> = {
 };
 
 export function ModalReporte({ entrada }: { entrada: Entrada }) {
-  const { secFunc } = entrada;
+  const { secFunc, categoria = 'todas' } = entrada;
   const { data, isLoading, isError, error, refetch } = useReportePipeline();
   const { abrir } = useModales();
 
+  // Detalle SIAF agregado (Formato A) del ámbito visible: girado/pagado que el
+  // snapshot MEF no expone. Solo tiene sentido a nivel de ámbito (no de una meta
+  // puntual), porque el agregado no filtra por sec_func. Es carga PROVISIONAL:
+  // rotulado, nunca un total oficial (RN §3).
+  const siafAgregado = useEjecucionSiafAgregada('proveedor');
+
+  // Ámbito del reporte: una meta puntual, o el conjunto de la naturaleza del
+  // gasto activa (Producto/Proyecto) — el mismo filtro que la barra de ámbito.
+  // 'todas' no filtra por naturaleza.
   const metas = useMemo(() => {
     if (!data) return [];
-    return secFunc != null ? data.metas.filter((m) => m.sec_func === secFunc) : data.metas;
-  }, [data, secFunc]);
+    if (secFunc != null) return data.metas.filter((m) => m.sec_func === secFunc);
+    if (categoria === 'todas') return data.metas;
+    return data.metas.filter((m) => m.categoria === categoria);
+  }, [data, secFunc, categoria]);
 
   if (isLoading) return <CargandoModal texto="Cargando reporte de ejecución…" />;
   if (isError || !data) {
@@ -49,7 +61,15 @@ export function ModalReporte({ entrada }: { entrada: Entrada }) {
 
   const totales = agregar(metas);
   const meta = secFunc != null ? metas[0] : null;
-  const titulo = meta ? `${meta.meta ?? meta.sec_func} — ${meta.nombre_meta ?? 'sin nombre'}` : 'Todo el ámbito visible';
+  // El identificador de meta es el SEC_FUNC (número que usa la muni), no el
+  // correlativo SIGA. Sin meta, se rotula el ámbito según la naturaleza activa.
+  const titulo = meta
+    ? `Meta ${meta.sec_func} — ${meta.nombre_meta ?? 'sin nombre'}`
+    : categoria === 'proyecto'
+      ? `Todos los proyectos · ${metas.length} meta${metas.length === 1 ? '' : 's'}`
+      : categoria === 'producto'
+        ? `Todos los productos · ${metas.length} meta${metas.length === 1 ? '' : 's'}`
+        : `Todo el ámbito visible · ${metas.length} meta${metas.length === 1 ? '' : 's'}`;
   const sub = `Corte al mes ${data.mes_corte} · dinero SIAF (1× por meta), trámite SIGA por pedido.`;
   const pedidos = metas.flatMap((m) => m.celdas.flatMap((c) => c.pedidos));
 
@@ -117,6 +137,17 @@ export function ModalReporte({ entrada }: { entrada: Entrada }) {
           </div>
         </ModalBloque>
       </div>
+
+      {/* Rastro de tesorería del ámbito (Formato A) — sólo a nivel de ámbito,
+          no de una meta puntual, para que el agregado coincida con lo mostrado. */}
+      {secFunc == null && siafAgregado.data?.tiene_datos ? (
+        <ModalBloque
+          titulo="Rastro de tesorería del ámbito (SIAF real)"
+          nota={`${selloDetalleSiaf(siafAgregado.data.meses_cargados)}. «En tránsito» = devengado − pagado (dinero comprometido que aún no salió de caja). Explica el gasto oficial; no reemplaza los totales del MEF.`}
+        >
+          <CajaSiaf totales={siafAgregado.data.totales_por_fase} />
+        </ModalBloque>
+      ) : null}
 
       {/* Ejecución por clasificador */}
       <ModalBloque titulo="Ejecución por clasificador (SIAF)" nota="Barra clara: PIM de la celda. Barra sólida: devengado real de la celda.">
@@ -220,6 +251,32 @@ function Card({
       <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
       <span className={`font-mono text-lg font-semibold tabular-nums text-foreground ${valorClass ?? ''}`}>{valor}</span>
       <span className="text-[10.5px] text-muted-foreground">{ayuda}</span>
+    </div>
+  );
+}
+
+// Caja de tesorería agregada del ámbito: cuatro fases del Formato A. Girado y
+// Pagado son lo que el snapshot MEF no da; "En tránsito" = devengado − pagado.
+function CajaSiaf({ totales }: { totales: Record<string, number> }) {
+  const dev = totales.D ?? 0;
+  const pag = totales.P ?? 0;
+  const tiles: { label: string; valor: number; ayuda?: string; resaltar?: boolean }[] = [
+    { label: 'Devengado', valor: dev },
+    { label: 'Girado', valor: totales.G ?? 0 },
+    { label: 'Pagado', valor: pag },
+    { label: 'En tránsito', valor: dev - pag, ayuda: 'devengado − pagado', resaltar: dev - pag > 0 },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+      {tiles.map((t) => (
+        <TileFase
+          key={t.label}
+          label={t.label}
+          valor={formatearMoneda(t.valor, true)}
+          ayuda={t.ayuda}
+          resaltar={t.resaltar}
+        />
+      ))}
     </div>
   );
 }

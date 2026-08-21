@@ -158,6 +158,38 @@ export function KpiTile({
   );
 }
 
+// ─── Tile de fase SIAF (dato numérico compacto etiquetado) ───────────────
+//
+// Fuente única de los "tiles de fase" que antes se dibujaban por separado en
+// CajaTesoreria, la CajaSiaf del ModalReporte y el TotalesPorFase de la
+// Ejecución SIAF. Muestra un valor (monto o conteo) bajo una etiqueta, con
+// una ayuda opcional y resaltado de aviso (amarillo institucional) para
+// "En tránsito" y similares. Cifras en mono + tabular-nums para alinear.
+
+export function TileFase({
+  label,
+  valor,
+  ayuda,
+  resaltar,
+}: {
+  label: string;
+  /** Ya formateado (monto o conteo). '—' si no aplica. */
+  valor: React.ReactNode;
+  ayuda?: React.ReactNode;
+  /** Aviso: resalta el valor en amarillo institucional (p. ej. "En tránsito"). */
+  resaltar?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 rounded-md border border-border px-3 py-2">
+      <span className="text-etiqueta text-muted-foreground">{label}</span>
+      <span className={cn('text-cifra', resaltar ? 'text-accent-foreground' : 'text-foreground')}>
+        {valor}
+      </span>
+      {ayuda ? <span className="text-microdato text-muted-foreground">{ayuda}</span> : null}
+    </div>
+  );
+}
+
 // ─── Barra de fase / progreso etiquetada ─────────────────────────────────
 
 export function BarraFase({
