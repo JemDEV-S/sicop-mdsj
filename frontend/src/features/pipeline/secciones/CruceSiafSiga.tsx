@@ -16,9 +16,21 @@ import { EmptyState } from '@/components/layout/EmptyState';
 import { ErrorState } from '@/components/layout/ErrorState';
 import { formatearMoneda, formatearNumero } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
-import { useReportePipeline } from '../api';
+import { useDetalleExpedienteSiaf, useReportePipeline } from '../api';
 import type { CeldaClasificador, MetaReporte, PedidoReporte, ReporteResponse } from '../reporte-types';
+import type { DetalleExpedienteSiaf } from '../types';
+import {
+  BarrasFasesSiaf,
+  CajaTesoreria,
+  DocumentosPorFase,
+} from '@/features/modales/componentes/DetalleFasesSiaf';
+import {
+  ordenarFases,
+  proveedorDeExpediente,
+  selloDeDetalle,
+} from '@/features/modales/componentes/detalle-fases-siaf-lib';
 import { SemaforoChip } from './reporte/Semaforo';
+import { KpiTile, type KpiChip } from '@/features/panel/ui/primitivas';
 import { useModales } from '@/features/modales/ModalesContext';
 
 interface CruceProps {
@@ -78,61 +90,62 @@ export function CruceSiafSiga({ metaInicial, onAbrirMeta }: CruceProps) {
     : null;
 
   return (
+    <CruceContenido
+      data={data}
+      metaActiva={metaActiva}
+      expBusqueda={expBusqueda}
+      setExpBusqueda={setExpBusqueda}
+      setMetaSelManual={setMetaSelManual}
+      expMatch={expMatch}
+      onAbrirMeta={onAbrirMeta}
+    />
+  );
+}
+
+// El cuerpo se separa para poder llamar el hook de detalle SIAF (que depende del
+// expediente hallado) sin romper las reglas de hooks con los early-returns de
+// carga/error de arriba.
+function CruceContenido({
+  data,
+  metaActiva,
+  expBusqueda,
+  setExpBusqueda,
+  setMetaSelManual,
+  expMatch,
+  onAbrirMeta,
+}: {
+  data: ReporteResponse;
+  metaActiva: MetaReporte | null;
+  expBusqueda: string;
+  setExpBusqueda: (v: string) => void;
+  setMetaSelManual: (v: number | null) => void;
+  expMatch: { meta: MetaReporte; pedido: PedidoReporte } | null;
+  onAbrirMeta: (secFunc: number) => void;
+}) {
+  // El expediente a rastrear: el del pedido hallado por la búsqueda.
+  const expSiaf = expMatch?.pedido.identificadores?.exp_siaf ?? null;
+  const siaf = useDetalleExpedienteSiaf(expSiaf);
+
+  return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">Cruce SIAF ↔ SIGA</h2>
-        <p className="max-w-[80ch] text-sm text-muted-foreground">
-          Lado a lado, el dinero oficial del MEF y el trámite operativo del SIGA. La llave de cruce
-          es la meta más el clasificador de gasto; el expediente SIAF cruza por pedido.
-        </p>
-      </div>
+      {/* ── Rastreador: elegir meta (por sec_func) y/o expediente SIAF ── */}
+      <RastreadorCruce
+        data={data}
+        metaActiva={metaActiva}
+        expBusqueda={expBusqueda}
+        onMeta={(sf) => {
+          setMetaSelManual(sf);
+          setExpBusqueda('');
+        }}
+        onExp={setExpBusqueda}
+        expMatch={expMatch}
+        onAbrirMeta={onAbrirMeta}
+      />
 
-      {/* ── Rastreador ── */}
-      <div className="flex flex-col gap-3 rounded-md border border-border bg-card px-4 py-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex flex-col gap-1 text-[11px] font-medium text-muted-foreground">
-            Meta
-            <select
-              value={metaActiva?.sec_func ?? ''}
-              onChange={(e) => {
-                setMetaSelManual(Number(e.target.value));
-                setExpBusqueda('');
-              }}
-              className="min-w-[280px] rounded-md border border-border bg-card px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {data.metas.map((m) => (
-                <option key={m.sec_func} value={m.sec_func}>
-                  {(m.meta ?? `Meta ${m.sec_func}`) + ' — ' + (m.nombre_meta ?? 'sin nombre')}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex flex-1 flex-col gap-1 text-[11px] font-medium text-muted-foreground">
-            Buscar por expediente SIAF
-            <div className="flex min-w-[220px] items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
-              <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <input
-                value={expBusqueda}
-                onChange={(e) => setExpBusqueda(e.target.value)}
-                placeholder="Ej. 6113"
-                inputMode="numeric"
-                className="min-w-0 flex-1 bg-transparent font-mono text-sm text-foreground outline-none"
-              />
-            </div>
-          </div>
-        </div>
-        {expBusqueda.trim() ? (
-          <p className="text-[11.5px] text-muted-foreground">
-            {expMatch
-              ? `Expediente ${expBusqueda.trim()} hallado en el pedido ${expMatch.pedido.nro_pedido}, meta ${expMatch.meta.meta ?? expMatch.meta.sec_func}.`
-              : `No se encontró un pedido con expediente SIAF que contenga "${expBusqueda.trim()}" en el ámbito visible.`}
-          </p>
-        ) : null}
-
-        {metaActiva ? (
-          <CadenaChips meta={metaActiva} pedidoExp={expMatch?.pedido ?? null} onAbrirMeta={onAbrirMeta} />
-        ) : null}
-      </div>
+      {/* Resumen del cruce de la meta activa: las cifras clave de un vistazo. */}
+      {metaActiva ? (
+        <ResumenCruce meta={metaActiva} mesCorte={data.mes_corte} avanceEsperado={data.avance_esperado} />
+      ) : null}
 
       {metaActiva ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -140,7 +153,333 @@ export function CruceSiafSiga({ metaInicial, onAbrirMeta }: CruceProps) {
           <PanelSiga meta={metaActiva} pedidoResaltado={expMatch?.pedido ?? null} onAbrirMeta={onAbrirMeta} />
         </div>
       ) : null}
+
+      {/* Rastro real del expediente (Formato A) — sólo al buscar por EXP_SIAF.
+          Es lo que la API MEF no da: girado/pagado, proveedor y documentos. */}
+      {expSiaf != null ? (
+        <PanelExpedienteSiaf
+          expSiaf={expSiaf}
+          pedido={expMatch?.pedido ?? null}
+          detalle={siaf.data}
+          cargando={siaf.isLoading}
+          error={siaf.isError}
+        />
+      ) : null}
+
+      {metaActiva ? <NotaLecturaCruce /> : null}
     </div>
+  );
+}
+
+// ─── Resumen del cruce (cifras clave de la meta de un vistazo) ───────────
+
+// Traduce el color del semáforo temporal (backend) al chip de EstadoChip que
+// usa KpiTile — misma convención institucional que SemaforoChip.
+const CHIP_SEMAFORO: Record<string, KpiChip> = {
+  verde: { texto: 'A tiempo', tono: 'ok' },
+  amarillo: { texto: 'En riesgo', tono: 'alerta' },
+  rojo: { texto: 'Atrasado', tono: 'critico' },
+};
+
+function ResumenCruce({
+  meta,
+  mesCorte,
+  avanceEsperado,
+}: {
+  meta: MetaReporte;
+  mesCorte: number;
+  avanceEsperado: number;
+}) {
+  const { pim, devengado, porcentaje_devengado: pct } = meta.mef;
+  const chipDevengado = CHIP_SEMAFORO[meta.mef.semaforo];
+
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <KpiTile
+        label="PIM oficial"
+        fuente="MEF"
+        valor={formatearMoneda(pim, true)}
+        ayuda="techo vigente"
+      />
+      <KpiTile
+        label="Devengado"
+        fuente="MEF"
+        valor={formatearMoneda(devengado, true)}
+        valorClass="text-primary"
+        ayuda={`${pct != null ? `${formatearNumero(pct, 1)}%` : '—'} · esperado ${avanceEsperado}% al mes ${mesCorte}`}
+        chip={chipDevengado}
+      />
+      <KpiTile
+        label="Requerimientos"
+        fuente="SIGA"
+        valor={meta.n_pedidos}
+        ayuda={`${meta.en_ejecucion} en ejecución`}
+      />
+      <KpiTile
+        label="Clasificadores"
+        fuente="SIGA"
+        valor={meta.n_celdas}
+        ayuda={`${meta.n_celdas_directas} con cruce directo`}
+      />
+    </div>
+  );
+}
+
+// Nota de lectura al pie: cómo interpretar los dos lados sin confundirlos.
+function NotaLecturaCruce() {
+  return (
+    <p className="rounded-md border border-dashed border-border bg-card px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+      <span className="font-semibold text-foreground">Cómo leer:</span> el dinero oficial es del{' '}
+      <span className="font-semibold">MEF/SIAF</span> y se cuenta una vez por meta (panel izquierdo).
+      El monto SIGA por pedido es lo solicitado (trámite operativo, referencial), no un total
+      presupuestal. Busca un expediente para ver su rastro real hasta el pago; ese detalle viene del
+      Formato A (carga provisional) y explica el gasto, no lo reemplaza.
+    </p>
+  );
+}
+
+// ─── Rastreador: buscador de meta (por sec_func) + expediente SIAF ───────
+
+function RastreadorCruce({
+  data,
+  metaActiva,
+  expBusqueda,
+  onMeta,
+  onExp,
+  expMatch,
+  onAbrirMeta,
+}: {
+  data: ReporteResponse;
+  metaActiva: MetaReporte | null;
+  expBusqueda: string;
+  onMeta: (secFunc: number | null) => void;
+  onExp: (v: string) => void;
+  expMatch: { meta: MetaReporte; pedido: PedidoReporte } | null;
+  onAbrirMeta: (secFunc: number) => void;
+}) {
+  const [busqueda, setBusqueda] = useState('');
+
+  // Desplegable del buscador de meta: por número de secuencia funcional o
+  // nombre. Igual criterio que "Análisis por meta" (la meta se identifica por
+  // su sec_func, no por el correlativo).
+  const coincidencias = useMemo(() => {
+    const q = busqueda.trim().toLowerCase();
+    if (!q) return [];
+    return data.metas
+      .filter(
+        (m) =>
+          String(m.sec_func).includes(q) ||
+          (m.nombre_meta ?? '').toLowerCase().includes(q),
+      )
+      .slice(0, 8);
+  }, [data.metas, busqueda]);
+
+  // Metas frecuentes = las de mayor PIM del ámbito visible.
+  const chips = useMemo(
+    () => [...data.metas].sort((a, b) => b.mef.pim - a.mef.pim).slice(0, 5),
+    [data.metas],
+  );
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-4">
+      {/* Fila 1 — buscador de meta + buscador de expediente */}
+      <div className="flex flex-wrap items-start gap-3">
+        <span className="mt-2 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Rastrear
+        </span>
+
+        {/* Buscador de meta (desplegable) */}
+        <div className="relative min-w-[280px] flex-1">
+          <div className="flex items-center gap-2 rounded-md border border-border bg-superficie-alt-2 px-3 py-2">
+            <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <input
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder={
+                metaActiva
+                  ? `Meta ${metaActiva.sec_func} — ${metaActiva.nombre_meta ?? 'Sin nombre'}`
+                  : 'Buscar una meta por número de secuencia funcional o nombre'
+              }
+              aria-label="Buscar una meta por número de secuencia funcional o nombre"
+              className="min-w-0 flex-1 border-0 bg-transparent text-sm font-medium text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground"
+            />
+          </div>
+          {coincidencias.length > 0 ? (
+            <ul className="absolute z-30 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-border bg-popover py-1 shadow-lg">
+              {coincidencias.map((m) => (
+                <li key={m.sec_func}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onMeta(m.sec_func);
+                      setBusqueda('');
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
+                  >
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">{m.sec_func}</span>
+                    <span className="min-w-0 flex-1 truncate">{m.nombre_meta ?? 'Sin nombre'}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+
+        {/* Buscador de expediente SIAF */}
+        <div className="flex min-w-[200px] items-center gap-2 rounded-md border border-border bg-superficie-alt-2 px-3 py-2">
+          <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <input
+            value={expBusqueda}
+            onChange={(e) => onExp(e.target.value)}
+            placeholder="Expediente SIAF (ej. 6113)"
+            inputMode="numeric"
+            aria-label="Buscar por expediente SIAF"
+            className="min-w-0 flex-1 bg-transparent font-mono text-sm text-foreground outline-none"
+          />
+        </div>
+      </div>
+
+      {expBusqueda.trim() ? (
+        <p className="text-[11.5px] text-muted-foreground">
+          {expMatch
+            ? `Expediente ${expBusqueda.trim()} hallado en el pedido ${expMatch.pedido.nro_pedido}, meta ${expMatch.meta.sec_func}.`
+            : `No se encontró un pedido con expediente SIAF que contenga "${expBusqueda.trim()}" en el ámbito visible.`}
+        </p>
+      ) : null}
+
+      {/* Fila 2 — metas frecuentes */}
+      {chips.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-3">
+          <span className="text-[11px] text-muted-foreground">Metas frecuentes:</span>
+          {chips.map((m) => {
+            const activo = metaActiva?.sec_func === m.sec_func;
+            return (
+              <button
+                key={m.sec_func}
+                type="button"
+                onClick={() => onMeta(activo ? null : m.sec_func)}
+                aria-pressed={activo}
+                title={m.nombre_meta ?? undefined}
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  activo
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border bg-card text-foreground hover:bg-muted',
+                )}
+              >
+                <span className="font-mono">{m.sec_func}</span>
+                <span className="max-w-[180px] truncate">{m.nombre_meta ?? 'Sin nombre'}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {/* Fila 3 — cadena de identificadores del rastro activo */}
+      {metaActiva ? (
+        <CadenaChips meta={metaActiva} pedidoExp={expMatch?.pedido ?? null} onAbrirMeta={onAbrirMeta} />
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Panel del expediente SIAF (rastro real del Formato A) ────────────────
+
+function PanelExpedienteSiaf({
+  expSiaf,
+  pedido,
+  detalle,
+  cargando,
+  error,
+}: {
+  expSiaf: number;
+  pedido: PedidoReporte | null;
+  detalle: DetalleExpedienteSiaf | null | undefined;
+  cargando: boolean;
+  error: boolean;
+}) {
+  const { abrir } = useModales();
+  const { fases } = ordenarFases(detalle);
+  const tieneFases = Boolean(detalle?.tiene_datos) && fases.length > 0;
+  const { nombre: proveedor, ruc: proveedorRuc } = proveedorDeExpediente(detalle);
+
+  return (
+    <section className="flex flex-col gap-3 rounded-lg border border-border border-t-[3px] border-t-secondary bg-card px-4 py-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold text-foreground">
+          Rastro del expediente <span className="font-mono text-primary">{expSiaf}</span>
+        </h3>
+        <span className="rounded border border-secondary/30 bg-secondary/10 px-1.5 py-px font-mono text-[9.5px] font-semibold uppercase tracking-wide text-secondary-foreground">
+          SIAF real
+        </span>
+        {pedido ? (
+          <button
+            type="button"
+            onClick={() =>
+              abrir({
+                tipo: 'siaf',
+                nroPedido: pedido.nro_pedido,
+                tipoBien: pedido.tipo_bien,
+                tipoPedido: pedido.tipo_pedido ?? '',
+                expSiaf,
+              })
+            }
+            className="ml-auto shrink-0 text-[11.5px] font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Ver expediente completo →
+          </button>
+        ) : null}
+      </div>
+
+      {cargando ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">Cargando detalle SIAF del expediente…</p>
+      ) : error ? (
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          No se pudo cargar el detalle SIAF del expediente. Intenta de nuevo más tarde.
+        </p>
+      ) : !detalle?.tiene_datos ? (
+        <p className="rounded border border-dashed border-border px-3 py-6 text-center text-sm leading-relaxed text-muted-foreground">
+          Aún no se ha cargado el Formato A del SIAF para este año. Un administrador puede subirlo
+          para ver el girado, el pagado y los documentos reales de este expediente.
+        </p>
+      ) : !tieneFases ? (
+        <p className="rounded border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+          El expediente aún no registra fases de gasto en el detalle SIAF.
+        </p>
+      ) : (
+        <>
+          {proveedor ? (
+            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
+              <span className="text-muted-foreground">Proveedor:</span>
+              <span className="font-medium text-foreground">{proveedor}</span>
+              {proveedorRuc ? (
+                <span className="font-mono text-[11px] text-muted-foreground">· RUC {proveedorRuc}</span>
+              ) : null}
+            </div>
+          ) : null}
+          <CajaTesoreria detalle={detalle} />
+          <div>
+            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Monto real por fase
+            </span>
+            <BarrasFasesSiaf detalle={detalle} />
+          </div>
+          <details className="group rounded-md border border-border/70">
+            <summary className="cursor-pointer select-none px-3 py-2 text-[12px] font-medium text-foreground marker:content-none">
+              <span className="text-primary group-open:hidden">Ver documentos sustento por fase</span>
+              <span className="hidden text-primary group-open:inline">Ocultar documentos sustento</span>
+            </summary>
+            <div className="border-t border-border/70 px-3 py-3">
+              <DocumentosPorFase detalle={detalle} />
+            </div>
+          </details>
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            {selloDeDetalle(detalle)}. Explica el gasto oficial (quién, qué documento, cuándo por
+            fase); no reemplaza los totales del MEF de la izquierda.
+          </p>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -159,7 +498,7 @@ function CadenaChips({
   return (
     <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
       <span className="text-[11px] text-muted-foreground">Cadena:</span>
-      <Chip tipo="Meta" valor={meta.meta ?? String(meta.sec_func)} onClick={() => onAbrirMeta(meta.sec_func)} />
+      <Chip tipo="Meta" valor={String(meta.sec_func)} onClick={() => onAbrirMeta(meta.sec_func)} />
       {ids?.pedido ? <Chip tipo="Requerim." valor={ids.pedido} /> : null}
       {ids?.orden ? <Chip tipo="Orden" valor={ids.orden} /> : null}
       {ids?.exp_siaf ? <Chip tipo="Exp. SIAF" valor={String(ids.exp_siaf)} /> : null}
@@ -204,12 +543,10 @@ function PanelMef({
   avanceEsperado: number;
 }) {
   const { pim, comprometido, devengado, porcentaje_devengado: pct } = meta.mef;
-  const filas: { label: string; valor: string; fuerte?: boolean }[] = [
-    { label: 'PIM (techo vigente)', valor: formatearMoneda(pim), fuerte: true },
-    { label: 'Comprometido', valor: formatearMoneda(comprometido) },
-    { label: 'Devengado', valor: formatearMoneda(devengado), fuerte: true },
-    { label: 'Saldo por ejecutar', valor: formatearMoneda(pim - devengado) },
-  ];
+  const saldo = pim - devengado;
+  // La progresión del gasto oficial como barras (única representación; las
+  // cifras "de un vistazo" viven en el resumen KPI, no se repiten aquí). El %
+  // sobre el PIM a la derecha es dato nuevo, no una copia del monto.
   const fases = [
     { label: 'PIM', valor: pim, barra: 'bg-primary' },
     { label: 'Comprometido', valor: comprometido, barra: 'bg-primary/70' },
@@ -217,52 +554,41 @@ function PanelMef({
   ];
 
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-border border-t-4 border-t-primary bg-card px-4 py-4">
-      <div className="flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-foreground">Dinero oficial — SIAF / MEF</h3>
-        <span className="rounded border border-primary/30 bg-primary/10 px-1.5 py-px font-mono text-[9.5px] text-primary">
-          OFICIAL
-        </span>
-      </div>
-      <div className="flex flex-col">
-        {filas.map((f) => (
-          <div key={f.label} className="flex items-center justify-between gap-3 border-b border-border/60 py-1.5">
-            <span className="text-[12px] text-muted-foreground">{f.label}</span>
-            <span
-              className={cn(
-                'font-mono text-[12.5px] tabular-nums',
-                f.fuerte ? 'font-semibold text-foreground' : 'text-muted-foreground',
-              )}
-            >
-              {f.valor}
-            </span>
-          </div>
-        ))}
-      </div>
-      <div className="flex flex-col gap-2 pt-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Fases del snapshot
-        </span>
+    <section className="flex flex-col gap-3 rounded-lg border border-border border-t-[3px] border-t-primary bg-card px-4 py-4">
+      <EncabezadoPanel titulo="Dinero oficial — SIAF / MEF" etiqueta="OFICIAL" tono="primary" />
+      <div className="flex flex-col gap-2">
+        <span className="text-etiqueta text-muted-foreground">Progresión del gasto</span>
         {fases.map((f) => {
           const w = pim > 0 ? Math.round((f.valor / pim) * 100) : 0;
           return (
             <div key={f.label} className="flex items-center gap-3">
-              <span className="w-24 shrink-0 text-[11px] text-foreground">{f.label}</span>
+              <span className="text-dato w-24 shrink-0 text-foreground">{f.label}</span>
               <div className="h-3.5 min-w-0 flex-1 overflow-hidden rounded bg-muted">
                 <div className={cn('h-full rounded', f.barra)} style={{ width: `${w}%` }} />
               </div>
-              <span className="w-24 shrink-0 text-right font-mono text-[11px] tabular-nums text-foreground">
-                {formatearNumero(f.valor, 0)}
+              <span className="text-cifra w-28 shrink-0 text-right text-foreground">
+                {formatearMoneda(f.valor, true)}
+              </span>
+              <span className="w-12 shrink-0 text-right font-mono text-[11px] tabular-nums text-muted-foreground">
+                {pim > 0 ? `${w}%` : '—'}
               </span>
             </div>
           );
         })}
       </div>
-      <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground">
-        <span>
-          Avance {pct != null ? `${formatearNumero(pct, 1)}%` : '—'} · esperado {avanceEsperado}% al mes {mesCorte}
+      {/* Saldo por ejecutar + semáforo temporal: el cierre de contexto del panel
+          (no está en el resumen, así que no es redundante). */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
+        <span className="text-dato text-muted-foreground">
+          Saldo por ejecutar{' '}
+          <span className="text-cifra ml-1 text-foreground">{formatearMoneda(saldo, true)}</span>
         </span>
-        <SemaforoChip color={meta.mef.semaforo} ctx={meta.mef.semaforo_ctx} tamano="xs" />
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">
+            {pct != null ? `${formatearNumero(pct, 1)}%` : '—'} · esperado {avanceEsperado}% al mes {mesCorte}
+          </span>
+          <SemaforoChip color={meta.mef.semaforo} ctx={meta.mef.semaforo_ctx} tamano="xs" />
+        </div>
       </div>
     </section>
   );
@@ -280,18 +606,14 @@ function PanelSiga({
   onAbrirMeta: (secFunc: number) => void;
 }) {
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-border border-t-4 border-t-secondary bg-card px-4 py-4">
-      <div className="flex items-center gap-2">
-        <h3 className="text-sm font-semibold text-foreground">Trámite operativo — SIGA</h3>
-        <span className="rounded border border-secondary/30 bg-secondary/10 px-1.5 py-px font-mono text-[9.5px] text-secondary-foreground">
-          OPERATIVO
-        </span>
-      </div>
-      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11.5px]">
+    <section className="flex flex-col gap-3 rounded-lg border border-border border-t-[3px] border-t-secondary bg-card px-4 py-4">
+      <EncabezadoPanel titulo="Trámite operativo — SIGA" etiqueta="OPERATIVO" tono="secondary" />
+      <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-superficie-alt px-3 py-2 text-[11.5px]">
         <span className="text-muted-foreground">
-          {meta.n_pedidos} pedido{meta.n_pedidos === 1 ? '' : 's'} · {meta.n_celdas} clasificador
-          {meta.n_celdas === 1 ? '' : 'es'} ({meta.n_celdas_directas} directo
-          {meta.n_celdas_directas === 1 ? '' : 's'})
+          <span className="font-semibold text-foreground">{meta.n_pedidos}</span> pedido
+          {meta.n_pedidos === 1 ? '' : 's'} ·{' '}
+          <span className="font-semibold text-foreground">{meta.n_celdas}</span> clasificador
+          {meta.n_celdas === 1 ? '' : 'es'} ({meta.n_celdas_directas} con cruce directo)
         </span>
         <button
           type="button"
@@ -302,11 +624,11 @@ function PanelSiga({
         </button>
       </div>
       {meta.celdas.length === 0 ? (
-        <p className="rounded border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+        <p className="rounded-md border border-dashed border-border px-3 py-8 text-center text-sm text-muted-foreground">
           Esta meta no tiene clasificadores con pedidos en el ámbito visible.
         </p>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2.5">
           {meta.celdas.map((c) => (
             <CeldaSiga key={c.clasificador} celda={c} pedidoResaltado={pedidoResaltado} />
           ))}
@@ -320,6 +642,34 @@ function PanelSiga({
   );
 }
 
+// Encabezado consistente de los paneles del cruce: título + etiqueta de rol
+// (OFICIAL / OPERATIVO / SIAF REAL) con el tono institucional correspondiente.
+function EncabezadoPanel({
+  titulo,
+  etiqueta,
+  tono,
+}: {
+  titulo: string;
+  etiqueta: string;
+  tono: 'primary' | 'secondary';
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <h3 className="text-sm font-semibold text-foreground">{titulo}</h3>
+      <span
+        className={cn(
+          'shrink-0 rounded border px-1.5 py-px font-mono text-[9.5px] font-semibold uppercase tracking-wide',
+          tono === 'primary'
+            ? 'border-primary/30 bg-primary/10 text-primary'
+            : 'border-secondary/30 bg-secondary/10 text-secondary-foreground',
+        )}
+      >
+        {etiqueta}
+      </span>
+    </div>
+  );
+}
+
 function CeldaSiga({
   celda,
   pedidoResaltado,
@@ -330,8 +680,16 @@ function CeldaSiga({
   const { abrir } = useModales();
   return (
     <div className="overflow-hidden rounded-md border border-border">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-superficie-alt px-3 py-2">
         <span className="font-mono text-[11.5px] font-semibold text-primary">{celda.clasificador}</span>
+        {celda.atribucion_directa ? (
+          <span
+            className="rounded border border-secondary/30 bg-secondary/10 px-1.5 py-px text-[9.5px] font-medium text-secondary-foreground"
+            title="Un solo pedido en esta específica de gasto: el cruce SIAF↔SIGA es directo, sin reparto."
+          >
+            cruce directo
+          </span>
+        ) : null}
         <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">
           {celda.clasificador_nombre ?? 'Sin nombre de clasificador'}
         </span>
@@ -359,8 +717,8 @@ function CeldaSiga({
               key={`${p.nro_pedido}-${p.tipo_bien}`}
               onClick={abrirPedido}
               className={cn(
-                'flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left text-[11.5px] transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
-                resaltado && 'bg-primary/5',
+                'flex w-full flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-transparent px-3 py-2 text-left text-[11.5px] transition-colors hover:bg-superficie-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
+                resaltado && 'border-l-primary bg-primary/5',
               )}
             >
               <span className="font-mono font-semibold text-foreground">{p.nro_pedido}</span>
@@ -400,7 +758,8 @@ function CeldaSiga({
                       });
                     }
                   }}
-                  className="cursor-pointer font-mono text-[10.5px] text-primary underline-offset-2 hover:underline"
+                  title="Ver el rastro SIAF real de este expediente"
+                  className="cursor-pointer rounded border border-primary/30 bg-primary/5 px-1.5 py-px font-mono text-[10px] font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   EXP {ids.exp_siaf}
                 </span>
