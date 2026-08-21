@@ -7,16 +7,10 @@ import { useMemo, useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { formatearMoneda, formatearNumero } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
-import {
-  descargarReportePipelinePdf,
-  useEjecucionSiafAgregada,
-  useReportePipeline,
-} from '@/features/pipeline/api';
+import { descargarReportePipelinePdf, useReportePipeline } from '@/features/pipeline/api';
 import type { MetaReporte, PedidoReporte } from '@/features/pipeline/reporte-types';
 import type { Macrofase } from '@/features/dashboard/types';
-import { selloDetalleSiaf } from '@/features/pipeline/siaf-cobertura';
 import { EstadoChip, type Tono } from '@/features/panel/ui/primitivas';
-import { TileFase } from '@/features/panel/ui/primitivas';
 import { tonoDeColor, ETIQUETA_SEMAFORO } from '@/features/panel/lib/semaforo';
 import { LABEL_MACROFASE, MACROFASES } from '@/features/pipeline/secciones/reporte/constantes';
 import { useContextoInterno } from '@/store/contexto-interno';
@@ -63,12 +57,6 @@ export function ModalReporte({ entrada }: { entrada: Entrada }) {
       setDescargando(false);
     }
   };
-
-  // Detalle SIAF agregado (Formato A) del ámbito visible: girado/pagado que el
-  // snapshot MEF no expone. Solo tiene sentido a nivel de ámbito (no de una meta
-  // puntual), porque el agregado no filtra por sec_func. Es carga PROVISIONAL:
-  // rotulado, nunca un total oficial (RN §3).
-  const siafAgregado = useEjecucionSiafAgregada('proveedor');
 
   // Ámbito del reporte: una meta puntual, o el conjunto de la naturaleza del
   // gasto activa (Producto/Proyecto) — el mismo filtro que la barra de ámbito.
@@ -215,17 +203,6 @@ export function ModalReporte({ entrada }: { entrada: Entrada }) {
         </ModalBloque>
       ) : null}
 
-      {/* Rastro de tesorería del ámbito (Formato A) — sólo a nivel de ámbito,
-          no de una meta puntual, para que el agregado coincida con lo mostrado. */}
-      {secFunc == null && siafAgregado.data?.tiene_datos ? (
-        <ModalBloque
-          titulo="Rastro de tesorería del ámbito (SIAF real)"
-          nota={`${selloDetalleSiaf(siafAgregado.data.meses_cargados)}. «En tránsito» = devengado − pagado (dinero comprometido que aún no salió de caja). Explica el gasto oficial; no reemplaza los totales del MEF.`}
-        >
-          <CajaSiaf totales={siafAgregado.data.totales_por_fase} />
-        </ModalBloque>
-      ) : null}
-
       {/* Ejecución por clasificador */}
       <ModalBloque titulo="Ejecución por clasificador (SIAF)" nota="Barra clara: PIM de la celda. Barra sólida: devengado real de la celda.">
         {celdas.length === 0 ? (
@@ -332,41 +309,16 @@ function Card({
   );
 }
 
-// Caja de tesorería agregada del ámbito: cuatro fases del Formato A. Girado y
-// Pagado son lo que el snapshot MEF no da; "En tránsito" = devengado − pagado.
-function CajaSiaf({ totales }: { totales: Record<string, number> }) {
-  const dev = totales.D ?? 0;
-  const pag = totales.P ?? 0;
-  const tiles: { label: string; valor: number; ayuda?: string; resaltar?: boolean }[] = [
-    { label: 'Devengado', valor: dev },
-    { label: 'Girado', valor: totales.G ?? 0 },
-    { label: 'Pagado', valor: pag },
-    { label: 'En tránsito', valor: dev - pag, ayuda: 'devengado − pagado', resaltar: dev - pag > 0 },
-  ];
-  return (
-    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-      {tiles.map((t) => (
-        <TileFase
-          key={t.label}
-          label={t.label}
-          valor={formatearMoneda(t.valor, true)}
-          ayuda={t.ayuda}
-          resaltar={t.resaltar}
-        />
-      ))}
-    </div>
-  );
-}
-
 // ─── Salud de metas del ámbito (reparto por semáforo temporal) ───────────
 
 // Orden y presentación de los estados. El color CODIFICA y el texto siempre
 // acompaña (sistema de diseño §3: nunca color solo). "Sin dato" al final.
-const ESTADOS_SALUD: { tono: Tono; barra: string }[] = [
-  { tono: 'critico', barra: 'bg-semaforo-critico' },
-  { tono: 'alerta', barra: 'bg-semaforo-alerta' },
-  { tono: 'ok', barra: 'bg-semaforo-ok' },
-  { tono: 'neutral', barra: 'bg-muted-foreground/40' },
+// `pie` describe el umbral en lenguaje llano (conecta con la regla del semáforo).
+const ESTADOS_SALUD: { tono: Tono; barra: string; texto: string; borde: string; pie: string }[] = [
+  { tono: 'critico', barra: 'bg-semaforo-critico', texto: 'text-destructive', borde: 'border-l-semaforo-critico', pie: 'rezago > 25 pts' },
+  { tono: 'alerta', barra: 'bg-semaforo-alerta', texto: 'text-accent-foreground', borde: 'border-l-semaforo-alerta', pie: 'rezago 10–25 pts' },
+  { tono: 'ok', barra: 'bg-semaforo-ok', texto: 'text-secondary-foreground', borde: 'border-l-semaforo-ok', pie: 'al día o adelantada' },
+  { tono: 'neutral', barra: 'bg-muted-foreground/40', texto: 'text-muted-foreground', borde: 'border-l-border', pie: 'sin PIM / sin ejecución' },
 ];
 
 interface ResumenSemaforo {
@@ -388,8 +340,12 @@ function SaludMetas({ resumen }: { resumen: ResumenSemaforo }) {
   const visibles = ESTADOS_SALUD.filter((e) => conteo[e.tono] > 0);
   return (
     <div className="flex flex-col gap-3">
-      {/* Barra apilada proporcional */}
-      <div className="flex h-6 w-full overflow-hidden rounded-md bg-muted" role="img" aria-label="Reparto de metas por estado">
+      {/* Barra apilada proporcional: el reparto de un vistazo. */}
+      <div
+        className="flex h-6 w-full overflow-hidden rounded-md bg-muted"
+        role="img"
+        aria-label={`Reparto de ${total} metas por estado`}
+      >
         {visibles.map((e) => {
           const pct = (conteo[e.tono] / total) * 100;
           return (
@@ -402,17 +358,34 @@ function SaludMetas({ resumen }: { resumen: ResumenSemaforo }) {
           );
         })}
       </div>
-      {/* Leyenda con conteo + % (color + texto, nunca color solo) */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-4">
+
+      {/* Tiles: cada estado en su propia celda, así conteo/% y etiqueta no se
+          separan (antes flotaban lejos en una grilla estirada). */}
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         {ESTADOS_SALUD.map((e) => {
           const n = conteo[e.tono];
           const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+          const vacio = n === 0;
           return (
-            <div key={e.tono} className={cn('flex items-center gap-2', n === 0 && 'opacity-40')}>
-              <span className={cn('h-2.5 w-2.5 shrink-0 rounded-[2px]', e.barra)} aria-hidden="true" />
-              <span className="text-dato flex-1 text-foreground">{ETIQUETA_SEMAFORO[e.tono]}</span>
-              <span className="font-mono text-[12px] font-semibold tabular-nums text-foreground">{n}</span>
-              <span className="w-9 text-right font-mono text-[10.5px] tabular-nums text-muted-foreground">{pct}%</span>
+            <div
+              key={e.tono}
+              className={cn(
+                'flex flex-col gap-1 rounded-md border border-border border-l-[3px] px-3 py-2',
+                e.borde,
+                vacio && 'opacity-45',
+              )}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className={cn('h-2.5 w-2.5 shrink-0 rounded-[2px]', e.barra)} aria-hidden="true" />
+                <span className="text-etiqueta text-muted-foreground">{ETIQUETA_SEMAFORO[e.tono]}</span>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className={cn('font-mono text-xl font-semibold leading-none tabular-nums', vacio ? 'text-muted-foreground' : e.texto)}>
+                  {n}
+                </span>
+                <span className="font-mono text-[12px] tabular-nums text-muted-foreground">{pct}%</span>
+              </div>
+              <span className="text-microdato text-muted-foreground">{e.pie}</span>
             </div>
           );
         })}
