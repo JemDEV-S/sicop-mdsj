@@ -10,14 +10,15 @@
 
 import { Package, Wrench } from 'lucide-react';
 import { formatearMoneda } from '@/lib/formatters';
-import { useDetallePedido } from '@/features/pipeline/api';
-import type { OrdenAsociada, PedidoDetalle } from '@/features/pipeline/types';
+import { useDetalleExpedienteSiaf, useDetallePedido } from '@/features/pipeline/api';
+import type { DetalleExpedienteSiaf, OrdenAsociada, PedidoDetalle } from '@/features/pipeline/types';
 import { useModales, type EntradaModal } from '../ModalesContext';
 import { CargandoModal, ErrorModal } from '../EstadoModal';
 import { BotonLigado, ChipInfo, ModalBloque, ModalHead } from '../ui';
 import { TrazabilidadCarriles } from '../componentes/TrazabilidadCarriles';
 import { IdsPedido, type TarjetaId } from '../componentes/IdsPedido';
 import { DineroPedido, type FilaDinero } from '../componentes/DineroPedido';
+import { ordenarFases, selloDeDetalle } from '../componentes/detalle-fases-siaf-lib';
 import { fasesDeEstadoSiaf } from '../lib/estados';
 
 type Entrada = Extract<EntradaModal, { tipo: 'pedido' }>;
@@ -26,6 +27,15 @@ export function ModalPedido({ entrada }: { entrada: Entrada }) {
   const { nroPedido, tipoBien, tipoPedido } = entrada;
   const { data, isLoading, isError, error, refetch } = useDetallePedido({ nroPedido, tipoBien, tipoPedido });
   const { abrir } = useModales();
+
+  // Expediente atribuido (mismo criterio que las tarjetas de abajo) para traer
+  // el detalle SIAF real por fase del Formato A. El hook va aquí, no en Cuerpo,
+  // para respetar las reglas de hooks pese a los early-returns de carga/error.
+  const ordenAtribuidaPrev =
+    data?.ordenes.find((o) => o.nro_certifica != null) ?? data?.ordenes[0] ?? null;
+  const expAtribuidoPrev =
+    ordenAtribuidaPrev?.exp_siaf ?? data?.expedientes.find((x) => x.exp_siaf != null)?.exp_siaf ?? null;
+  const siaf = useDetalleExpedienteSiaf(expAtribuidoPrev);
 
   if (isLoading) return <CargandoModal texto={`Cargando pedido ${nroPedido}…`} />;
   if (isError || !data) {
@@ -41,17 +51,19 @@ export function ModalPedido({ entrada }: { entrada: Entrada }) {
     );
   }
 
-  return <Cuerpo pedido={data} entrada={entrada} abrir={abrir} />;
+  return <Cuerpo pedido={data} entrada={entrada} abrir={abrir} detalleSiaf={siaf.data} />;
 }
 
 function Cuerpo({
   pedido,
   entrada,
   abrir,
+  detalleSiaf,
 }: {
   pedido: PedidoDetalle;
   entrada: Entrada;
   abrir: (e: EntradaModal) => void;
+  detalleSiaf: DetalleExpedienteSiaf | null | undefined;
 }) {
   const IconoTipo = pedido.tipo_bien === 'B' ? Package : Wrench;
   const tipoLabel = pedido.tipo_bien === 'B' ? 'Bien' : 'Servicio';
@@ -64,6 +76,7 @@ function Cuerpo({
   const expAtribuido = ordenAtribuida?.exp_siaf ?? expedientes[0]?.exp_siaf ?? null;
   const pecosa = pedido.movimientos_almacen[0] ?? null;
   const montoSiga = pedido.items.reduce((a, it) => a + (it.valor_total ?? 0), 0);
+  const tieneDetalleReal = Boolean(detalleSiaf?.tiene_datos) && (detalleSiaf?.fases?.length ?? 0) > 0;
 
   // ── Tarjetas de identificadores ──
   const tarjetas: TarjetaId[] = [
@@ -128,8 +141,12 @@ function Cuerpo({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <ModalBloque titulo="Dinero del requerimiento">
           <DineroPedido
-            filas={dineroDe(montoSiga, ordenAtribuida)}
-            nota="El monto SIGA solicitado es el único sumable por pedido. Certificado/devengado/girado por orden serán reales cuando llegue la ejecución SIAF por expediente; hoy van rotulados según el estado de la orden."
+            filas={dineroDe(montoSiga, ordenAtribuida, detalleSiaf)}
+            nota={
+              tieneDetalleReal
+                ? `El monto SIGA solicitado es el único sumable por pedido. Devengado/girado son el monto real por fase del expediente SIAF (${selloDeDetalle(detalleSiaf)}); pueden diferir del total facturado por pagos parciales o rectificaciones.`
+                : 'El monto SIGA solicitado es el único sumable por pedido. Devengado/girado por orden van rotulados según el estado de la orden; para ver el monto real por fase, carga el Formato A del SIAF del expediente.'
+            }
           />
         </ModalBloque>
 
@@ -208,13 +225,41 @@ function Cuerpo({
   );
 }
 
-// Deriva las filas de dinero. Solo el monto SIGA es sumable; el resto se rotula
-// según el estado SIAF real de la orden atribuida (sin inventar montos por fase).
-function dineroDe(montoSiga: number, orden: OrdenAsociada | null): FilaDinero[] {
+// Deriva las filas de dinero. Solo el monto SIGA es sumable. El devengado/girado
+// preferentemente vienen del monto neto real por fase del Formato A (misma fuente
+// que ModalOrden y ModalSiaf, para que los tres cuenten la misma historia); si no
+// hay detalle real cargado, se cae al rótulo binario según el estado de la orden.
+function dineroDe(
+  montoSiga: number,
+  orden: OrdenAsociada | null,
+  detalle: DetalleExpedienteSiaf | null | undefined,
+): FilaDinero[] {
   const filas: FilaDinero[] = [
     { label: 'Monto SIGA solicitado', valor: formatearMoneda(montoSiga), badge: 'sumable', fuerte: true },
   ];
-  if (orden) {
+
+  const { porCod } = ordenarFases(detalle);
+  const tieneReal = Boolean(detalle?.tiene_datos) && porCod.size > 0;
+
+  if (tieneReal) {
+    // Monto neto real por fase (Formato A). El total facturado de la orden se
+    // mantiene como dato operativo del SIGA, arriba en la cabecera.
+    const devengado = porCod.get('D')?.monto_neto ?? null;
+    const girado = porCod.get('G')?.monto_neto ?? null;
+    filas.push(
+      {
+        label: 'Devengado real (SIAF)',
+        valor: devengado != null ? formatearMoneda(devengado) : '—',
+        badge: devengado != null ? 'real' : 'pendiente',
+        fuerte: true,
+      },
+      {
+        label: 'Girado real (SIAF)',
+        valor: girado != null ? formatearMoneda(girado) : '—',
+        badge: girado != null ? 'real' : 'pendiente',
+      },
+    );
+  } else if (orden) {
     const fases = fasesDeEstadoSiaf(orden.estado_siaf);
     const alcanzada = (nombre: string) => fases.find((f) => f.label === nombre)?.hecho ?? false;
     const total = orden.total_fact_soles;
@@ -228,12 +273,12 @@ function dineroDe(montoSiga: number, orden: OrdenAsociada | null): FilaDinero[] 
       {
         label: 'Devengado (orden)',
         valor: total != null && alcanzada('Devengado') ? formatearMoneda(total) : '—',
-        badge: alcanzada('Devengado') ? 'real' : 'pendiente',
+        badge: alcanzada('Devengado') ? 'estimado' : 'pendiente',
       },
       {
         label: 'Girado (orden)',
         valor: total != null && alcanzada('Girado') ? formatearMoneda(total) : '—',
-        badge: alcanzada('Girado') ? 'real' : 'pendiente',
+        badge: alcanzada('Girado') ? 'estimado' : 'pendiente',
       },
     );
   } else {
