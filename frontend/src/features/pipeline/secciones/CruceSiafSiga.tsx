@@ -284,7 +284,7 @@ function RastreadorCruce({
     <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-4">
       {/* Fila 1 — buscador de meta + buscador de expediente */}
       <div className="flex flex-wrap items-start gap-3">
-        <span className="mt-2 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="mt-2 shrink-0 text-etiqueta text-muted-foreground">
           Rastrear
         </span>
 
@@ -459,7 +459,7 @@ function PanelExpedienteSiaf({
           ) : null}
           <CajaTesoreria detalle={detalle} />
           <div>
-            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            <span className="mb-1.5 block text-etiqueta text-muted-foreground">
               Monto real por fase
             </span>
             <BarrasFasesSiaf detalle={detalle} />
@@ -509,7 +509,7 @@ function CadenaChips({
 function Chip({ tipo, valor, onClick }: { tipo: string; valor: string; onClick?: () => void }) {
   const contenido = (
     <>
-      <span className="text-[9.5px] uppercase tracking-wide text-muted-foreground">{tipo}</span>
+      <span className="text-microdato uppercase tracking-wide text-muted-foreground">{tipo}</span>
       <span className="font-mono text-[12px] font-semibold text-primary">{valor}</span>
     </>
   );
