@@ -137,3 +137,32 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 }
+
+/* ── Escala tipográfica canónica del Panel Interno v2 ─────────────────────
+   Cinco pasos intencionales (24 · 14 · 12 · 11 · 9.5) que reemplazan los
+   text-[Npx] sueltos. Una interfaz se ve profesional con POCOS tamaños muy
+   deliberados, no con doce casi iguales. Las cifras llevan mono + tabular-nums
+   para que las columnas alineen. Usar estas utilidades, no píxeles sueltos.
+
+     text-cifra-lg  → KPI grande del resumen (montos protagonistas)
+     text-cifra     → montos en filas, tiles de fase, valores de barra
+     text-dato      → texto de fila: nombres, motivos, valores corrientes
+     text-etiqueta  → labels de KPI y encabezados de columna (uppercase)
+     text-microdato → chips de código (EXP, O:, RUC), badges de rol */
+@layer components {
+  .text-cifra-lg {
+    @apply font-mono text-2xl font-semibold leading-none tabular-nums;
+  }
+  .text-cifra {
+    @apply font-mono text-[14px] font-semibold leading-tight tabular-nums;
+  }
+  .text-dato {
+    @apply text-xs leading-snug;
+  }
+  .text-etiqueta {
+    @apply text-[11px] font-semibold uppercase leading-tight tracking-wide;
+  }
+  .text-microdato {
+    @apply font-mono text-[9.5px] leading-tight;
+  }
+}

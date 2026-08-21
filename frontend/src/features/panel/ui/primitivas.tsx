@@ -135,22 +135,17 @@ export function KpiTile({
   return (
     <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-card px-4 py-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <span className="text-etiqueta flex items-center gap-1.5 text-muted-foreground">
           {Icono ? <Icono className="h-3.5 w-3.5 text-primary" aria-hidden="true" /> : null}
           {label}
         </span>
         {fuente ? (
-          <span className="rounded border border-border px-1 py-px font-mono text-[9.5px] text-muted-foreground">
+          <span className="text-microdato rounded border border-border px-1 py-px text-muted-foreground">
             {fuente}
           </span>
         ) : null}
       </div>
-      <div
-        className={cn(
-          'font-mono text-2xl font-semibold leading-none tabular-nums text-foreground',
-          valorClass,
-        )}
-      >
+      <div className={cn('text-cifra-lg text-foreground', valorClass)}>
         {valor}
       </div>
       {ayuda ? <div className="text-[11.5px] leading-snug text-muted-foreground">{ayuda}</div> : null}
