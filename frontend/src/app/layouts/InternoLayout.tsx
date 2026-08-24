@@ -4,6 +4,8 @@ import { SidebarInterno } from '@/components/nav/SidebarInterno';
 import { TopbarInterno } from '@/components/nav/TopbarInterno';
 import { useContextoInterno } from '@/store/contexto-interno';
 import { cn } from '@/lib/utils';
+import { ModalesProvider } from '@/features/modales/ModalesContext';
+import { ModalesHost } from '@/features/modales/ModalesHost';
 
 export default function InternoLayout() {
   const drawerAbierto = useContextoInterno((s) => s.drawerAbierto);
@@ -24,6 +26,7 @@ export default function InternoLayout() {
   }, [drawerAbierto, cerrarDrawer]);
 
   return (
+    <ModalesProvider>
     <div className="min-h-screen bg-background flex">
       {/* Sidebar fijo — solo escritorio/tablet ancho */}
       <div className="hidden lg:flex">
@@ -66,6 +69,8 @@ export default function InternoLayout() {
           <Outlet />
         </main>
       </div>
+      <ModalesHost />
     </div>
+    </ModalesProvider>
   );
 }

@@ -25,13 +25,28 @@
   --accent-foreground: hsl(210 15% 15%);
 
   --muted: hsl(198 34% 90%);
-  --muted-foreground: hsl(210 19% 31%);
+  --muted-foreground: hsl(207 11% 47%);
   --destructive: hsl(4 70% 48%);
   --destructive-foreground: hsl(0 0% 100%);
-  --border: hsl(198 24% 78%);
-  --input: hsl(198 24% 78%);
+  /* Borde fino de tarjeta del tema v2 (#cfdde3). */
+  --border: hsl(198 26% 85%);
+  --input: hsl(198 26% 85%);
   --ring: hsl(198 52% 43%);
-  --radius: 0.5rem;
+  /* Esquinas de 10px como en la plantilla Panel Interno v2. */
+  --radius: 0.625rem;
+
+  /* ── Tokens de superficie del tema v2 ──────────────────────────────────
+     Grises/azulados de la plantilla para texto secundario y fondos alternos
+     (cabeceras de tabla, franjas de filtros). No son colores nuevos de marca:
+     son matices del mismo azul institucional. */
+  --texto-suave: hsl(213 17% 31%);      /* #414d5c — texto secundario */
+  --texto-tenue: hsl(207 12% 59%);      /* #8b98a3 — texto muy secundario */
+  --superficie-alt: hsl(192 33% 97%);   /* #f5f9fa — cabecera de tabla */
+  --superficie-alt-2: hsl(180 33% 99%); /* #fbfdfd — franjas suaves */
+
+  /* Tipografía institucional v2: IBM Plex Sans (texto) + Mono (números). */
+  --fuente-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --fuente-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
 
   /* Semaforo: colores de estado segun umbral (RN-01). ok/alerta alineados
      a la paleta institucional; critico usa rojo funcional estandar
@@ -95,6 +110,14 @@
   --color-semaforo-ok: var(--semaforo-ok);
   --color-semaforo-alerta: var(--semaforo-alerta);
   --color-semaforo-critico: var(--semaforo-critico);
+  /* Superficies y textos del tema v2 (expuestos como utilidades Tailwind). */
+  --color-texto-suave: var(--texto-suave);
+  --color-texto-tenue: var(--texto-tenue);
+  --color-superficie-alt: var(--superficie-alt);
+  --color-superficie-alt-2: var(--superficie-alt-2);
+  /* Familias tipográficas: habilitan font-sans / font-mono con IBM Plex. */
+  --font-sans: var(--fuente-sans);
+  --font-mono: var(--fuente-mono);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -111,6 +134,35 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+}
+
+/* ── Escala tipográfica canónica del Panel Interno v2 ─────────────────────
+   Cinco pasos intencionales (24 · 14 · 12 · 11 · 9.5) que reemplazan los
+   text-[Npx] sueltos. Una interfaz se ve profesional con POCOS tamaños muy
+   deliberados, no con doce casi iguales. Las cifras llevan mono + tabular-nums
+   para que las columnas alineen. Usar estas utilidades, no píxeles sueltos.
+
+     text-cifra-lg  → KPI grande del resumen (montos protagonistas)
+     text-cifra     → montos en filas, tiles de fase, valores de barra
+     text-dato      → texto de fila: nombres, motivos, valores corrientes
+     text-etiqueta  → labels de KPI y encabezados de columna (uppercase)
+     text-microdato → chips de código (EXP, O:, RUC), badges de rol */
+@layer components {
+  .text-cifra-lg {
+    @apply font-mono text-2xl font-semibold leading-none tabular-nums;
+  }
+  .text-cifra {
+    @apply font-mono text-[14px] font-semibold leading-tight tabular-nums;
+  }
+  .text-dato {
+    @apply text-xs leading-snug;
+  }
+  .text-etiqueta {
+    @apply text-[11px] font-semibold uppercase leading-tight tracking-wide;
+  }
+  .text-microdato {
+    @apply font-mono text-[9.5px] leading-tight;
   }
 }

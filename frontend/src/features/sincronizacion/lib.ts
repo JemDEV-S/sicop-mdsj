@@ -18,6 +18,8 @@ export function etiquetaJob(job: string): string {
     invierte: 'Invierte.pe · obras',
     siga_pipeline: 'SIGA · pipeline',
     catalogos_siga: 'SIGA · catálogos',
+    // Formato A: carga provisional del detalle SIAF por documento (admin).
+    formato_a: 'SIAF · detalle (Formato A)',
     // Nombres de corridas manuales (scheduler._wrap_run).
     sync_siaf: 'SIAF · ejecución (manual)',
     sync_invierte: 'Invierte.pe · obras (manual)',
@@ -25,7 +27,7 @@ export function etiquetaJob(job: string): string {
     reconciliacion_siga: 'SIGA · reconciliación (manual)',
     revisar_resoluciones: 'Revisión resoluciones CCMN (manual)',
   };
-  const legible = BASE[base] ?? job;
+  const legible = (base ? BASE[base] : undefined) ?? job;
   return ano ? `${legible} (${ano})` : legible;
 }
 

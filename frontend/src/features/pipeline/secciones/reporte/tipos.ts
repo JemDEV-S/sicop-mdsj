@@ -6,7 +6,7 @@
 // totalizar sea trivial y consistente. Ver `aplanar.ts` y `procesar.ts`.
 
 import type { EtapaCodigo, Macrofase } from '@/features/dashboard/types';
-import type { Atribucion } from '../../reporte-types';
+import type { Atribucion, CategoriaMeta } from '../../reporte-types';
 
 /** Fila-pedido aplanada: la unidad atómica de la tabla dinámica. */
 export interface FilaPedido {
@@ -20,6 +20,14 @@ export interface FilaPedido {
   // Contexto: dónde vive el pedido.
   sec_func: number;
   nombre_meta: string | null;
+  // Identidad de la meta arrastrada desde el bloque meta (para tabla y filtros).
+  meta: string | null;
+  categoria: CategoriaMeta;
+  act_proy: string | null;
+  // Avance devengado/PIM de la meta (1× por meta) — se muestra en la fila pero
+  // NUNCA se suma; el % es de la meta completa, no del pedido.
+  pct_devengado_meta: number | null;
+  semaforo_meta: string;
   centro_costo: string | null;
   clasificador: string;
   clasificador_nombre: string | null;
@@ -44,7 +52,13 @@ export interface FilaPedido {
 }
 
 /** Campo por el que se puede agrupar la tabla (tabla dinámica). */
-export type CampoAgrupacion = 'macrofase' | 'centro_costo' | 'meta' | 'estado' | 'ninguno';
+export type CampoAgrupacion =
+  | 'macrofase'
+  | 'centro_costo'
+  | 'meta'
+  | 'categoria'
+  | 'estado'
+  | 'ninguno';
 
 /** Campo y dirección de orden dentro de cada grupo. */
 export type CampoOrden =
@@ -61,6 +75,7 @@ export interface FiltrosReporte {
   centrosCosto: string[]; // vacío = todos
   macrofases: Macrofase[]; // vacío = todas
   metas: number[]; // vacío = todas
+  categorias: CategoriaMeta[]; // vacío = producto y proyecto
   soloEstancados: boolean;
   soloConOrden: boolean;
   soloSinOrden: boolean;
@@ -74,6 +89,7 @@ export const FILTROS_DEFAULT: FiltrosReporte = {
   centrosCosto: [],
   macrofases: [],
   metas: [],
+  categorias: [],
   soloEstancados: false,
   soloConOrden: false,
   soloSinOrden: false,

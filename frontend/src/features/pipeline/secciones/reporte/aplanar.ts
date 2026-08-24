@@ -23,6 +23,11 @@ export function aplanarPedidos(data: ReporteResponse): FilaPedido[] {
 
           sec_func: meta.sec_func,
           nombre_meta: meta.nombre_meta,
+          meta: meta.meta,
+          categoria: meta.categoria,
+          act_proy: meta.act_proy,
+          pct_devengado_meta: meta.mef.porcentaje_devengado,
+          semaforo_meta: meta.mef.semaforo,
           centro_costo: p.centro_costo,
           clasificador: celda.clasificador,
           clasificador_nombre: celda.clasificador_nombre,

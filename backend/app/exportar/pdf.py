@@ -23,6 +23,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
+from app.exportar.graficos import dibujar_apilada, dibujar_barras
 from app.exportar.reportes import Reporte
 
 
@@ -97,6 +98,21 @@ def generar(
             story.append(Paragraph(f"Filtros: {filtro_str}", styles["Italic"]))
 
     story.append(Spacer(1, 6 * mm))
+
+    # Gráficos-resumen (si el reporte los define): se dibujan del propio `datos`,
+    # antes de la tabla, para que el PDF abra con la foto ejecutiva. Ancho útil
+    # en landscape A4 = 297 − 2×10 mm de margen.
+    if reporte.graficos_de is not None:
+        graficos = reporte.graficos_de(datos)
+        if graficos:
+            ancho_util = 277 * mm
+            story.append(Paragraph("Resumen", styles["Heading3"]))
+            for g in graficos:
+                dibujo = dibujar_barras(g, ancho_util) if g.tipo == "barras" else dibujar_apilada(g, ancho_util)
+                story.append(dibujo)
+                story.append(Spacer(1, 4 * mm))
+            story.append(Spacer(1, 4 * mm))
+            story.append(Paragraph("Detalle", styles["Heading3"]))
 
     # Tabla de datos
     header = [c.label for c in reporte.columnas]

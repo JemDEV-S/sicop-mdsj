@@ -30,7 +30,7 @@ export default function Pedido() {
         icono={ClipboardList}
         titulo="Número de pedido inválido"
         descripcion="La URL no contiene un número de pedido válido."
-        accion={{ label: 'Volver al pipeline', href: '/interno/pipeline' }}
+        accion={{ label: 'Volver al análisis', href: '/interno/analisis' }}
       />
     );
   }
@@ -41,7 +41,7 @@ export default function Pedido() {
         icono={ClipboardList}
         titulo="Tipo de pedido inválido"
         descripcion="El tipo debe ser B (Bien) o S (Servicio)."
-        accion={{ label: 'Volver al pipeline', href: '/interno/pipeline' }}
+        accion={{ label: 'Volver al análisis', href: '/interno/analisis' }}
       />
     );
   }
@@ -52,7 +52,7 @@ export default function Pedido() {
         icono={ClipboardList}
         titulo="Falta el tipo de pedido"
         descripcion="La URL no indica el tipo de pedido de SIGA."
-        accion={{ label: 'Volver al pipeline', href: '/interno/pipeline' }}
+        accion={{ label: 'Volver al análisis', href: '/interno/analisis' }}
       />
     );
   }

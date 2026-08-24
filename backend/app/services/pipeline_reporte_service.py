@@ -111,7 +111,14 @@ def reporte_profesional(
         db, ano=ano, sec_funcs=sec_funcs
     )
     mes_corte = ejecucion_mef_repo.mes_maximo_ejecutado(db, ano=ano)
-    nombres_meta = _nombres_meta(db, sec_funcs)
+    info_meta = _info_meta(db, sec_funcs)
+
+    # Trámite operativo SIGA por meta (pestañas O/C, O/S, PECOSAS del reporte).
+    # Del snapshot PG, en un solo lote para todas las metas visibles. No cruza
+    # con el dinero MEF: es el rastro de gestión, no un total presupuestal.
+    ordenes_por_meta, pecosas_por_meta = pipeline_read_repo.ordenes_pecosas_por_meta(
+        db, ano, sec_funcs
+    )
 
     # Catálogo de CC (código → {nombre, sigla}) de todos los centros presentes en
     # los pedidos del alcance. Sirve al filtro (nombre) y a la tabla (sigla).
@@ -236,9 +243,18 @@ def reporte_profesional(
         # Nombre de meta y CC: el CC es el conjunto real de centros de los
         # pedidos (una meta puede tocar varios). El nombre viene del catálogo.
         centros_meta = sorted(c for c in meta["centros_costo"] if c)
+        info = info_meta.get(sec_func) or {}
+        tipo_meta = info.get("tipo_meta")
         salida_metas.append({
             "sec_func": sec_func,
-            "nombre_meta": nombres_meta.get(sec_func),
+            "nombre_meta": info.get("nombre"),
+            # Nº de meta legible (ref.metas.meta, p.ej. "0001") y clasificación
+            # SIAF por naturaleza del gasto: proyecto de inversión vs producto/
+            # actividad. `categoria` es la vista binaria que consume el filtro.
+            "meta": info.get("meta"),
+            "tipo_meta": tipo_meta,
+            "categoria": _categoria_meta(tipo_meta),
+            "act_proy": info.get("act_proy"),
             "centros_costo": centros_meta,
             "n_pedidos": n_pedidos_meta,
             "en_contratacion": en_contratacion,
@@ -255,6 +271,10 @@ def reporte_profesional(
             "n_celdas": len(celdas_salida),
             "n_celdas_directas": sum(1 for c in celdas_salida if c["atribucion_directa"]),
             "celdas": celdas_salida,
+            # Trámite operativo SIGA de la meta (snapshot PG). Listas vacías si la
+            # meta aún no tiene órdenes/PECOSAS — no se inventa nada.
+            "ordenes": ordenes_por_meta.get(sec_func, []),
+            "pecosas": pecosas_por_meta.get(sec_func, []),
         })
 
     sincronizado = _sincronizado(db)
@@ -276,21 +296,51 @@ def reporte_profesional(
     }
 
 
-# ─── Metadatos (nombre de meta, frescura) ────────────────────────────────
+# ─── Metadatos (identidad de meta, frescura) ─────────────────────────────
 
-def _nombres_meta(db: Session, sec_funcs: list[int]) -> dict[int, str | None]:
-    """Nombres de meta desde `ref.metas` (catálogo poblado por el sync), en lote."""
+# Un solo lugar traduce `tipo_meta` (4 valores SIAF) a la vista binaria del
+# reporte. `proyecto_inversion` es el único proyecto de inversión (act_proy
+# 2xxxxxx); actividad genérica/PP y "otros" son producto/actividad — gasto
+# corriente que no es un proyecto. Ver app/siga/catalogos.py::_clasificar_tipo_meta.
+def _categoria_meta(tipo_meta: str | None) -> str:
+    """'proyecto' si es proyecto de inversión; 'producto' en cualquier otro caso."""
+    return "proyecto" if tipo_meta == "proyecto_inversion" else "producto"
+
+
+def _info_meta(db: Session, sec_funcs: list[int]) -> dict[int, dict[str, Any]]:
+    """Identidad de cada meta desde `ref.metas` (catálogo del sync), en lote.
+
+    Trae nombre, nº de meta legible (`meta`, p.ej. "0001"), su clasificación
+    SIAF (`tipo_meta`) y el código de producto/proyecto (`act_proy`) — lo que la
+    tabla necesita para mostrar la meta y distinguir producto de proyecto.
+    """
     if not sec_funcs:
         return {}
     from sqlalchemy import bindparam, text
 
     rows = db.execute(
         text(
-            "SELECT sec_func, nombre FROM ref.metas WHERE sec_func IN :sfs"
+            """
+            SELECT sec_func, nombre, meta, tipo_meta, act_proy
+              FROM ref.metas
+             WHERE sec_func IN :sfs
+            """
         ).bindparams(bindparam("sfs", expanding=True)),
         {"sfs": sec_funcs},
-    ).all()
-    return {int(r[0]): (r[1].strip() if r[1] else None) for r in rows}
+    ).mappings().all()
+
+    def _s(v: Any) -> str | None:
+        return v.strip() if isinstance(v, str) and v.strip() else None
+
+    return {
+        int(r["sec_func"]): {
+            "nombre": _s(r["nombre"]),
+            "meta": _s(r["meta"]),
+            "tipo_meta": _s(r["tipo_meta"]),
+            "act_proy": _s(r["act_proy"]),
+        }
+        for r in rows
+    }
 
 
 def _catalogo_cc(db: Session, codigos: list[str]) -> list[dict[str, Any]]:

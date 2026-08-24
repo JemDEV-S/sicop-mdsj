@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/api-client';
 import { useContextoInterno } from '@/store/contexto-interno';
-import type { Anotacion, Bolsa, PedidoDetalle, Resolucion } from './types';
+import type {
+  Anotacion,
+  Bolsa,
+  DetalleExpedienteSiaf,
+  EjecucionAgregadaSiaf,
+  PedidoDetalle,
+  Resolucion,
+} from './types';
 import type { ReporteResponse } from './reporte-types';
 
 // El backend acepta entidad_id como string; usamos "NRO-TIPO" (no barra, que
@@ -65,24 +72,22 @@ export function useReportePipeline() {
   });
 }
 
-/**
- * Descarga el reporte del pipeline en Excel (auditado en el backend, RN-08).
- * Dispara la descarga en el navegador con el nombre que envía el servidor.
- */
-export async function descargarReportePipeline(filtros: {
+// Filtros del reporte pipeline. `sec_func`/`categoria` recortan el ámbito igual
+// que la vista (una meta puntual, o Producto/Proyecto) para que el archivo
+// coincida con lo mostrado; ambos son opcionales (sin ellos, todo el ámbito CC).
+export interface FiltrosReportePipeline {
   ano: number;
   centro_costo?: string;
-}): Promise<void> {
-  const { data, headers } = await apiClient.post(
-    '/interno/exportar/excel',
-    { reporte: 'pipeline_reporte', filtros },
-    { responseType: 'blob' },
-  );
+  sec_func?: number;
+  categoria?: 'producto' | 'proyecto';
+}
+
+// Dispara la descarga de un blob en el navegador con el nombre del servidor.
+function descargarBlob(data: Blob, headers: Record<string, unknown>, nombreDefecto: string) {
   const disposition = String(headers['content-disposition'] ?? '');
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const nombre = match?.[1] ?? `pipeline_reporte_${filtros.ano}.xlsx`;
-
-  const url = URL.createObjectURL(data as Blob);
+  const nombre = match?.[1] ?? nombreDefecto;
+  const url = URL.createObjectURL(data);
   const a = document.createElement('a');
   a.href = url;
   a.download = nombre;
@@ -90,6 +95,82 @@ export async function descargarReportePipeline(filtros: {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Descarga el reporte del pipeline en Excel (auditado en el backend, RN-08).
+ */
+export async function descargarReportePipeline(filtros: FiltrosReportePipeline): Promise<void> {
+  const { data, headers } = await apiClient.post(
+    '/interno/exportar/excel',
+    { reporte: 'pipeline_reporte', filtros },
+    { responseType: 'blob' },
+  );
+  descargarBlob(data as Blob, headers, `pipeline_reporte_${filtros.ano}.xlsx`);
+}
+
+/**
+ * Descarga el reporte del pipeline en PDF (auditado en el backend, RN-08).
+ * Mismos filtros que la vista para que el documento sea fiel a lo que se ve.
+ */
+export async function descargarReportePipelinePdf(filtros: FiltrosReportePipeline): Promise<void> {
+  const { data, headers } = await apiClient.post(
+    '/interno/exportar/pdf',
+    { reporte: 'pipeline_reporte', filtros },
+    { responseType: 'blob' },
+  );
+  descargarBlob(data as Blob, headers, `pipeline_reporte_${filtros.ano}.pdf`);
+}
+
+// ─── Detalle SIAF por expediente (Formato A, Fase 1) ─────────────────────
+
+/**
+ * Detalle SIAF por fase de un expediente (Certificación/Devengado/Girado/
+ * Pagado netados con proveedor y documentos). Rompe la ceguera SIAF del
+ * pipeline. Es carga PROVISIONAL: nunca un total de tablero. Si no hay Formato
+ * A cargado, `tiene_datos=false` con `fases=[]` (la UI muestra estado vacío).
+ */
+export function useDetalleExpedienteSiaf(expSiaf: number | null | undefined) {
+  const ano = useContextoInterno((s) => s.añoActivo);
+  return useQuery({
+    queryKey: ['interno', 'expediente-siaf', ano, expSiaf],
+    queryFn: async () => {
+      const { data } = await apiClient.get<DetalleExpedienteSiaf>(
+        `/interno/pipeline/expediente-siaf/${expSiaf}/detalle`,
+        { params: { ano } },
+      );
+      return data;
+    },
+    enabled: expSiaf != null,
+    refetchOnWindowFocus: false,
+  });
+}
+
+// ─── Ejecución SIAF agregada (Fase 2: proveedor / clasificador / rubro) ──
+
+/**
+ * Ejecución SIAF vigente agregada por la dimensión pedida. El detalle que la
+ * API MEF no da (RUC, clasificador de 5 niveles). Consume año + CC del contexto
+ * interno; el backend aplica el alcance por CC. Carga provisional (rotulada).
+ */
+export function useEjecucionSiafAgregada(
+  groupBy: 'proveedor' | 'clasificador' | 'rubro',
+) {
+  const ano = useContextoInterno((s) => s.añoActivo);
+  const cc = useContextoInterno((s) => s.ccActivo);
+  const ccCodigo = cc?.codigo ?? null;
+  return useQuery({
+    queryKey: ['interno', 'ejecucion-siaf-agregada', ano, ccCodigo, groupBy],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { ano, group_by: groupBy };
+      if (ccCodigo) params.centro_costo = ccCodigo;
+      const { data } = await apiClient.get<EjecucionAgregadaSiaf>(
+        '/interno/pipeline/ejecucion-siaf/agregados',
+        { params },
+      );
+      return data;
+    },
+  });
 }
 
 export function useAnotacionesPedido({ nroPedido, tipoBien }: UseDetalleParams) {

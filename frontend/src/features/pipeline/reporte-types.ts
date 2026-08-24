@@ -66,9 +66,49 @@ export interface CeldaClasificador {
   pedidos: PedidoReporte[];
 }
 
+/** Orden de compra (O/C, bien) o de servicio (O/S) de una meta. Del snapshot
+ *  `siga.ordenes` keyed por sec_func; `tipo_bien` separa O/C ('B') de O/S ('S'). */
+export interface OrdenReporte {
+  nro_orden: number;
+  tipo_bien: string; // 'B' → O/C · 'S' → O/S
+  clasificador: string | null;
+  estado: string | null;
+  estado_siaf: string | null;
+  exp_siaf: number | null;
+  total_fact_soles: number;
+  concepto: string | null;
+  proveedor_nombre: string | null;
+  proveedor_ruc: string | null;
+  fecha_orden: string | null;
+  /** Recepción de la orden: '1' pendiente · '2' parcial · '3' completa. */
+  flag_recep: string | null;
+}
+
+/** PECOSA (despacho de almacén) de una meta, vía la orden que la origina. */
+export interface PecosaReporte {
+  nro_pecosa: number;
+  nro_orden: number | null;
+  tipo_bien: string;
+  nro_guia: string | null;
+  fecha_movimto: string | null;
+  proveedor_nombre: string | null;
+  total_fact_soles: number;
+}
+
+/** Naturaleza del gasto de la meta: proyecto de inversión vs producto/actividad. */
+export type CategoriaMeta = 'producto' | 'proyecto';
+
 export interface MetaReporte {
   sec_func: number;
   nombre_meta: string | null;
+  /** Nº de meta legible (ref.metas.meta, p.ej. "0001") — no la llave sec_func. */
+  meta: string | null;
+  /** Clasificación SIAF cruda (proyecto_inversion, actividad_generica, …). */
+  tipo_meta: string | null;
+  /** Vista binaria que consume el filtro Producto/Proyecto. */
+  categoria: CategoriaMeta;
+  /** Código de actividad/proyecto (act_proy) — para verificar en SIAF. */
+  act_proy: string | null;
   centros_costo: string[];
   n_pedidos: number;
   en_contratacion: number;
@@ -78,6 +118,9 @@ export interface MetaReporte {
   n_celdas: number;
   n_celdas_directas: number;
   celdas: CeldaClasificador[];
+  /** Trámite operativo SIGA de la meta (pestañas O/C, O/S, PECOSAS). */
+  ordenes: OrdenReporte[];
+  pecosas: PecosaReporte[];
 }
 
 export interface ReporteTotales {

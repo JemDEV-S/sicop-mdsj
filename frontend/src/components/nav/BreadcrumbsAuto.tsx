@@ -11,6 +11,7 @@ const ETIQUETAS_POR_SEGMENTO: Record<string, string> = {
   pipeline: 'Pipeline',
   saldos: 'Saldos',
   cruce: 'Cruce SIAF-SIGA',
+  'ejecucion-siaf': 'Ejecución SIAF',
   'expediente-siaf': 'Expediente',
   proveedores: 'Proveedores',
   alertas: 'Alertas',

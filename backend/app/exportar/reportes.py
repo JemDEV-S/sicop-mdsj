@@ -12,6 +12,16 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.exportar.graficos import (
+    AMARILLO,
+    AZUL,
+    AZUL_CLARO,
+    GRIS,
+    ROJO,
+    VERDE,
+    Grafico,
+    SegmentoGrafico,
+)
 from app.security.deps import CurrentUser
 from app.services import (
     ejecucion_service,
@@ -37,6 +47,10 @@ class Reporte:
     obtener_datos: Callable[[Session, dict[str, Any], CurrentUser | None], list[dict[str, Any]]]
     con_totales: bool = False
     columnas_totalizables: list[str] = field(default_factory=list)
+    # Opcional: deriva gráficos-resumen de las mismas filas ya obtenidas (sin
+    # otra consulta). Solo el PDF los dibuja; el Excel los ignora. Si es None,
+    # el PDF sale como tabla, igual que antes.
+    graficos_de: Callable[[list[dict[str, Any]]], list[Grafico]] | None = None
 
 
 # ─── Reporte: SALDOS ─────────────────────────────────────────────────────
@@ -308,6 +322,20 @@ def _datos_pipeline_reporte(
     data = pipeline_reporte_service.reporte_profesional(
         db, ano=filtros.get("ano") or settings.ANO_VIGENTE, centros=centros
     )
+
+    # Alcance del reporte: los mismos dos recortes que la vista aplica en el
+    # cliente (ModalReporte), para que el PDF/Excel coincida con lo mostrado —
+    # una meta puntual (sec_func) o la naturaleza del gasto (categoría). Si no
+    # se envía ninguno, se exporta todo el ámbito visible del CC.
+    metas = data["metas"]
+    sec_func_filtro = filtros.get("sec_func")
+    if sec_func_filtro is not None:
+        metas = [m for m in metas if m["sec_func"] == int(sec_func_filtro)]
+    else:
+        categoria = filtros.get("categoria")
+        if categoria in ("producto", "proyecto"):
+            metas = [m for m in metas if m.get("categoria") == categoria]
+
     # Catálogo código → etiqueta (nombre + sigla) para que el CC del Excel sea
     # legible, igual que en la vista. Cae al código si no hay nombre.
     cc_label = {
@@ -321,7 +349,7 @@ def _datos_pipeline_reporte(
         return cc_label.get(codigo, codigo) if codigo else None
 
     filas: list[dict[str, Any]] = []
-    for m in data["metas"]:
+    for m in metas:
         mef_meta = m["mef"]
         cc_meta = ", ".join(_cc(c) or c for c in m["centros_costo"]) or None
         for c in m["celdas"]:
@@ -332,7 +360,13 @@ def _datos_pipeline_reporte(
                 dev = p.get("devengado_estimado")
                 filas.append({
                     "sec_func": m["sec_func"],
+                    "meta": m.get("meta"),
                     "nombre_meta": m["nombre_meta"],
+                    "categoria": (
+                        "Proyecto de inversión" if m.get("categoria") == "proyecto"
+                        else "Producto / actividad"
+                    ),
+                    "act_proy": m.get("act_proy"),
                     "centro_costo": _cc(p.get("centro_costo")) or cc_meta,
                     "clasificador": c["clasificador"],
                     "clasificador_nombre": c["clasificador_nombre"],
@@ -356,16 +390,99 @@ def _datos_pipeline_reporte(
                     "comprometido_meta_mef": mef_meta["comprometido"],
                     "devengado_meta_mef": mef_meta["devengado"],
                     "pct_devengado_meta": mef_meta["porcentaje_devengado"],
+                    # ── Contexto por meta para los gráficos del PDF (interno,
+                    #    prefijo _; no es columna exportada). Repetido por fila,
+                    #    se deduplica por sec_func en graficos_de. ──
+                    "_pim_meta": mef_meta["pim"],
+                    "_semaforo_meta": mef_meta.get("semaforo", "desconocido"),
                 })
     return filas
+
+
+# Gráficos-resumen del PDF, derivados de las filas ya obtenidas (sin otra
+# consulta): el embudo de fases (montos MEF 1× por meta) y la salud de metas
+# (reparto por semáforo temporal). Coincide con lo que muestra el ModalReporte.
+_ETIQUETA_SEMAFORO = {
+    "rojo": "Atrasado",
+    "amarillo": "En riesgo",
+    "verde": "A tiempo",
+    "desconocido": "Sin dato",
+}
+_COLOR_SEMAFORO = {"rojo": ROJO, "amarillo": AMARILLO, "verde": VERDE, "desconocido": GRIS}
+
+
+def _graficos_pipeline(datos: list[dict[str, Any]]) -> list[Grafico]:
+    if not datos:
+        return []
+
+    # Dedup por meta: cada meta aporta su PIM/comprometido/devengado (1×) y su
+    # estado de semáforo una sola vez, aunque tenga varios pedidos.
+    por_meta: dict[Any, dict[str, Any]] = {}
+    for f in datos:
+        sf = f.get("sec_func")
+        if sf not in por_meta:
+            por_meta[sf] = f
+
+    pim = sum(float(m.get("_pim_meta") or 0) for m in por_meta.values())
+    comprometido = sum(float(m.get("comprometido_meta_mef") or 0) for m in por_meta.values())
+    devengado = sum(float(m.get("devengado_meta_mef") or 0) for m in por_meta.values())
+
+    def _money(v: float) -> str:
+        return f"S/ {v:,.0f}"
+
+    graficos: list[Grafico] = []
+
+    # 1) Embudo de fases (PIM → Comprometido → Devengado).
+    if pim > 0:
+        graficos.append(Grafico(
+            tipo="barras",
+            titulo="Ejecución del ámbito — fases del gasto (MEF, 1× por meta)",
+            segmentos=[
+                SegmentoGrafico("PIM (techo)", pim, AZUL, _money(pim)),
+                SegmentoGrafico("Comprometido", comprometido, AZUL_CLARO, _money(comprometido)),
+                SegmentoGrafico("Devengado", devengado, VERDE, _money(devengado)),
+            ],
+        ))
+
+    # 2) Salud de metas (reparto por semáforo). Solo con más de una meta.
+    if len(por_meta) > 1:
+        conteo: dict[str, int] = {}
+        for m in por_meta.values():
+            estado = str(m.get("_semaforo_meta") or "desconocido")
+            if estado not in _ETIQUETA_SEMAFORO:
+                estado = "desconocido"
+            conteo[estado] = conteo.get(estado, 0) + 1
+        total = sum(conteo.values()) or 1
+        orden = ["rojo", "amarillo", "verde", "desconocido"]
+        segmentos = [
+            SegmentoGrafico(
+                _ETIQUETA_SEMAFORO[e],
+                conteo.get(e, 0),
+                _COLOR_SEMAFORO[e],
+                f"{conteo.get(e, 0)} ({round(conteo.get(e, 0) / total * 100)}%)",
+            )
+            for e in orden
+            if conteo.get(e, 0) > 0
+        ]
+        graficos.append(Grafico(
+            tipo="apilada",
+            titulo=f"Salud de {total} metas del ámbito (avance devengado vs. esperado)",
+            segmentos=segmentos,
+            nota="Rojo: rezago >25 pts · Amarillo: 10–25 pts · Verde: al día · Gris: sin PIM/ejecución.",
+        ))
+
+    return graficos
 
 
 REPORTE_PIPELINE_PROFESIONAL = Reporte(
     codigo="pipeline_reporte",
     titulo="Pipeline presupuestal — cruce SIGA × SIAF por clasificador (Meta → Clasificador → Pedido)",
     columnas=[
-        Columna("sec_func", "Meta"),
+        Columna("sec_func", "Sec. Func."),
+        Columna("meta", "N° Meta"),
         Columna("nombre_meta", "Nombre de meta"),
+        Columna("categoria", "Producto / Proyecto"),
+        Columna("act_proy", "Cod. Acto/Proy"),
         Columna("centro_costo", "Centro de costo"),
         Columna("clasificador", "Clasificador"),
         Columna("clasificador_nombre", "Específica de gasto"),
@@ -392,6 +509,7 @@ REPORTE_PIPELINE_PROFESIONAL = Reporte(
     # SOLO el monto SIGA se totaliza. El dinero MEF NO — es contexto por meta
     # repetido en cada fila y sumarlo mentiría (§2.1, inflado ×34.9).
     columnas_totalizables=["monto_siga"],
+    graficos_de=_graficos_pipeline,
 )
 
 

@@ -354,3 +354,124 @@ def clasificador_por_pedido(
         ): {"clasificador": r["clasificador"], "monto": float(r["monto"] or 0)}
         for r in rows
     }
+
+
+# ─── Órdenes y PECOSAS por meta (pestañas del reporte, §9.7) ─────────────
+#
+# El reporte profesional lista, por meta, las órdenes de compra (O/C = bienes)
+# y de servicio (O/S = servicios) y las PECOSAS (despacho de almacén). Todo sale
+# del snapshot PG — cero llamadas en caliente a SIGA:
+#
+#   - `siga.ordenes` ya trae `sec_func` (la meta de la orden, vía
+#     SIG_ORDEN_PRESUPUESTO) y `tipo_bien` ('B'→O/C, 'S'→O/S). Es la misma tabla
+#     que alimenta el puente pedido↔orden, así que las cifras concuerdan con el
+#     detalle del pedido.
+#   - Las PECOSAS son movimientos de salida de almacén (`siga.movimientos_almacen`,
+#     TIPO_MOVIMTO='S') colgados de una orden por `nro_orden`. La meta de la
+#     PECOSA es la de su orden (el almacén no tiene SEC_FUNC propio).
+#
+# Solo se piden las metas visibles del alcance (RN-06): no se filtra ni se
+# muestra dinero/trámite de metas que el usuario no ve.
+
+_SQL_ORDENES_POR_META = """
+    SELECT
+        o.sec_func,
+        o.tipo_bien,
+        o.nro_orden,
+        o.clasificador,
+        o.estado,
+        o.estado_siaf,
+        o.exp_siaf,
+        o.total_fact_soles,
+        o.concepto,
+        o.proveedor_nombre,
+        o.proveedor_ruc,
+        o.fecha_orden,
+        o.flag_recep
+    FROM siga.ordenes o
+    WHERE o.ano_eje = :ano AND o.sec_ejec = :sec_ejec
+      AND o.sec_func IN :sfs
+    ORDER BY o.sec_func, o.tipo_bien, o.fecha_orden DESC NULLS LAST, o.nro_orden DESC
+"""
+
+# PECOSAS: la salida de almacén (TIPO_MOVIMTO='S') que despacha una orden. Se
+# ata a la meta por la orden (siga.ordenes.sec_func). Una orden puede tener
+# varias salidas; cada una es una PECOSA distinta (NRO_PECOSA).
+_SQL_PECOSAS_POR_META = """
+    SELECT
+        o.sec_func,
+        m.nro_pecosa,
+        m.nro_orden,
+        o.tipo_bien,
+        m.nro_guia,
+        m.fecha_movimto,
+        o.proveedor_nombre,
+        o.total_fact_soles
+    FROM siga.movimientos_almacen m
+    JOIN siga.ordenes o
+        ON o.ano_eje = m.ano_eje AND o.sec_ejec = m.sec_ejec
+       AND o.tipo_bien = m.tipo_bien AND o.nro_orden = m.nro_orden
+    WHERE m.ano_eje = :ano AND m.sec_ejec = :sec_ejec
+      AND m.tipo_movimto = 'S' AND m.nro_orden IS NOT NULL
+      AND o.sec_func IN :sfs
+    ORDER BY o.sec_func, m.fecha_movimto DESC NULLS LAST, m.nro_pecosa DESC
+"""
+
+
+def ordenes_pecosas_por_meta(
+    db: Session, ano: int, sec_funcs: list[int]
+) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[dict[str, Any]]]]:
+    """Órdenes y PECOSAS del snapshot PG, agrupadas por SEC_FUNC (meta).
+
+    Returns:
+        `(ordenes_por_meta, pecosas_por_meta)`, cada uno
+        `{sec_func: [fila, ...]}`. Las órdenes traen `tipo_bien` para que el
+        consumidor separe O/C (bienes) de O/S (servicios). Vacío si `sec_funcs`
+        lo está — no se consulta nada.
+    """
+    if not sec_funcs:
+        return {}, {}
+    from sqlalchemy import bindparam
+
+    params = {"ano": ano, "sec_ejec": int(settings.SEC_EJEC), "sfs": sec_funcs}
+
+    ord_rows = db.execute(
+        text(_SQL_ORDENES_POR_META).bindparams(bindparam("sfs", expanding=True)),
+        params,
+    ).mappings().all()
+    pec_rows = db.execute(
+        text(_SQL_PECOSAS_POR_META).bindparams(bindparam("sfs", expanding=True)),
+        params,
+    ).mappings().all()
+
+    ordenes: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for r in ord_rows:
+        ordenes[int(r["sec_func"])].append({
+            "nro_orden": int(r["nro_orden"]),
+            "tipo_bien": (r["tipo_bien"] or "").strip(),
+            "clasificador": (r["clasificador"] or "").strip() or None,
+            "estado": (r["estado"] or "").strip() or None,
+            "estado_siaf": (r["estado_siaf"] or "").strip() or None,
+            "exp_siaf": int(r["exp_siaf"]) if r["exp_siaf"] is not None else None,
+            "total_fact_soles": float(r["total_fact_soles"] or 0),
+            "concepto": (r["concepto"] or "").strip() or None,
+            "proveedor_nombre": (r["proveedor_nombre"] or "").strip() or None,
+            "proveedor_ruc": (r["proveedor_ruc"] or "").strip() or None,
+            "fecha_orden": r["fecha_orden"],
+            # Recepción de la orden ('1'=pendiente, '2'=parcial, '3'=completa).
+            "flag_recep": (r["flag_recep"] or "").strip() or None,
+        })
+
+    pecosas: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for r in pec_rows:
+        pecosas[int(r["sec_func"])].append({
+            "nro_pecosa": int(r["nro_pecosa"]),
+            "nro_orden": int(r["nro_orden"]) if r["nro_orden"] is not None else None,
+            "tipo_bien": (r["tipo_bien"] or "").strip(),
+            "nro_guia": (r["nro_guia"] or "").strip() or None,
+            "fecha_movimto": r["fecha_movimto"],
+            "proveedor_nombre": (r["proveedor_nombre"] or "").strip() or None,
+            "total_fact_soles": float(r["total_fact_soles"] or 0),
+        })
+
+    return dict(ordenes), dict(pecosas)

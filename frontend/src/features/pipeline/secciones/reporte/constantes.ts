@@ -1,7 +1,22 @@
 // Constantes compartidas de la vista profesional del pipeline.
 
 import type { Macrofase } from '@/features/dashboard/types';
+import type { CategoriaMeta } from '../../reporte-types';
 import type { CampoAgrupacion, CampoOrden } from './tipos';
+
+/** Etiqueta y sigla de cada naturaleza de gasto (producto vs proyecto). */
+export const CATEGORIAS_META: {
+  categoria: CategoriaMeta;
+  label: string;
+  sigla: string;
+}[] = [
+  { categoria: 'proyecto', label: 'Proyecto de inversión', sigla: 'PROY' },
+  { categoria: 'producto', label: 'Producto / actividad', sigla: 'PROD' },
+];
+
+export const LABEL_CATEGORIA: Record<CategoriaMeta, string> = Object.fromEntries(
+  CATEGORIAS_META.map((c) => [c.categoria, c.label]),
+) as Record<CategoriaMeta, string>;
 
 /** Las 6 macrofases en orden de avance, con sigla y etiqueta. */
 export const MACROFASES: { macrofase: Macrofase; sigla: string; label: string }[] = [
@@ -31,6 +46,7 @@ export const OPCIONES_AGRUPACION: { valor: CampoAgrupacion; label: string }[] = 
   { valor: 'macrofase', label: 'Fase del pipeline' },
   { valor: 'centro_costo', label: 'Centro de costo' },
   { valor: 'meta', label: 'Meta' },
+  { valor: 'categoria', label: 'Producto / Proyecto' },
   { valor: 'estado', label: 'Estado (estancado / en curso)' },
   { valor: 'ninguno', label: 'Sin agrupar (lista plana)' },
 ];

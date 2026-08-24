@@ -1,11 +1,14 @@
 /**
- * Página de Dashboard Interno (HU-22, T-44).
+ * Página Panel (home del panel interno) — Panel Interno v2.
  *
- * Ruta: /interno (index)
- * Protegida por RequireAuth.
+ * Ruta: /interno (index). Protegida por RequireAuth.
+ *
+ * Es el "Panel de decisión": lectura ejecutiva del pliego (KPIs SIAF, embudo de
+ * fases, pipeline por macrofase, bandeja de acción y focos de atención), sobre
+ * los endpoints reales de saldos/alertas. Sigue llamándose "Panel".
  */
-import DashboardWidgets from '../../features/dashboard/secciones/DashboardWidgets';
+import PanelDecision from '@/features/panel/PanelDecision';
 
 export default function Dashboard() {
-  return <DashboardWidgets />;
+  return <PanelDecision />;
 }

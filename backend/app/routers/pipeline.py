@@ -11,8 +11,14 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
+from app.jobs.siga_refresh import refrescar_pedido
 from app.models.enums import CodigoRol
-from app.repositories import pipeline_read_repo, pipeline_repo, resolucion_ccmn_repo
+from app.repositories import (
+    ejecucion_detalle_repo,
+    pipeline_read_repo,
+    pipeline_repo,
+    resolucion_ccmn_repo,
+)
 from app.schemas.pipeline import (
     CONFIANZA_A_ESTADO,
     CONFIANZA_A_LABEL,
@@ -20,11 +26,12 @@ from app.schemas.pipeline import (
     ETAPA_A_MACROFASE,
     ETAPA_A_NUMERO,
     ETAPAS_ORDEN,
-    BolsaResponse,
-    CandidatoCCMN,
-    KanbanResponse,
     MACROFASE_A_LABEL,
     MACROFASES,
+    BolsaResponse,
+    CandidatoCCMN,
+    DetalleExpedienteSiafResponse,
+    KanbanResponse,
     PedidoCard,
     PedidoDetalleResponse,
     PedidoEnBolsa,
@@ -32,7 +39,6 @@ from app.schemas.pipeline import (
     ResolucionCreate,
     ResolucionResponse,
 )
-from app.jobs.siga_refresh import refrescar_pedido
 from app.security.deps import CurrentUser, get_current_user
 from app.services import (
     auditoria_service,
@@ -126,6 +132,142 @@ def reporte(
         db, ano=ano or settings.ANO_VIGENTE, centros=centros
     )
     return ReporteResponse.model_validate(data)
+
+
+@pipeline_router.get(
+    "/expediente-siaf/{exp}/detalle",
+    response_model=DetalleExpedienteSiafResponse,
+)
+def detalle_expediente_siaf(
+    exp: int,
+    request: Request,
+    ano: int | None = None,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DetalleExpedienteSiafResponse:
+    """Detalle SIAF por fase de un expediente (Formato A, carga provisional).
+
+    Rompe la ceguera SIAF del pipeline: devuelve Certificación/Devengado/Girado/
+    Pagado netados con proveedor, montos y documentos sustento. Solo trazabilidad
+    (RN §3): nunca es fuente de totales de tablero. Si no hay Formato A cargado
+    para el año, responde `tiene_datos=False` con `fases=[]` (degradación limpia).
+
+    Alcance (RN-04): el detalle SIAF tiene `sec_func`, así que se restringe a las
+    metas del alcance del usuario. Un expediente cuyas metas caen todas fuera del
+    alcance devuelve 403.
+    """
+    ano_eje = ano or settings.ANO_VIGENTE
+    proc = ejecucion_detalle_repo.procedencia(db, ano_eje)
+
+    # Filtro por CC (RN-04): compara las metas del expediente contra el alcance.
+    # Admin (`centros_permitidos is None`) no filtra. Si el Excel no está cargado
+    # no hay nada que proteger: se devuelve el estado vacío sin 403.
+    if user.centros_permitidos is not None and proc["tiene_datos"]:
+        metas_exp = ejecucion_detalle_repo.sec_func_de_expediente(db, exp, ano_eje)
+        if metas_exp:
+            visibles = set(
+                ejecucion_detalle_repo.sec_funcs_de_centros(
+                    db, user.centros_permitidos
+                )
+            )
+            if not (set(metas_exp) & visibles):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="expediente fuera del alcance del usuario",
+                )
+
+    fases = (
+        ejecucion_detalle_repo.por_expediente(db, exp, ano_eje)
+        if proc["tiene_datos"]
+        else []
+    )
+
+    # Auditoría: consulta sensible (expone proveedor + montos por fase).
+    if proc["tiene_datos"] and fases:
+        auditoria_service.registrar_desde_request(
+            db, request,
+            accion=auditoria_service.Accion.CONSULTA_DETALLE_SIAF,
+            usuario_id=user.id,
+            detalle={"exp_siaf": exp, "ano_eje": ano_eje, "n_fases": len(fases)},
+        )
+        db.commit()
+
+    return DetalleExpedienteSiafResponse.model_validate({
+        "exp_siaf": exp,
+        "ano_eje": ano_eje,
+        "tiene_datos": proc["tiene_datos"],
+        "meses_cargados": proc["meses_cargados"],
+        "emitido_en": proc["emitido_en"],
+        "cargado_en": proc["cargado_en"],
+        "fases": fases,
+    })
+
+
+@pipeline_router.get("/ejecucion-siaf/agregados")
+def ejecucion_siaf_agregados(
+    request: Request,
+    group_by: str = Query(
+        "proveedor",
+        pattern="^(proveedor|clasificador|rubro)$",
+        description="Dimensión de agregación: proveedor | clasificador | rubro.",
+    ),
+    ano: int | None = None,
+    centro_costo: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Ejecución SIAF vigente agregada por proveedor / clasificador / rubro (Fase 2).
+
+    El detalle que la API MEF no puede dar (RUC, clasificador de 5 niveles),
+    pivotado por fase (Certificado/Devengado/Girado/Pagado) sobre la dimensión
+    pedida. Carga PROVISIONAL del Formato A: nunca es KPI de tablero (RN §3);
+    la UI lo rotula como detalle provisional con la fecha de emisión.
+
+    Alcance (RN-04): restringido a las metas visibles del usuario vía `sec_func`.
+    """
+    ano_eje = ano or settings.ANO_VIGENTE
+    centros = permisos_service.restringir_a_subrama(
+        db, user.centros_permitidos, centro_costo
+    )
+    # CC → sec_funcs (None = admin sin filtro). El repo trata [] como "sin
+    # alcance" y devuelve vacío.
+    sec_funcs: list[int] | None = None
+    if centros is not None:
+        sec_funcs = ejecucion_detalle_repo.sec_funcs_de_centros(db, centros)
+
+    proc = ejecucion_detalle_repo.procedencia(db, ano_eje)
+    filas = (
+        ejecucion_detalle_repo.agregados(
+            db, ano_eje, group_by=group_by, sec_funcs=sec_funcs
+        )
+        if proc["tiene_datos"]
+        else []
+    )
+    totales = (
+        ejecucion_detalle_repo.totales_por_fase(db, ano_eje, sec_funcs=sec_funcs)
+        if proc["tiene_datos"]
+        else {}
+    )
+
+    if proc["tiene_datos"] and filas:
+        auditoria_service.registrar_desde_request(
+            db, request,
+            accion=auditoria_service.Accion.CONSULTA_EJECUCION_AGREGADA_SIAF,
+            usuario_id=user.id,
+            detalle={"group_by": group_by, "ano_eje": ano_eje, "n_filas": len(filas)},
+        )
+        db.commit()
+
+    return {
+        "ano": ano_eje,
+        "group_by": group_by,
+        "tiene_datos": proc["tiene_datos"],
+        "meses_cargados": proc["meses_cargados"],
+        "emitido_en": proc["emitido_en"],
+        "cargado_en": proc["cargado_en"],
+        "totales_por_fase": totales,
+        "filas": filas,
+    }
 
 
 @pedidos_router.get("", response_model=list[PedidoCard])
@@ -246,7 +388,39 @@ def detalle_pedido(
         )
         ficha["devengado_mef"] = dev.get(int(sec_func), 0.0)
 
-    # Timeline con las 13/16 etapas + etapa actual del pedido.
+    # Detalle SIAF por documento (Formato A) para el/los expediente(s) del
+    # pedido: rompe la ceguera SIAF del timeline (Devengado duro + Girado +
+    # Pagado). Se inyecta en la ficha como {fase: {monto_neto, fecha_*}}. Si no
+    # hay Formato A cargado, `detalle_siaf` queda vacío y esas etapas caen a
+    # `sin_dato` (degradación limpia). Solo trazabilidad — no infla totales.
+    exps_pedido = {
+        int(e["exp_siaf"])
+        for e in (renombrado.get("expedientes") or [])
+        if e.get("exp_siaf")
+    } | {
+        int(o["exp_siaf"])
+        for o in (renombrado.get("ordenes") or [])
+        if o.get("exp_siaf")
+    }
+    detalle_siaf: dict[str, dict[str, Any]] = {}
+    for exp in exps_pedido:
+        for f in ejecucion_detalle_repo.por_expediente(
+            db, exp, ano or settings.ANO_VIGENTE
+        ):
+            acc = detalle_siaf.setdefault(
+                f["fase"], {"monto_neto": 0.0, "fecha_min": None, "fecha_max": None}
+            )
+            acc["monto_neto"] += f["monto_neto"]
+            for k in ("fecha_min", "fecha_max"):
+                if f[k] is not None:
+                    cur = acc[k]
+                    if k == "fecha_min":
+                        acc[k] = f[k] if cur is None else min(cur, f[k])
+                    else:
+                        acc[k] = f[k] if cur is None else max(cur, f[k])
+    ficha["detalle_siaf"] = detalle_siaf
+
+    # Timeline con las 15/18 etapas + etapa actual del pedido.
     timeline = pipeline_service.construir_timeline(ficha)
     renombrado["timeline"] = timeline
 

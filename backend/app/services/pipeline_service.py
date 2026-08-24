@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.repositories import pipeline_read_repo, resolucion_ccmn_repo
-from app.services import pipeline_v2
 from app.schemas.pipeline import (
     CONFIANZA_A_ESTADO,
     ESTADOS_ALCANZADOS,
@@ -36,7 +35,9 @@ from app.schemas.pipeline import (
     ETAPA_DESPACHO_PECOSA,
     ETAPA_DEVENGADO,
     ETAPA_EJECUCION,
+    ETAPA_GIRADO,
     ETAPA_ORDEN_EMITIDA,
+    ETAPA_PAGADO,
     ETAPA_PEDIDO_APROBADO,
     ETAPA_PEDIDO_INTERNO,
     ETAPA_PEDIDO_REGISTRADO,
@@ -46,6 +47,7 @@ from app.schemas.pipeline import (
     MACROFASE_A_LABEL,
     MACROFASES,
 )
+from app.services import pipeline_v2
 
 logger = logging.getLogger(__name__)
 
@@ -529,6 +531,7 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         *,
         via_ccmn: bool = False,
         docs: list[dict[str, Any]] | None = None,
+        monto: float | None = None,
     ):
         """Agrega un hito con su estado de UI y sus documentos identificadores.
 
@@ -540,6 +543,9 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         documento en SIGA (CCMN 2266, CCP 182, OC 132...). Sin esto el
         recorrido dice "llego a certificacion" pero no *cual* certificacion,
         que es justo lo que hace falta para verificarlo.
+
+        `monto` es el monto neto de la fase cuando el dato es duro del Formato A
+        (Devengado/Girado/Pagado). Carga provisional — nunca un KPI de tablero.
         """
         if not alcanzada:
             estado = "sin_dato"
@@ -561,6 +567,7 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
             # `alcanzada` se mantiene por compatibilidad, pero ahora excluye
             # `grupo`: un avance ajeno no es avance de este pedido.
             "alcanzada": estado in ESTADOS_ALCANZADOS,
+            "monto": monto,
         })
 
     def _doc(etiqueta: str, valor: Any) -> dict[str, Any] | None:
@@ -736,28 +743,82 @@ def construir_timeline(ficha: dict[str, Any]) -> list[dict[str, Any]]:
         _add(ETAPA_DESPACHO_PECOSA, fecha_despacho, fecha_despacho is not None,
              "El almacen despacho el bien (PECOSA).", docs=pecosas)
 
-    # Devengado presupuestal: es del MEF, pero a NIVEL META (sec_func), no por
-    # orden — el clasificador SIGA no cruza 1:1 con SIAF y EXPEDIENTE_SIAF de la
-    # conformidad viene NULL. Por eso el devengado MEF NO puede marcar por si
-    # solo esta etapa: casi toda meta tiene algo devengado y marcaria devengado
-    # a pedidos sin siquiera ejecucion (timeline incoherente: devengado [15]
-    # alcanzado con ejecucion [11] pendiente). La etapa se alcanza con la
-    # evidencia REAL de ejecucion del pedido (conformidad / entrada a almacen);
-    # el devengado MEF de la meta se muestra como confirmacion en el texto.
+    # ─── Devengado / Girado / Pagado: rastro SIAF hacia el pago ──────────
+    #
+    # Dato DURO del Formato A (siaf.ejecucion_detalle_siaf), inyectado en la
+    # ficha como `detalle_siaf = {fase: {monto_neto, fecha_min, fecha_max}}` por
+    # el llamador (routers/pipeline.py). Carga provisional: rompe la ceguera
+    # SIAF sin inflar totales (RN §3). Sin Formato A cargado, `detalle_siaf` va
+    # vacio y estas etapas caen al comportamiento inferido / `sin_dato`.
+    detalle_siaf: dict[str, dict[str, Any]] = ficha.get("detalle_siaf") or {}
+
+    def _fase_siaf(cod: str) -> tuple[bool, datetime | None, float]:
+        """(existe, fecha_max_como_dt, monto_neto) de una fase del Formato A."""
+        d = detalle_siaf.get(cod)
+        if not d:
+            return (False, None, 0.0)
+        monto = float(d.get("monto_neto") or 0)
+        # Solo cuenta como fase alcanzada si el neto vigente es != 0 (las
+        # rectificaciones que netean a 0 no son un hito real).
+        existe = abs(monto) > 0
+        return (existe, _to_dt(d.get("fecha_max") or d.get("fecha_min")), monto)
+
+    dev_siaf_ok, dev_siaf_fecha, dev_siaf_monto = _fase_siaf("D")
+    gir_ok, gir_fecha, gir_monto = _fase_siaf("G")
+    pag_ok, pag_fecha, pag_monto = _fase_siaf("P")
+
+    # Devengado: si el Formato A trae la fase D del expediente -> dato DURO
+    # (fecha y monto reales, estado `directo`). Si no, se mantiene el
+    # comportamiento inferido previo: la etapa se alcanza con la evidencia REAL
+    # de ejecucion del pedido (conformidad / entrada a almacen) y el devengado
+    # MEF de la meta solo confirma en el texto. El devengado MEF NO marca por si
+    # solo la etapa (casi toda meta tiene algo devengado -> marcaria devengado a
+    # pedidos sin ejecucion; timeline incoherente).
     dev_mef = float(ficha.get("devengado_mef") or 0)
-    _add(ETAPA_DEVENGADO, fecha_confor or fecha_ingreso, tiene_ejecucion,
-         "El gasto se devengo. La meta del pedido registra devengado en el MEF."
-         if (tiene_ejecucion and dev_mef > 0)
-         else "El gasto se devengo (ejecucion con conformidad)."
-         if tiene_ejecucion
-         else "Devengado: el monto autoritativo proviene del MEF.")
+    if dev_siaf_ok:
+        _add(ETAPA_DEVENGADO, dev_siaf_fecha, True,
+             "El gasto se devengo (detalle SIAF del expediente).",
+             monto=dev_siaf_monto)
+    else:
+        _add(ETAPA_DEVENGADO, fecha_confor or fecha_ingreso, tiene_ejecucion,
+             "El gasto se devengo. La meta del pedido registra devengado en el MEF."
+             if (tiene_ejecucion and dev_mef > 0)
+             else "El gasto se devengo (ejecucion con conformidad)."
+             if tiene_ejecucion
+             else "Devengado: el monto autoritativo proviene del MEF.")
+
+    # Girado y Pagado: NUEVAS. No existen en SIGA (llega hasta orden+recepcion);
+    # su unico dato duro es el Formato A. Sin el, quedan `sin_dato` (no se
+    # infieren: seria inventar la salida de caja).
+    _add(ETAPA_GIRADO, gir_fecha, gir_ok,
+         "El SIAF giro el pago al proveedor (detalle SIAF)."
+         if gir_ok else "Girado: aun no registrado en el detalle SIAF.",
+         monto=gir_monto if gir_ok else None)
+    _add(ETAPA_PAGADO, pag_fecha, pag_ok,
+         "El pago salio de caja hacia el proveedor (detalle SIAF)."
+         if pag_ok else "Pagado: aun no registrado en el detalle SIAF.",
+         monto=pag_monto if pag_ok else None)
+
+    # Cierre financiero: si el detalle SIAF confirma que el Pagado neto igualo al
+    # Devengado neto, el dinero salio completo de caja. Es una senal adicional de
+    # cierre, independiente del cierre operativo SIGA (recepcion completa).
+    cierre_financiero = (
+        dev_siaf_ok and pag_ok
+        and abs(pag_monto - dev_siaf_monto) < 0.01
+    )
+    tiene_cierre = tiene_cierre or cierre_financiero
 
     fecha_cierre_final = (
-        fecha_cierre_ord or (fecha_atenc if estado_pedido == "7" else None)
+        fecha_cierre_ord
+        or (fecha_atenc if estado_pedido == "7" else None)
+        or (pag_fecha if cierre_financiero else None)
     )
     if tiene_cierre_negativo:
         _add(ETAPA_CIERRE, fecha_orden, True,
              "El pedido se cerro: su orden fue anulada en SIGA.")
+    elif cierre_financiero and not (cierre_por_recepcion or estado_pedido == "7"):
+        _add(ETAPA_CIERRE, fecha_cierre_final, True,
+             "El pedido se cerro: el pago salio completo de caja (SIAF).")
     else:
         _add(ETAPA_CIERRE, fecha_cierre_final, tiene_cierre,
              "El pedido se cerro: la orden recibio todo lo solicitado."

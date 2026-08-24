@@ -12,14 +12,17 @@
  *
  * Auto-refresca cada 15s. Los administradores pueden forzar SIAF / Invierte.
  */
+import { useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
   CalendarClock,
   CheckCircle2,
   Database,
+  FileSpreadsheet,
   History,
   RefreshCw,
+  Upload,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { SectionCard } from '@/components/layout/SectionCard';
@@ -28,8 +31,13 @@ import { ErrorState } from '@/components/layout/ErrorState';
 import { SkeletonTable } from '@/components/layout/LoadingSkeleton';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { formatFechaHora } from '@/lib/formatters';
-import { useEstadoSincronizacion, useTriggerSync } from '@/features/sincronizacion/api';
+import { formatearMoneda, formatFechaHora } from '@/lib/formatters';
+import {
+  useCargarFormatoA,
+  useEstadoSincronizacion,
+  useTriggerSync,
+} from '@/features/sincronizacion/api';
+import type { CargaFormatoAResultado } from '@/features/sincronizacion/types';
 import {
   duracion,
   enCuanto,
@@ -118,6 +126,9 @@ export default function Sincronizacion() {
             <TablaProgramadas jobs={estadoQ.data.jobs_programados} />
           </SectionCard>
 
+          {/* ── Carga del Formato A (SIAF) ───────────────────────────── */}
+          <CargaFormatoA />
+
           {/* ── Disparo manual ───────────────────────────────────────── */}
           <SectionCard titulo="Forzar sincronización" icono={RefreshCw} padding="sm">
             <p className="mb-3 text-sm text-muted-foreground">
@@ -163,6 +174,156 @@ export default function Sincronizacion() {
         </>
       ) : null}
     </div>
+  );
+}
+
+// ── Carga del Formato A (SIAF) ───────────────────────────────────────────
+//
+// El Formato A del Modulo Administrativo SIAF se exporta por mes. Aquí el admin
+// sube uno o varios Excel; el backend deduce año y mes de la cabecera y reemplaza
+// solo ese mes (swap por año+mes). Cargar el histórico = subir cada mes una vez;
+// el mes en curso se recarga a diario sin duplicar.
+
+const MES_NOMBRE = [
+  '', 'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'setiembre', 'octubre', 'noviembre', 'diciembre',
+];
+
+type ResultadoFila =
+  | { archivo: string; estado: 'ok'; data: CargaFormatoAResultado }
+  | { archivo: string; estado: 'error'; mensaje: string };
+
+function CargaFormatoA() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const cargar = useCargarFormatoA();
+  const [encolados, setEncolados] = useState<File[]>([]);
+  const [resultados, setResultados] = useState<ResultadoFila[]>([]);
+  const [subiendo, setSubiendo] = useState(false);
+  const [activo, setActivo] = useState<string | null>(null);
+
+  const alElegir = (files: FileList | null) => {
+    if (!files) return;
+    setEncolados(Array.from(files));
+    setResultados([]);
+  };
+
+  const subir = async () => {
+    if (encolados.length === 0 || subiendo) return;
+    setSubiendo(true);
+    setResultados([]);
+    // Secuencial: cada carga hace un swap por mes; en serie evita choques y deja
+    // el resultado de cada archivo a la vista.
+    for (const archivo of encolados) {
+      setActivo(archivo.name);
+      try {
+        const data = await cargar.mutateAsync(archivo);
+        setResultados((r) => [...r, { archivo: archivo.name, estado: 'ok', data }]);
+      } catch (e) {
+        const mensaje =
+          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+          (e instanceof Error ? e.message : 'Error desconocido');
+        setResultados((r) => [...r, { archivo: archivo.name, estado: 'error', mensaje }]);
+      }
+    }
+    setActivo(null);
+    setSubiendo(false);
+    setEncolados([]);
+    if (inputRef.current) inputRef.current.value = '';
+  };
+
+  return (
+    <SectionCard titulo="Cargar Formato A (SIAF)" icono={FileSpreadsheet} padding="sm">
+      <p className="mb-3 text-sm text-muted-foreground">
+        Sube el Excel del reporte «Formato A» del Módulo Administrativo del SIAF. Trae el
+        detalle por documento (expediente, fase, proveedor, montos) que la API pública del
+        MEF no da. El sistema detecta el año y el mes de cada archivo y reemplaza solo ese
+        mes; para tener el rastro completo, sube un archivo por cada mes. Puedes
+        seleccionar varios a la vez.
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".xlsx,.xlsm"
+          multiple
+          onChange={(e) => alElegir(e.target.files)}
+          disabled={subiendo}
+          className={cn(
+            'text-sm text-foreground file:mr-3 file:rounded-md file:border file:border-border',
+            'file:bg-card file:px-3 file:py-1.5 file:text-sm file:text-foreground',
+            'file:transition-colors hover:file:bg-muted',
+            subiendo && 'opacity-60',
+          )}
+        />
+        <Button size="sm" onClick={subir} disabled={subiendo || encolados.length === 0}>
+          <Upload className={cn('mr-1.5 h-4 w-4', subiendo && 'animate-pulse')} />
+          {subiendo
+            ? `Cargando ${activo ? `(${activo})` : ''}…`
+            : encolados.length > 1
+              ? `Cargar ${encolados.length} archivos`
+              : 'Cargar archivo'}
+        </Button>
+      </div>
+
+      {encolados.length > 0 && !subiendo ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {encolados.length} archivo{encolados.length > 1 ? 's' : ''} listo
+          {encolados.length > 1 ? 's' : ''} para cargar.
+        </p>
+      ) : null}
+
+      {resultados.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {resultados.map((r, i) => (
+            <li
+              key={`${r.archivo}-${i}`}
+              className={cn(
+                'rounded-md border px-3 py-2 text-sm',
+                r.estado === 'ok'
+                  ? 'border-emerald-500/30 bg-emerald-500/5'
+                  : 'border-destructive/30 bg-destructive/5',
+              )}
+            >
+              {r.estado === 'ok' ? (
+                <div className="flex flex-col gap-1">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <span className="font-medium text-foreground">
+                      {r.data.mes ? MES_NOMBRE[r.data.mes] : '—'} {r.data.ano}
+                    </span>
+                    <span className="text-muted-foreground">
+                      · {r.data.registros.toLocaleString('es-PE')} filas cargadas
+                      {r.data.descartadas > 0
+                        ? ` · ${r.data.descartadas.toLocaleString('es-PE')} de otro año descartadas`
+                        : ''}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 pl-6 font-mono text-[11px] tabular-nums text-muted-foreground">
+                    {(['C', 'D', 'G', 'P'] as const).map((f) =>
+                      r.data.resumen_por_fase[f] ? (
+                        <span key={f}>
+                          {{ C: 'Cert', D: 'Deveng', G: 'Girado', P: 'Pagado' }[f]}:{' '}
+                          {formatearMoneda(r.data.resumen_por_fase[f])}
+                        </span>
+                      ) : null,
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                  <div>
+                    <span className="font-medium text-foreground">{r.archivo}</span>
+                    <p className="text-xs text-destructive">{r.mensaje}</p>
+                  </div>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </SectionCard>
   );
 }
 

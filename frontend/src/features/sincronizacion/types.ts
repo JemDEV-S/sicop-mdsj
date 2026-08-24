@@ -52,3 +52,18 @@ export interface EstadoSincronizacion {
 
 /** Nombre del disparador manual disponible en el endpoint admin. */
 export type TriggerManual = 'sincronizar-siaf' | 'sincronizar-invierte';
+
+/**
+ * Resultado de subir un Excel del Formato A. Espejo de `CargaFormatoAResponse`
+ * en `backend/app/routers/admin_jobs.py`.
+ */
+export interface CargaFormatoAResultado {
+  archivo: string;
+  ano: number;
+  mes: number | null;
+  registros: number;
+  descartadas: number;
+  ejecutora: string | null;
+  periodo: string | null;
+  resumen_por_fase: Record<string, number>;
+}
