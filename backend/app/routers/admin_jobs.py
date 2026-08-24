@@ -52,7 +52,7 @@ class CargaFormatoAResponse(BaseModel):
 
 
 _EXT_PERMITIDAS = (".xlsx", ".xlsm")
-_MAX_BYTES = 25 * 1024 * 1024  # 25 MB: el Formato A ronda 1-3 MB.
+_MAX_BYTES = 50 * 1024 * 1024  # 50 MB: Soporta archivos pesados de Formato A.
 
 
 class RunEstadoResponse(BaseModel):
@@ -231,9 +231,10 @@ def cargar_formato_a(
             detail="El archivo esta vacio.",
         )
     if len(contenido) > _MAX_BYTES:
+        max_mb = _MAX_BYTES // (1024 * 1024)
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="El archivo excede el limite de 25 MB.",
+            detail=f"El archivo excede el limite de {max_mb} MB.",
         )
 
     try:
