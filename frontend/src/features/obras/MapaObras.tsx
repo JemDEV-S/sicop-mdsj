@@ -134,7 +134,7 @@ const MARKER_STYLES = `
     width: var(--cluster-size, 44px);
     height: var(--cluster-size, 44px);
     border-radius: 999px;
-    background: var(--primary);
+    background: var(--cluster-bg, var(--primary));
     border: 3px solid #fff;
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.28);
     display: flex;
@@ -221,16 +221,84 @@ function obtenerNombreTooltip(nombre: string | null | undefined): string {
   return `${base.trimEnd()}...`;
 }
 
-function colorPinPorAvance(avance: number | null): string {
-  if (avance == null) return '#94a3b8'; // slate-400 — neutro para "sin dato"
-  // Rango: 8FA4D9 (lavanda claro, avance 0) → 1E3A8A (indigo profundo, avance 100)
-  const t = Math.min(1, Math.max(0, avance / 100));
-  const start = { r: 0x8f, g: 0xa4, b: 0xd9 };
-  const end = { r: 0x1e, g: 0x3a, b: 0x8a };
-  const r = Math.round(start.r + (end.r - start.r) * t);
-  const g = Math.round(start.g + (end.g - start.g) * t);
-  const b = Math.round(start.b + (end.b - start.b) * t);
-  return `rgb(${r},${g},${b})`;
+interface CategoriaPin {
+  id: string;
+  etiqueta: string;
+  color: string;
+  patrones: RegExp[];
+}
+
+const CATEGORIAS_PIN: CategoriaPin[] = [
+  {
+    id: 'transporte',
+    etiqueta: 'Transporte',
+    color: '#1d4ed8',
+    patrones: [/transporte|vial|v[ií]a|pista|calle|puente|carret|transitabilidad/],
+  },
+  {
+    id: 'saneamiento',
+    etiqueta: 'Agua',
+    color: '#0ea5e9',
+    patrones: [/saneamiento|agua|desag|alcantar|drenaje|potable|canaliz/],
+  },
+  {
+    id: 'educacion',
+    etiqueta: 'Educación',
+    color: '#7e22ce',
+    patrones: [/educaci|escolar|escuela|colegio|instituci[oó]n educativa|i\.e\./],
+  },
+  {
+    id: 'salud',
+    etiqueta: 'Salud',
+    color: '#e11d48',
+    patrones: [/salud|hospital|posta|m[eé]dic|centro de salud/],
+  },
+  {
+    id: 'recreacion',
+    etiqueta: 'Recreación',
+    color: '#f97316',
+    patrones: [/deporte|recre|parque|plaza|estadio|losa/],
+  },
+  {
+    id: 'ambiente',
+    etiqueta: 'Ambiente',
+    color: '#16a34a',
+    patrones: [/ambient|residuo|ecol|forestal|limpieza/],
+  },
+  {
+    id: 'agropecuaria',
+    etiqueta: 'Riego rural',
+    color: '#a16207',
+    patrones: [/agr[ií]|riego|pecuari|rural/],
+  },
+  {
+    id: 'seguridad',
+    etiqueta: 'Seguridad',
+    color: '#111827',
+    patrones: [/seguridad|orden|serenaz|polic/],
+  },
+  {
+    id: 'cultura',
+    etiqueta: 'Cultura',
+    color: '#db2777',
+    patrones: [/cultura|patrimonio|turism/],
+  },
+];
+
+const CATEGORIA_PIN_DEFAULT: CategoriaPin = {
+  id: 'otros',
+  etiqueta: 'Otros',
+  color: '#64748b',
+  patrones: [],
+};
+
+const CATEGORIAS_LEYENDA_PIN = [...CATEGORIAS_PIN, CATEGORIA_PIN_DEFAULT];
+
+function categoriaPinPorObra(obra: ObraMapaItem): CategoriaPin {
+  const key = `${obra.funcion ?? ''} ${obra.nombre_inversion ?? ''}`.toLowerCase();
+  return CATEGORIAS_PIN.find((categoria) =>
+    categoria.patrones.some((patron) => patron.test(key)),
+  ) ?? CATEGORIA_PIN_DEFAULT;
 }
 
 /**
@@ -278,16 +346,16 @@ function iconoSectorSvg(funcion: string | null | undefined): string {
 }
 
 /**
- * Construye el HTML del marcador tipo pin con anillo de progreso
- * dibujado sobre el contorno mismo del pin.
+ * Construye el HTML del marcador tipo pin: el color identifica el tipo
+ * de proyecto y el número conserva el avance físico.
  */
 function crearIconoPin(obra: ObraMapaItem, seleccionado = false, separado = false): L.DivIcon {
   const avance =
     obra.avance_fisico != null ? Math.min(100, Math.max(0, Number(obra.avance_fisico))) : null;
-  const color = colorPinPorAvance(avance);
-  const iconoSector = iconoSectorSvg(obra.funcion);
+  const color = categoriaPinPorObra(obra).color;
+  const iconoSector = iconoSectorSvg(`${obra.funcion ?? ''} ${obra.nombre_inversion ?? ''}`);
 
-  // Trazamos el pin dos veces: el "fondo" claro y el "progreso" al color.
+  // Trazamos el pin con su color de categoría y dejamos el avance como aro blanco.
   // Path del contorno del pin (mismo path, viewBox 44x54).
   // Longitud aproximada del path para stroke-dasharray dinámico.
   const pathPin =
@@ -371,11 +439,25 @@ function idDeCluster(obras: ObraMapaItem[]): string {
     .join('|');
 }
 
-function crearIconoCluster(count: number): L.DivIcon {
+function fondoClusterPorObras(obras: ObraMapaItem[]): string {
+  const colores = Array.from(new Set(obras.map((obra) => categoriaPinPorObra(obra).color)));
+
+  if (colores.length === 0) return 'var(--primary)';
+  if (colores.length === 1) return colores[0]!;
+
+  const visibles = colores.slice(0, 5);
+  const paso = 100 / visibles.length;
+  return `conic-gradient(${visibles
+    .map((color, index) => `${color} ${index * paso}% ${(index + 1) * paso}%`)
+    .join(', ')})`;
+}
+
+function crearIconoCluster(count: number, obras: ObraMapaItem[]): L.DivIcon {
   const size = count >= 10 ? 52 : count >= 5 ? 46 : 42;
+  const fondo = fondoClusterPorObras(obras);
   return L.divIcon({
     html: `
-      <div class="mapa-cluster-obra" style="--cluster-size:${size}px" role="button" tabindex="-1"
+      <div class="mapa-cluster-obra" style="--cluster-size:${size}px;--cluster-bg:${fondo}" role="button" tabindex="-1"
            aria-label="${count} obras en esta zona. Clic para separarlas.">
         <span class="mapa-cluster-obra__count">${count}</span>
         <span class="mapa-cluster-obra__label">obras</span>
@@ -483,7 +565,7 @@ function calcularVistasMarcadores(
         id,
         count: obrasGrupo.length,
         position: map.layerPointToLatLng(cluster.centro),
-        icon: crearIconoCluster(obrasGrupo.length),
+        icon: crearIconoCluster(obrasGrupo.length, obrasGrupo),
         obras: obrasGrupo,
       });
       return;
@@ -610,24 +692,28 @@ export default function MapaObras({
         />
       </WrapperMapa>
 
-      {/* Leyenda flotante — intensidad de color = avance físico */}
-      <div className="pointer-events-none absolute bottom-4 left-4 z-[500] rounded-xl border border-border bg-gradient-to-br from-card/95 via-card/95 to-primary/10 px-3 py-2.5 shadow-md backdrop-blur">
+      {/* Leyenda flotante — color = tipo de proyecto */}
+      <div className="pointer-events-none absolute bottom-4 left-4 z-[500] w-[300px] max-w-[calc(100%-2rem)] rounded-xl border border-border bg-card/95 px-3 py-2.5 shadow-md backdrop-blur">
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Avance físico
+          Tipo de proyecto
         </p>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold text-muted-foreground">0%</span>
-          <span
-            className="h-2 w-28 rounded-full"
-            style={{
-              background: 'linear-gradient(to right, #8fa4d9, #1e3a8a)',
-            }}
-            aria-hidden="true"
-          />
-          <span className="text-[10px] font-semibold text-muted-foreground">100%</span>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+          {CATEGORIAS_LEYENDA_PIN.map((categoria) => (
+            <span
+              key={categoria.id}
+              className="flex min-w-0 items-center gap-1.5 text-[10px] font-medium text-muted-foreground"
+            >
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white"
+                style={{ backgroundColor: categoria.color }}
+                aria-hidden="true"
+              />
+              <span className="truncate">{categoria.etiqueta}</span>
+            </span>
+          ))}
         </div>
-        <p className="mt-1.5 text-[10px] leading-tight text-muted-foreground">
-          Varias obras juntas se agrupan; haz clic en el número para separarlas.
+        <p className="mt-2 text-[10px] leading-tight text-muted-foreground">
+          El número muestra el avance físico. Los grupos reúnen obras cercanas.
         </p>
       </div>
     </div>
