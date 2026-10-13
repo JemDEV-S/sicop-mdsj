@@ -76,6 +76,10 @@ export function AmbitoAnalisis({
           <div className="inline-flex overflow-hidden rounded-md border border-border">
             {CATEGORIAS.map((c) => {
               const activo = categoria === c.valor;
+              const conteo =
+                c.valor === 'todas'
+                  ? data.metas.length
+                  : data.metas.filter((m) => m.categoria === c.valor).length;
               return (
                 <button
                   key={c.valor}
@@ -87,7 +91,7 @@ export function AmbitoAnalisis({
                     activo ? 'bg-primary text-primary-foreground' : 'bg-card text-foreground hover:bg-muted',
                   )}
                 >
-                  {c.label}
+                  {c.label} ({conteo})
                 </button>
               );
             })}

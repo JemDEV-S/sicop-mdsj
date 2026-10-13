@@ -92,6 +92,23 @@ export function AnalisisPorMeta({
     if (m) setCategoria(m.categoria);
   }, [metaInicial, data]);
 
+  // Si no se especificó una meta inicial y los datos cargaron:
+  // Si la categoría activa ('proyecto') tiene 0 metas para esta área (ej. Seguridad Ciudadana, Serenazgo,
+  // áreas administrativas), auto-conmutamos a 'producto' o 'todas' para que nunca vean un tablero en cero artificial.
+  useEffect(() => {
+    if (metaInicial != null || !data || data.metas.length === 0) return;
+    const nProyecto = data.metas.filter((m) => m.categoria === 'proyecto').length;
+    const nProducto = data.metas.filter((m) => m.categoria === 'producto').length;
+
+    if (categoria === 'proyecto' && nProyecto === 0) {
+      if (nProducto > 0) {
+        setCategoria('producto');
+      } else {
+        setCategoria('todas');
+      }
+    }
+  }, [data, metaInicial, categoria]);
+
   // Cambiar la naturaleza del gasto (bandera principal) manda sobre la meta: si
   // la elegida no es de esa naturaleza, se limpia. Se hace en el handler (no en
   // un efecto reactivo) para no pisar la meta inicial del enlace entrante.
