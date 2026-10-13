@@ -72,8 +72,39 @@ if ('serviceWorker' in navigator) {
 // 2. Detectar error de chunks obsoletos tras nuevo despliegue (Vite Dynamic Imports)
 window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault();
-  void forceUpdateApp('Módulo dinámico obsoleto detectado');
+  void forceUpdateApp('Módulo dinámico obsoleto detectado (vite:preloadError)');
 });
+
+// 2b. Capturar errores no manejados en import() dinámicos
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason;
+  const msg = reason?.message || String(reason || '');
+  if (
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Importing a module script failed') ||
+    msg.includes('error loading dynamically imported module') ||
+    msg.includes('Loading chunk')
+  ) {
+    event.preventDefault();
+    void forceUpdateApp('Módulo dinámico obsoleto detectado (unhandledrejection)');
+  }
+});
+
+// 2c. Capturar errores 404 de carga de script o link con hash de Vite en fase de captura
+window.addEventListener(
+  'error',
+  (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+      const src = (target as HTMLScriptElement).src || (target as HTMLLinkElement).href || '';
+      if (src.includes('/assets/')) {
+        console.warn('[SICOP] Error de carga en recurso versionado:', src);
+        void forceUpdateApp('Recurso versionado no disponible (posible nuevo despliegue)');
+      }
+    }
+  },
+  true
+);
 
 // 3. Revisión periódica y por eventos de foco / visibilidad
 setTimeout(() => void checkServerVersion(), 1500);
