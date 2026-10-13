@@ -75,7 +75,7 @@ export default function InternoLayout() {
       </div>
       <ModalesHost />
       <ModalCambiarPassword
-        abierto={Boolean(user?.debe_cambiar_password)}
+        abierto={Boolean(user?.debe_cambiar_password && user?.rol !== 'admin')}
         obligatorio={true}
       />
     </div>
