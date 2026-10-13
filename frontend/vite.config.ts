@@ -15,11 +15,41 @@ const httpsConfig =
     ? { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) }
     : undefined
 
+const buildId = Date.now().toString()
+
+function versionPlugin(id: string) {
+  return {
+    name: 'version-plugin',
+    generateBundle(this: any) {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: JSON.stringify({ version: id, timestamp: new Date().toISOString() }),
+      })
+    },
+    configureServer(server: any) {
+      server.middlewares.use((req: any, res: any, next: any) => {
+        if (req.url?.startsWith('/version.json')) {
+          res.setHeader('Content-Type', 'application/json')
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(JSON.stringify({ version: id, timestamp: new Date().toISOString() }))
+          return
+        }
+        next()
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_BUILD_ID__: JSON.stringify(buildId),
+  },
   plugins: [
     react(),
     tailwindcss(),
+    versionPlugin(buildId),
     VitePWA({
       registerType: 'autoUpdate',
       // Habilita la PWA también en `vite dev` para poder probar la instalación.
@@ -50,8 +80,13 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // No cachear el backend: las respuestas de /api deben ir siempre a la red.
-        navigateFallbackDenylist: [/^\/api/],
+        // No cachear backend ni version.json
+        navigateFallbackDenylist: [/^\/api/, /^\/version\.json/],
+        // No precachear index.html en el Service Worker para que el navegador
+        // SIEMPRE solicite el HTML fresco al servidor (Nginx) y nunca se quede en caché vieja.
+        globIgnores: ['**/index.html', '**/version.json'],
+        navigateFallback: null,
+        cleanupOutdatedCaches: true,
       },
     }),
   ],
