@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, LogOut, Menu } from 'lucide-react';
+import { ChevronDown, KeyRound, LogOut, Menu } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { useContextoInterno } from '@/store/contexto-interno';
 import { cn } from '@/lib/utils';
+import { ModalCambiarPassword } from '@/features/auth/ModalCambiarPassword';
 import BreadcrumbsAuto from './BreadcrumbsAuto';
 import { ChipAñoActivo, ChipCentroCostoActivo } from './ChipContexto';
 
@@ -16,6 +17,7 @@ export function TopbarInterno({ breadcrumbs }: TopbarInternoProps) {
   const abrirDrawer = useContextoInterno((s) => s.abrirDrawer);
 
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const [modalPasswordAbierto, setModalPasswordAbierto] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -100,17 +102,35 @@ export function TopbarInterno({ breadcrumbs }: TopbarInternoProps) {
                 role="menuitem"
                 onClick={() => {
                   setMenuAbierto(false);
+                  setModalPasswordAbierto(true);
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted focus-visible:outline-none focus-visible:bg-muted"
+              >
+                <KeyRound className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
+                Cambiar contraseña
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuAbierto(false);
                   void logout();
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-foreground hover:bg-muted focus-visible:outline-none focus-visible:bg-muted"
               >
-                <LogOut className="w-4 h-4" aria-hidden="true" />
+                <LogOut className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
                 Cerrar sesión
               </button>
             </div>
           ) : null}
         </div>
       </div>
+
+      <ModalCambiarPassword
+        abierto={modalPasswordAbierto}
+        obligatorio={false}
+        onClose={() => setModalPasswordAbierto(false)}
+      />
 
       {/* Fila secundaria móvil: chips de contexto, que en el topbar se ocultan por debajo de md.
           Sin overflow-x aquí: recortaría los menús desplegables de los chips. */}

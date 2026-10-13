@@ -147,7 +147,7 @@ def crear_usuario(
     rol: CodigoRol,
     email: str | None,
 ) -> UUID:
-    """Crea el usuario con contraseña = DNI y `debe_cambiar_password = false`.
+    """Crea el usuario con contraseña = DNI y `debe_cambiar_password = true`.
 
     No commitea — el caller decide la transacción (para agrupar con auditoría).
     """
@@ -172,7 +172,7 @@ def crear_usuario(
             INSERT INTO auth.usuarios
                    (usuario, password_hash, nombre_completo, dni, email, rol_id,
                     debe_cambiar_password)
-            VALUES (:u, :h, :n, :dni, :email, :r, false)
+            VALUES (:u, :h, :n, :dni, :email, :r, true)
             RETURNING id
             """
         ),
@@ -263,7 +263,7 @@ def resetear_password_a_dni(db: Session, usuario_id: UUID) -> None:
         )
     db.execute(
         text(
-            "UPDATE auth.usuarios SET password_hash = :h, debe_cambiar_password = false "
+            "UPDATE auth.usuarios SET password_hash = :h, debe_cambiar_password = true "
             "WHERE id = :id"
         ),
         {"h": hash_password(fila.dni), "id": str(usuario_id)},

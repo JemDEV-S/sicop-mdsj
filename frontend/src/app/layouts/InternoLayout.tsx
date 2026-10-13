@@ -7,7 +7,11 @@ import { cn } from '@/lib/utils';
 import { ModalesProvider } from '@/features/modales/ModalesContext';
 import { ModalesHost } from '@/features/modales/ModalesHost';
 
+import { useAuthStore } from '@/store/auth';
+import { ModalCambiarPassword } from '@/features/auth/ModalCambiarPassword';
+
 export default function InternoLayout() {
+  const user = useAuthStore((s) => s.user);
   const drawerAbierto = useContextoInterno((s) => s.drawerAbierto);
   const cerrarDrawer = useContextoInterno((s) => s.cerrarDrawer);
 
@@ -70,6 +74,10 @@ export default function InternoLayout() {
         </main>
       </div>
       <ModalesHost />
+      <ModalCambiarPassword
+        abierto={Boolean(user?.debe_cambiar_password)}
+        obligatorio={true}
+      />
     </div>
     </ModalesProvider>
   );

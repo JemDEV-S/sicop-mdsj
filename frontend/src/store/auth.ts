@@ -23,6 +23,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (usuario: string, password: string) => Promise<void>;
+  cambiarPassword: (passwordActual: string, passwordNueva: string) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
   resetSession: () => void;
@@ -46,6 +47,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     const userRes = await apiClient.get<UserProfile>('/auth/me');
     useContextoInterno.getState().hidratarDesdePerfil(userRes.data.centros_costo);
     set({ user: userRes.data, isAuthenticated: true });
+  },
+
+  cambiarPassword: async (passwordActual, passwordNueva) => {
+    await apiClient.post('/auth/cambiar-password', {
+      password_actual: passwordActual,
+      password_nueva: passwordNueva,
+    });
+    const currentUser = useAuthStore.getState().user;
+    if (currentUser?.usuario) {
+      await useAuthStore.getState().login(currentUser.usuario, passwordNueva);
+    }
   },
 
   logout: async () => {
