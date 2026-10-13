@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Eye, EyeOff, Loader2, Lock, LogIn, ShieldCheck, User } from 'lucide-react';
 import { useAuthStore } from '../../store/auth';
 import { handleApiError } from '../../lib/api-errors';
@@ -14,7 +14,20 @@ export default function Login() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { login } = useAuthStore();
-  const navigate = useNavigate();
+
+  // Al cargar la vista de login, purgar proactivamente cualquier caché obsoleta del navegador
+  useEffect(() => {
+    if ('caches' in window) {
+      caches.keys().then((names) => {
+        names.forEach((name) => caches.delete(name));
+      }).catch(() => {});
+    }
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach((reg) => reg.update().catch(() => {}));
+      }).catch(() => {});
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,7 +36,17 @@ export default function Login() {
 
     try {
       await login(usuario, password);
-      navigate('/interno', { replace: true });
+
+      // Limpiar cachés del navegador antes de ingresar al panel
+      if ('caches' in window) {
+        try {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        } catch {}
+      }
+
+      // Redirigir de forma completa para garantizar carga limpia de los módulos más recientes del servidor
+      window.location.replace('/interno');
     } catch (error) {
       setErrorMsg(handleApiError(error).message);
     } finally {

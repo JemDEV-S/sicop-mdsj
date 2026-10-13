@@ -69,6 +69,12 @@ export const useAuthStore = create<AuthState>((set) => ({
       console.warn('Fallo al avisar logout al servidor', error);
     } finally {
       useAuthStore.getState().resetSession();
+      if ('caches' in window) {
+        try {
+          const names = await caches.keys();
+          await Promise.all(names.map((n) => caches.delete(n)));
+        } catch {}
+      }
       // En este caso, al ser un logout explícito, sí navegamos
       window.location.href = '/login';
     }
