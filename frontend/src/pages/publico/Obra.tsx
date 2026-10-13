@@ -12,7 +12,6 @@ import { useObra } from '@/features/obras/hooks';
 import { mapSemaforoApiToEstado } from '@/features/obras/api';
 import { Identificacion } from '@/features/obras/secciones/Identificacion';
 import { AvancePresupuesto } from '@/features/obras/secciones/AvancePresupuesto';
-import { Cronograma } from '@/features/obras/secciones/Cronograma';
 import { UbicacionMapa } from '@/features/obras/secciones/UbicacionMapa';
 import { Contratista, Documentos } from '@/features/obras/secciones/ContratistaDocumentos';
 import { Galeria } from '@/features/obras/secciones/Galeria';
@@ -239,16 +238,15 @@ export default function Obra() {
         </div>
       </SectionBand>
 
-      {/* SECCIÓN — Ficha técnica + cronograma + ubicación */}
+      {/* SECCIÓN — Ficha técnica + ubicación */}
       <SectionBand tono="muted">
         <SectionHeader
           eyebrow="Ficha técnica"
           titulo="Datos del proyecto"
           descripcion="Información oficial registrada en Invierte.pe y en la administración municipal."
         />
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="mx-auto grid w-full max-w-4xl grid-cols-1 gap-6">
           <Identificacion obra={obra} />
-          <Cronograma obra={obra} />
         </div>
         <div className="mt-6">
           <UbicacionMapa obra={obra} />
