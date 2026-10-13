@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Check, Eye, EyeOff, Loader2, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -252,14 +252,16 @@ export function ModalCambiarPassword({
             </Button>
 
             {obligatorio ? (
-              <button
+              <Button
                 type="button"
+                variant="outline"
                 onClick={() => void logout()}
                 disabled={enviando}
-                className="text-center text-[11px] text-muted-foreground/60 hover:text-destructive transition-colors py-1 cursor-pointer"
+                className="w-full h-9 rounded-lg text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/5 hover:border-destructive/30 border-border/80 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
+                <LogOut className="h-3.5 w-3.5" />
                 Cerrar sesión e intentar más tarde
-              </button>
+              </Button>
             ) : (
               <Button
                 type="button"
