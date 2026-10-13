@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './app/App';
+import './pwa';
 // Tipografía institucional del Panel Interno v2 (IBM Plex), auto-hospedada
 // (sin llamadas a Google Fonts en runtime). Pesos usados: 400/500/600/700 sans,
 // 400/500/600 mono.
