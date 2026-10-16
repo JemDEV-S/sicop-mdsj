@@ -678,7 +678,7 @@ export default function MapaObras({
       <WrapperMapa
         height={height}
         zoom={ZOOM_DEFAULT_MAPA_GENERAL}
-        estilo="voyager"
+        estilo="osm"
         scrollWheelZoom
       >
         <MarcadoresObras
