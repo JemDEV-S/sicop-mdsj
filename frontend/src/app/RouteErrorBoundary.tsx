@@ -130,11 +130,19 @@ export default function RouteErrorBoundary() {
           </button>
 
           <a
-            href="/"
+            href={
+              typeof window !== 'undefined' &&
+              (window.location.pathname.startsWith('/interno') || window.location.pathname.startsWith('/admin'))
+                ? '/interno'
+                : '/'
+            }
             className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-slate-700 bg-slate-100 hover:bg-slate-200 transition-all cursor-pointer"
           >
             <Home className="w-4 h-4" />
-            Ir al inicio
+            {typeof window !== 'undefined' &&
+            (window.location.pathname.startsWith('/interno') || window.location.pathname.startsWith('/admin'))
+              ? 'Volver al panel'
+              : 'Ir al inicio'}
           </a>
         </div>
 

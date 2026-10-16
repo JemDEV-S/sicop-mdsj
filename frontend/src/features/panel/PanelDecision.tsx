@@ -96,8 +96,7 @@ export default function PanelDecision() {
     });
   const analizarMeta = (secFunc: number) =>
     navigate(`/interno/analisis?meta=${secFunc}`);
-  const verContrato = (ruc: string | null) =>
-    navigate(ruc ? `/interno/proveedores/${ruc}` : '/interno/analisis?tab=contratos');
+  const verContrato = () => navigate('/interno/contratos');
 
   return (
     <div className="space-y-6">
