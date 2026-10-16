@@ -13,9 +13,11 @@ Ejecucion:
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
 import sys
 import traceback
+import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
@@ -168,6 +170,99 @@ def _leer_todo(client: MefClient) -> dict[str, dict[str, Any]]:
     return consolidado
 
 
+def _leer_todo_archivo_mef(sec_ejec: str) -> dict[str, dict[str, Any]]:
+    """Descarga/transmite en streaming DETALLE_INVERSIONES.csv del MEF
+    y extrae todos los proyectos de la entidad solicitada."""
+    url = "https://fs.datosabiertos.mef.gob.pe/datastorefiles/DETALLE_INVERSIONES.csv"
+    logger.info("Leyendo registros Invierte.pe en streaming desde %s...", url)
+    token1 = f",{sec_ejec},".encode("latin-1")
+    token2 = f',"{sec_ejec}",'.encode("latin-1")
+    consolidado: dict[str, dict[str, Any]] = {}
+
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        first_line = resp.readline().decode("latin-1", errors="replace")
+        headers = next(csv.reader([first_line]))
+        col_map = {h.strip().upper(): i for i, h in enumerate(headers)}
+        sec_idx = col_map.get("SEC_EJEC")
+        if sec_idx is None:
+            raise RuntimeError("Columna SEC_EJEC no encontrada en DETALLE_INVERSIONES.csv")
+
+        for raw_line in resp:
+            if token1 in raw_line or token2 in raw_line:
+                line_str = raw_line.decode("latin-1", errors="replace")
+                row = next(csv.reader([line_str]))
+                if len(row) <= sec_idx or row[sec_idx].strip() != sec_ejec:
+                    continue
+
+                def _v(col: str) -> Any:
+                    idx = col_map.get(col)
+                    return row[idx] if idx is not None and len(row) > idx else None
+
+                codigo = _str_o_none(_v("CODIGO_UNICO"))
+                if not codigo:
+                    continue
+
+                consolidado[codigo] = {
+                    "codigo_unico": codigo,
+                    "nombre_inversion": _str_o_none(_v("NOMBRE_INVERSION")),
+                    "tipo_inversion": _str_o_none(_v("TIPO_INVERSION")),
+                    "marco": _str_o_none(_v("MARCO")),
+                    "estado": _str_o_none(_v("ESTADO")),
+                    "situacion": _str_o_none(_v("SITUACION")),
+                    "anio_proceso": _int_o_none(_v("ANIO_PROCESO")),
+                    "sec_ejec": _str_o_none(_v("SEC_EJEC")),
+                    "avance_fisico": _num_o_none(_v("AVANCE_FISICO")),
+                    "avance_ejecucion": _num_o_none(_v("AVANCE_EJECUCION")),
+                    "tiene_avan_fisico": _si_no(_v("TIENE_AVAN_FISICO")),
+                    "pim_anio_actual": _num_o_none(_v("PIM_ANIO_ACTUAL")),
+                    "dev_anio_actual": _num_o_none(_v("DEV_ANIO_ACTUAL")),
+                    "deven_acumul_anio_ant": _num_o_none(_v("DEVEN_ACUMUL_ANIO_ANT")),
+                    "comprom_anual_anio_actual": _num_o_none(_v("COMPROM_ANUAL_ANIO_ACTUAL")),
+                    "certif_anio_actual": _num_o_none(_v("CERTIF_ANIO_ACTUAL")),
+                    "costo_actualizado": _num_o_none(_v("COSTO_ACTUALIZADO")),
+                    "monto_viable": _num_o_none(_v("MONTO_VIABLE")),
+                    "saldo_ejecutar": _num_o_none(_v("SALDO_EJECUTAR")),
+                    "tiene_f8": _si_no(_v("TIENE_F8")),
+                    "etapa_f8": _str_o_none(_v("ETAPA_F8")),
+                    "tiene_f9": _si_no(_v("TIENE_F9")),
+                    "tiene_f12b": _si_no(_v("TIENE_F12B")),
+                    "informe_cierre": _si_no(_v("INFORME_CIERRE")),
+                    "expediente_tecnico": _si_no(_v("EXPEDIENTE_TECNICO")),
+                    "des_modalidad": _str_o_none(_v("DES_MODALIDAD")),
+                    "des_tipologia": _str_o_none(_v("DES_TIPOLOGIA")),
+                    "funcion": _str_o_none(_v("FUNCION")),
+                    "programa": _str_o_none(_v("PROGRAMA")),
+                    "fec_ini_ejecucion": _fecha(_v("FEC_INI_EJECUCION")),
+                    "fec_fin_ejecucion": _fecha(_v("FEC_FIN_EJECUCION")),
+                    "fec_ini_ejec_fisica": _fecha(_v("FEC_INI_EJEC_FISICA")),
+                    "fec_fin_ejec_fisica": _fecha(_v("FEC_FIN_EJEC_FISICA")),
+                    "fecha_viabilidad": _fecha(_v("FECHA_VIABILIDAD")),
+                    "primer_devengado": _fecha(_v("PRIMER_DEVENGADO")),
+                    "ultimo_devengado": _fecha(_v("ULTIMO_DEVENGADO")),
+                    "latitud": _num_o_none(_v("LATITUD")),
+                    "longitud": _num_o_none(_v("LONGITUD")),
+                    "ubigeo": _str_o_none(_v("UBIGEO")),
+                    "departamento": _str_o_none(_v("DEPARTAMENTO")),
+                    "provincia": _str_o_none(_v("PROVINCIA")),
+                    "distrito": _str_o_none(_v("DISTRITO")),
+                    "nombre_uei": _str_o_none(_v("NOMBRE_UEI")),
+                    "nombre_uf": _str_o_none(_v("NOMBRE_UF")),
+                    "nombre_opmi": _str_o_none(_v("NOMBRE_OPMI")),
+                    "pia_anio_actual": _num_o_none(_v("PIA_ANIO_ACTUAL")),
+                    "num_habitantes_benef": _int_o_none(_v("NUM_HABITANTES_BENEF")),
+                    "registrado_pmi": _si_no(_v("REGISTRADO_PMI")),
+                    "pmi_anio_1": _num_o_none(_v("PMI_ANIO_1")),
+                    "pmi_anio_2": _num_o_none(_v("PMI_ANIO_2")),
+                    "pmi_anio_3": _num_o_none(_v("PMI_ANIO_3")),
+                    "pmi_anio_4": _num_o_none(_v("PMI_ANIO_4")),
+                    "ult_fec_decla_estim": _fecha(_v("ULT_FEC_DECLA_ESTIM")),
+                }
+
+    logger.info("Extraidos %d proyectos de Invierte.pe para San Jeronimo", len(consolidado))
+    return consolidado
+
+
 # ─── Swap atomico ────────────────────────────────────────────────────────
 
 _COLUMNAS = [
@@ -262,8 +357,17 @@ def sync_invierte() -> ResultadoSyncInvierte:
     sync_id = _registrar_inicio(session.connection())
 
     try:
-        with MefClient() as client:
-            consolidado = _leer_todo(client)
+        consolidado = {}
+        try:
+            consolidado = _leer_todo_archivo_mef(str(settings.SEC_EJEC))
+        except Exception as e_stream:
+            logger.warning("Fallo lectura desde stream MEF (%s). Intentando API CKAN...", e_stream)
+            try:
+                with MefClient() as client:
+                    consolidado = _leer_todo(client)
+            except Exception as e_api:
+                logger.warning("Fallo tambien API MEF CKAN (%s)", e_api)
+
         filas = list(consolidado.values())
 
         engine = session.get_bind()
