@@ -6,6 +6,7 @@
 // Cada ítem lleva su acción: abrir el pedido o analizar la meta.
 
 import { useMemo, useState } from 'react';
+import { useAuthStore } from '@/store/auth';
 import { formatearMoneda, formatearNumero } from '@/lib/formatters';
 import { cn } from '@/lib/utils';
 import type {
@@ -23,8 +24,9 @@ export interface AccionItem {
   titulo: string;
   evidencia: string;
   ref: string;
-  cta: string;
-  onAccion: () => void;
+  cta?: string;
+  onAccion?: () => void;
+  restringido?: boolean;
 }
 
 const GRUPOS: { id: 'todas' | AccionItem['grupo']; label: string }[] = [
@@ -50,6 +52,8 @@ export function BandejaAccion({
   onVerContrato: (ruc: string | null) => void;
 }) {
   const [grupo, setGrupo] = useState<'todas' | AccionItem['grupo']>('todas');
+  const user = useAuthStore((s) => s.user);
+  const puedeVerDetalleContrato = user?.rol === 'admin' || user?.rol === 'decisor';
 
   const items = useMemo<AccionItem[]>(() => {
     const out: AccionItem[] = [];
@@ -99,13 +103,14 @@ export function BandejaAccion({
           evidencia:
             c.objeto ?? 'Contrato próximo a vencer sin renovación registrada en el pipeline.',
           ref: `${c.proveedor_nombre ?? 'Proveedor'} · ${formatearMoneda(c.valor_soles, true)}`,
-          cta: 'Ver',
-          onAccion: () => onVerContrato(c.proveedor_ruc),
+          cta: puedeVerDetalleContrato ? 'Ver' : undefined,
+          onAccion: puedeVerDetalleContrato ? () => onVerContrato(c.proveedor_ruc) : undefined,
+          restringido: !puedeVerDetalleContrato,
         });
       });
 
     return out;
-  }, [estancados, metasRezagadas, contratos, onAbrirPedido, onAnalizarMeta, onVerContrato]);
+  }, [estancados, metasRezagadas, contratos, onAbrirPedido, onAnalizarMeta, onVerContrato, puedeVerDetalleContrato]);
 
   const visibles = grupo === 'todas' ? items : items.filter((i) => i.grupo === grupo);
   const conteo = (id: (typeof GRUPOS)[number]['id']) =>
@@ -162,13 +167,22 @@ export function BandejaAccion({
               <span className="text-[11.5px] leading-snug text-muted-foreground">{a.evidencia}</span>
               <span className="font-mono text-[10.5px] text-muted-foreground/80">{a.ref}</span>
             </div>
-            <button
-              type="button"
-              onClick={a.onAccion}
-              className="shrink-0 rounded-md border border-primary bg-card px-2.5 py-1 text-[11.5px] font-medium text-primary transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {a.cta}
-            </button>
+            {a.cta && a.onAccion ? (
+              <button
+                type="button"
+                onClick={a.onAccion}
+                className="shrink-0 rounded-md border border-primary bg-card px-2.5 py-1 text-[11.5px] font-medium text-primary transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer"
+              >
+                {a.cta}
+              </button>
+            ) : a.restringido ? (
+              <span
+                className="shrink-0 rounded-md border border-border bg-muted/60 px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground select-none"
+                title="El detalle y gestión de contratos está reservado para nivel Decisor y Administración"
+              >
+                Solo Decisor / Admin
+              </span>
+            ) : null}
           </div>
         ))
       )}

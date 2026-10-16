@@ -17,6 +17,8 @@ import { ErrorState } from '@/components/layout/ErrorState';
 import { SkeletonTable, SkeletonBloque } from '@/components/layout/LoadingSkeleton';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '@/store/auth';
 import { formatearMoneda, formatFecha } from '@/lib/formatters';
 import { useContextoInterno } from '@/store/contexto-interno';
 import { useContratos, useContratosPorVencer } from '@/features/provint/api';
@@ -27,11 +29,39 @@ const PAGE_SIZE = 25;
 const DIAS_ALERTA = 30;
 
 export default function Contratos() {
+  const user = useAuthStore((s) => s.user);
+  const navigate = useNavigate();
   const año = useContextoInterno((s) => s.añoActivo);
   const [page, setPage] = useState(1);
 
   const vencerQ = useContratosPorVencer(DIAS_ALERTA);
   const listadoQ = useContratos({ page, size: PAGE_SIZE, estado: null });
+
+  if (user?.rol === 'operativo') {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          titulo="Contratos"
+          descripcion="Contratos de la entidad y alerta de vencimientos."
+        />
+        <SectionCard titulo="Acceso restringido por rol" icono={FileSignature}>
+          <div className="py-8 text-center space-y-4">
+            <EmptyState
+              titulo="Vista reservada para nivel Decisor y Administración"
+              descripcion="El detalle y gestión de los contratos marco de la entidad está reservado para funcionarios con rol Decisor (Alcaldía / Gerencias) o Administrador. Su rol operativo se enfoca en el seguimiento de los requerimientos y metas asignadas a su dependencia."
+            />
+            <Button
+              variant="outline"
+              onClick={() => navigate('/interno')}
+              className="cursor-pointer"
+            >
+              Volver al panel
+            </Button>
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
