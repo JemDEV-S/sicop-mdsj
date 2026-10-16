@@ -19,9 +19,15 @@ Ejecucion:
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import logging
+import os
 import sys
+import tempfile
 import traceback
+import urllib.request
+import zipfile
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -93,6 +99,112 @@ def _registrar_fin_error(conn: Connection, sync_id: int, mensaje: str) -> None:
         {"id": sync_id, "msg": mensaje[:2000]},
     )
     conn.commit()
+
+
+def _leer_registros_archivo_diario_mef(
+    ano: int, sec_ejec: str, mes_top: int
+) -> list[dict[str, Any]]:
+    """Descarga el consolidado diario oficial del MEF ({ano}-Gasto-Diario.zip),
+    extrae en streaming únicamente las filas de la entidad solicitada (SEC_EJEC),
+    mapea los campos para staging y elimina el archivo temporal de inmediato sin sobrecargar disco."""
+    url = f"https://fs.datosabiertos.mef.gob.pe/datastorefiles/{ano}-Gasto-Diario.zip"
+    logger.info("Descargando consolidado oficial diario MEF desde %s...", url)
+
+    token1 = f",{sec_ejec},".encode("latin-1")
+    token2 = f',"{sec_ejec}",'.encode("latin-1")
+    filas: list[dict[str, Any]] = []
+
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_zip:
+        tmp_path = tmp_zip.name
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                while True:
+                    chunk = resp.read(1024 * 1024 * 16)
+                    if not chunk:
+                        break
+                    tmp_zip.write(chunk)
+
+            logger.info("Descarga finalizada. Procesando archivo ZIP en streaming...")
+            with zipfile.ZipFile(tmp_path, "r") as z:
+                csv_names = [n for n in z.namelist() if n.endswith(".csv")]
+                if not csv_names:
+                    raise RuntimeError("No se encontró archivo CSV dentro del ZIP del MEF")
+                csv_name = csv_names[0]
+
+                with z.open(csv_name, "r") as raw_stream:
+                    first_line = raw_stream.readline().decode("latin-1", errors="replace")
+                    headers = next(csv.reader([first_line]))
+                    col_map = {h.strip().upper(): i for i, h in enumerate(headers)}
+
+                    sec_idx = col_map.get("SEC_EJEC")
+                    if sec_idx is None:
+                        raise RuntimeError("Columna SEC_EJEC no encontrada en el CSV del MEF")
+
+                    for raw_line in raw_stream:
+                        if token1 in raw_line or token2 in raw_line:
+                            line_str = raw_line.decode("latin-1", errors="replace")
+                            row = next(csv.reader([line_str]))
+                            if len(row) <= sec_idx or row[sec_idx].strip() != sec_ejec:
+                                continue
+
+                            sf = _int_o_none(row[col_map["SEC_FUNC"]] if "SEC_FUNC" in col_map and len(row) > col_map["SEC_FUNC"] else None)
+                            mes_eje = _int_o_none(row[col_map["MES_EJE"]] if "MES_EJE" in col_map and len(row) > col_map["MES_EJE"] else None)
+                            if sf is None or mes_eje is None:
+                                continue
+                            if mes_eje > mes_top:
+                                continue
+
+                            def _val(col_name: str) -> Any:
+                                idx = col_map.get(col_name)
+                                return row[idx] if idx is not None and len(row) > idx else None
+
+                            filas.append(
+                                {
+                                    "sec_func": sf,
+                                    "mes_eje": mes_eje,
+                                    "producto_proyecto": _str_o_none(_val("PRODUCTO_PROYECTO")),
+                                    "producto_proyecto_nombre": _str_o_none(_val("PRODUCTO_PROYECTO_NOMBRE")),
+                                    "tipo_act_proy": _str_o_none(_val("TIPO_ACT_PROY")),
+                                    "meta": _str_o_none(_val("META")),
+                                    "meta_nombre": _str_o_none(_val("META_NOMBRE")),
+                                    "funcion": _str_o_none(_val("FUNCION")),
+                                    "funcion_nombre": _str_o_none(_val("FUNCION_NOMBRE")),
+                                    "programa_ppto": _str_o_none(_val("PROGRAMA_PPTO")),
+                                    "programa_ppto_nombre": _str_o_none(_val("PROGRAMA_PPTO_NOMBRE")),
+                                    "finalidad": _str_o_none(_val("FINALIDAD")),
+                                    "categoria_gasto": _str_o_none(_val("CATEGORIA_GASTO")),
+                                    "categoria_gasto_nombre": _str_o_none(_val("CATEGORIA_GASTO_NOMBRE")),
+                                    "generica": _str_o_none(_val("GENERICA")),
+                                    "generica_nombre": _str_o_none(_val("GENERICA_NOMBRE")),
+                                    "subgenerica": _str_o_none(_val("SUBGENERICA")),
+                                    "subgenerica_nombre": _str_o_none(_val("SUBGENERICA_NOMBRE")),
+                                    "subgenerica_det": _str_o_none(_val("SUBGENERICA_DET")),
+                                    "subgenerica_det_nombre": _str_o_none(_val("SUBGENERICA_DET_NOMBRE")),
+                                    "especifica": _str_o_none(_val("ESPECIFICA")),
+                                    "especifica_nombre": _str_o_none(_val("ESPECIFICA_NOMBRE")),
+                                    "especifica_det": _str_o_none(_val("ESPECIFICA_DET")),
+                                    "especifica_det_nombre": _str_o_none(_val("ESPECIFICA_DET_NOMBRE")),
+                                    "fuente_financiamiento": _str_o_none(_val("FUENTE_FINANCIAMIENTO")),
+                                    "fuente_financiamiento_nombre": _str_o_none(_val("FUENTE_FINANCIAMIENTO_NOMBRE")),
+                                    "rubro": _str_o_none(_val("RUBRO")),
+                                    "rubro_nombre": _str_o_none(_val("RUBRO_NOMBRE")),
+                                    "monto_pia": _num(_val("MONTO_PIA")),
+                                    "monto_pim": _num(_val("MONTO_PIM")),
+                                    "monto_certificado": _num(_val("MONTO_CERTIFICADO")),
+                                    "monto_comprometido_anual": _num(_val("MONTO_COMPROMETIDO_ANUAL")),
+                                    "monto_devengado": _num(_val("MONTO_DEVENGADO")),
+                                    "monto_girado": _num(_val("MONTO_GIRADO")),
+                                    "monto_comprometido": _num(_val("MONTO_COMPROMETIDO")),
+                                }
+                            )
+
+            logger.info("Filtradas %d filas de San Jerónimo desde el archivo diario oficial", len(filas))
+            return filas
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                logger.info("Archivo temporal ZIP eliminado correctamente.")
 
 
 def _leer_registros(
@@ -321,6 +433,8 @@ def _num(valor: Any) -> float:
     if valor in (None, "", " "):
         return 0.0
     try:
+        if isinstance(valor, str):
+            valor = valor.replace(",", "").strip()
         return float(valor)
     except (TypeError, ValueError):
         return 0.0
@@ -694,25 +808,28 @@ def sync_siaf(
     sync_id = _registrar_inicio(session.connection(), ano_ejec)
 
     try:
-        # 1) Leer montos de la API via datastore_search con fallback automatico
+        # 1) Leer montos: intentar primero el consolidado diario oficial del MEF (archivo .zip efímero)
+        filas = []
         try:
-            with MefClient() as client:
-                logger.info("Leyendo registros SIAF Ejecucion desde API MEF...")
-                filas = _leer_registros(client, ano_ejec, mes_top)
-                logger.info("Extraidos %d registros totales desde API MEF", len(filas))
-        except Exception as api_exc:
+            logger.info("Leyendo registros SIAF Ejecucion desde archivo diario oficial MEF...")
+            filas = _leer_registros_archivo_diario_mef(ano_ejec, str(settings.SEC_EJEC), mes_top)
+            logger.info("Extraidos %d registros oficiales desde archivo diario MEF", len(filas))
+        except Exception as e_diario:
             logger.warning(
-                f"API MEF no disponible o experimento timeout ({api_exc}). "
-                "Cargando dataset SIAF 2026 de respaldo para San Jerónimo..."
+                "No se pudo sincronizar desde el archivo diario MEF (%s). Intentando API CKAN...", e_diario
             )
-            filas = []
+            try:
+                with MefClient() as client:
+                    filas = _leer_registros(client, ano_ejec, mes_top)
+                    logger.info("Extraidos %d registros desde API MEF CKAN", len(filas))
+            except Exception as e_api:
+                logger.warning("Fallo tambien API MEF CKAN (%s)", e_api)
+                filas = []
 
-        # Si la API MEF devolvió 0 registros (dataset 2026 no publicado en MEF Open Data),
-        # activar el dataset oficial de respaldo para San Jerónimo en vez de vaciar la tabla.
+        # Si ninguna fuente externa devolvió registros y es 2026, activar respaldo
         if not filas and ano_ejec == 2026:
             logger.warning(
-                "API MEF devolvió 0 registros para el año 2026 (dataset aún no publicado en MEF Open Data). "
-                "Cargando dataset SIAF 2026 oficial de respaldo para San Jerónimo..."
+                "Fuentes MEF no disponibles. Cargando dataset SIAF 2026 oficial de respaldo para San Jerónimo..."
             )
             engine = session.get_bind()
             with engine.connect() as conn:
