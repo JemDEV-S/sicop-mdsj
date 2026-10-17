@@ -13,10 +13,11 @@ import { Button } from '@/components/ui/button';
 import { useEjecucionResumen } from '@/features/ejecucion/hooks';
 import { useObras, useObrasMapa } from '@/features/obras/hooks';
 import { PublicHero } from '@/components/publico/PublicHero';
+import { HeroImageStack } from '@/components/publico/HeroImageStack';
+import { HeroExecutionCard } from '@/components/publico/HeroExecutionCard';
 import { SectionBand } from '@/components/publico/SectionBand';
 import { SectionHeader } from '@/components/publico/SectionHeader';
 import { StatBig } from '@/components/publico/StatBig';
-import { ProgresoAnillo } from '@/components/publico/ProgresoAnillo';
 import { FeatureCard } from '@/components/publico/FeatureCard';
 import { BarraEjecucion } from '@/components/publico/BarraEjecucion';
 
@@ -54,6 +55,8 @@ export default function Home() {
 
   const pim = parseMonto(resumen?.pim);
   const devengado = parseMonto(resumen?.devengado);
+  const certificado = parseMonto(resumen?.certificado);
+  const girado = parseMonto(resumen?.girado);
   const porcentajeEjecucion =
     resumen?.porcentaje_ejecucion !== undefined && resumen?.porcentaje_ejecucion !== null
       ? parseMonto(resumen.porcentaje_ejecucion)
@@ -65,39 +68,30 @@ export default function Home() {
 
   return (
     <div className="bg-background">
-      {/* HERO */}
+      {/* HERO — Distribución tipo Motion.dev con fondo blanco y colores institucionales */}
       <PublicHero
+        distribuido
+        fondoBlanco
+        areaSuperior={<HeroImageStack />}
         eyebrow={<>Portal de Transparencia · Año {ANIO_VIGENTE}</>}
         titulo={
           <>
             Así se invierte el presupuesto de{' '}
-            <span className="text-primary">San Jerónimo</span>
+            <span className="text-primary font-black block mt-1 sm:mt-2 tracking-[-0.03em]">
+              San Jerónimo
+            </span>
           </>
         }
         subtitulo="Consulta las obras públicas y la ejecución del presupuesto distrital. Los datos provienen directamente de SIAF, SIGA e Invierte.pe."
         acciones={
-          <>
-            <Button asChild size="lg">
-              <Link to="/obras">
-                <Building2 className="w-4 h-4" aria-hidden="true" />
-                Ver obras públicas
-              </Link>
-            </Button>
-            <Button asChild size="lg" variant="outline">
-              <Link to="/ejecucion">
-                <BarChart3 className="w-4 h-4" aria-hidden="true" />
-                Ver presupuesto
-              </Link>
-            </Button>
-          </>
-        }
-        destacado={
-          <DestacadoAnillo
+          <HeroExecutionCard
             porcentaje={porcentajeEjecucion}
             devengado={devengado}
             pim={pim}
+            certificado={certificado}
+            girado={girado}
             cargando={kpiHomeCargando}
-            formatoMonto={formatoMillones}
+            anio={ANIO_VIGENTE}
           />
         }
       />
@@ -142,7 +136,7 @@ export default function Home() {
           <SectionHeader
             eyebrow="Ejecución Presupuestal"
             titulo="Cómo se está usando el presupuesto"
-            descripcion="Cada peso del presupuesto atraviesa cuatro etapas antes de ser pagado. Aquí puedes ver cuánto ha avanzado cada una en lo que va del año."
+            descripcion="Cada sol del presupuesto atraviesa cuatro etapas antes de ser pagado. Aquí puedes ver cuánto ha avanzado cada una en lo que va del año."
             accion={
               <Button asChild variant="outline">
                 <Link to="/ejecucion">
@@ -264,70 +258,6 @@ export default function Home() {
 }
 
 /* ----- Subcomponentes locales de Home ----- */
-
-interface DestacadoAnilloProps {
-  porcentaje: number | null;
-  devengado: number | null;
-  pim: number | null;
-  cargando: boolean;
-  formatoMonto: (v: number | null) => string;
-}
-
-function DestacadoAnillo({
-  porcentaje,
-  devengado,
-  pim,
-  cargando,
-  formatoMonto,
-}: DestacadoAnilloProps) {
-  return (
-    <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-card via-card to-primary/5 border border-border/50 p-8 shadow-md hover:shadow-lg transition-shadow">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="inline-block w-1.5 h-1.5 rounded-full bg-primary" aria-hidden="true" />
-        <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-          Ejecución del año
-        </span>
-      </div>
-
-      <div className="flex items-center justify-center py-6">
-        {cargando ? (
-          <div
-            className="w-[200px] h-[200px] rounded-full bg-muted animate-pulse"
-            aria-hidden="true"
-          />
-        ) : (
-          <ProgresoAnillo
-            valor={porcentaje ?? 0}
-            size={200}
-            grosor={14}
-            color="primary"
-            centro={porcentaje !== null ? `${porcentaje.toFixed(1)}%` : '—'}
-            etiqueta="PIM Ejecutado"
-          />
-        )}
-      </div>
-
-      <div className="mt-6 pt-6 border-t border-border/50 grid grid-cols-2 gap-5 text-center">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Devengado
-          </p>
-          <p className="mt-2 text-lg font-bold text-foreground tabular-nums">
-            {cargando ? '—' : formatoMonto(devengado)}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            De un PIM de
-          </p>
-          <p className="mt-2 text-lg font-bold text-foreground tabular-nums">
-            {cargando ? '—' : formatoMonto(pim)}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function NotaEtapa({ titulo, descripcion }: { titulo: string; descripcion: string }) {
   return (

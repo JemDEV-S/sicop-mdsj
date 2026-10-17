@@ -44,9 +44,10 @@
   --superficie-alt: hsl(192 33% 97%);   /* #f5f9fa — cabecera de tabla */
   --superficie-alt-2: hsl(180 33% 99%); /* #fbfdfd — franjas suaves */
 
-  /* Tipografía institucional v2: IBM Plex Sans (texto) + Mono (números). */
+  /* Tipografía institucional v2: IBM Plex Sans (texto) + Mono (números) + Display (titulares). */
   --fuente-sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   --fuente-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --fuente-display: 'Plus Jakarta Sans', 'Outfit', 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
 
   /* Semaforo: colores de estado segun umbral (RN-01). ok/alerta alineados
      a la paleta institucional; critico usa rojo funcional estandar
@@ -115,9 +116,10 @@
   --color-texto-tenue: var(--texto-tenue);
   --color-superficie-alt: var(--superficie-alt);
   --color-superficie-alt-2: var(--superficie-alt-2);
-  /* Familias tipográficas: habilitan font-sans / font-mono con IBM Plex. */
+  /* Familias tipográficas: habilitan font-sans / font-mono / font-display. */
   --font-sans: var(--fuente-sans);
   --font-mono: var(--fuente-mono);
+  --font-display: var(--fuente-display);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);

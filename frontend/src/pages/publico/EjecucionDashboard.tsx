@@ -200,7 +200,7 @@ export default function EjecucionDashboard() {
           <SectionHeader
             eyebrow="Cómo se gasta el presupuesto"
             titulo="Las 4 etapas de la ejecución"
-            descripcion="Cada peso del presupuesto atraviesa cuatro etapas antes de ser pagado. Aquí puedes ver cuánto ha avanzado cada una."
+            descripcion="Cada sol del presupuesto atraviesa cuatro etapas antes de ser pagado. Aquí puedes ver cuánto ha avanzado cada una."
           />
           <div className="rounded-lg border border-border/50 bg-gradient-to-br from-card via-card to-secondary/5 p-6 shadow-sm md:p-10">
             <BarraEjecucion
