@@ -133,7 +133,11 @@ def _leer_registros_archivo_diario_mef(
                 csv_name = csv_names[0]
 
                 with z.open(csv_name, "r") as raw_stream:
-                    first_line = raw_stream.readline().decode("latin-1", errors="replace")
+                    first_raw = raw_stream.readline()
+                    try:
+                        first_line = first_raw.decode("utf-8-sig")
+                    except UnicodeDecodeError:
+                        first_line = first_raw.decode("latin-1", errors="replace")
                     headers = next(csv.reader([first_line]))
                     col_map = {h.strip().upper(): i for i, h in enumerate(headers)}
 
@@ -143,7 +147,10 @@ def _leer_registros_archivo_diario_mef(
 
                     for raw_line in raw_stream:
                         if token1 in raw_line or token2 in raw_line:
-                            line_str = raw_line.decode("latin-1", errors="replace")
+                            try:
+                                line_str = raw_line.decode("utf-8-sig")
+                            except UnicodeDecodeError:
+                                line_str = raw_line.decode("latin-1", errors="replace")
                             row = next(csv.reader([line_str]))
                             if len(row) <= sec_idx or row[sec_idx].strip() != sec_ejec:
                                 continue
@@ -449,11 +456,20 @@ def _int_o_none(valor: Any) -> int | None:
         return None
 
 
+def _reparar_mojibake(texto: str | None) -> str | None:
+    if not texto or "Ã" not in texto:
+        return texto
+    try:
+        return texto.encode("latin-1").decode("utf-8")
+    except Exception:
+        return texto
+
+
 def _str_o_none(valor: Any) -> str | None:
     if valor in (None, ""):
         return None
     s = str(valor).strip()
-    return s or None
+    return _reparar_mojibake(s) if s else None
 
 
 def _obtener_filas_respaldo_2026(conn: Connection | None = None) -> list[dict[str, Any]]:

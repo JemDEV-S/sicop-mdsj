@@ -299,13 +299,20 @@ def _swap(conn: Connection, filas: list[dict[str, Any]]) -> None:
     conn.execute(stmt, filas_norm)
 
 
-# ─── Conversores ─────────────────────────────────────────────────────────
+def _reparar_mojibake(texto: str | None) -> str | None:
+    if not texto or "Ã" not in texto:
+        return texto
+    try:
+        return texto.encode("latin-1").decode("utf-8")
+    except Exception:
+        return texto
+
 
 def _str_o_none(v: Any) -> str | None:
     if v in (None, ""):
         return None
     s = str(v).strip()
-    return s or None
+    return _reparar_mojibake(s) if s else None
 
 
 def _int_o_none(v: Any) -> int | None:

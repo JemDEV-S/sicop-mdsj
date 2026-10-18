@@ -15,6 +15,22 @@ from sqlalchemy.orm import Session
 from app.config import settings
 
 
+def _reparar_texto(s: str | None) -> str | None:
+    if not s or "Ã" not in s:
+        return s
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except Exception:
+        return s
+
+
+def _sanear_mojibake(d: dict[str, Any]) -> dict[str, Any]:
+    for k, v in d.items():
+        if isinstance(v, str) and "Ã" in v:
+            d[k] = _reparar_texto(v)
+    return d
+
+
 # ─── Listado (HU-01) ─────────────────────────────────────────────────────
 
 def listar_obras(
@@ -91,7 +107,7 @@ def listar_obras(
     """
     params_rows = {**params, "limit": limit, "offset": offset}
     rows = db.execute(text(sql_rows), params_rows).mappings().all()
-    return [dict(r) for r in rows], total
+    return [_sanear_mojibake(dict(r)) for r in rows], total
 
 
 # ─── Ficha (HU-02) ───────────────────────────────────────────────────────
@@ -121,7 +137,7 @@ def obtener_obra(
     d = dict(row)
     d["tipologia"] = d.get("des_tipologia")
     d["modalidad"] = d.get("des_modalidad")
-    return d
+    return _sanear_mojibake(d)
 
 
 def montos_de_obra(
@@ -193,7 +209,7 @@ def obras_para_mapa(
         .mappings()
         .all()
     )
-    return [dict(r) for r in rows]
+    return [_sanear_mojibake(dict(r)) for r in rows]
 
 
 def obras_sin_coordenadas(db: Session) -> list[dict[str, Any]]:
@@ -213,7 +229,7 @@ def obras_sin_coordenadas(db: Session) -> list[dict[str, Any]]:
         .mappings()
         .all()
     )
-    return [dict(r) for r in rows]
+    return [_sanear_mojibake(dict(r)) for r in rows]
 
 
 # ─── Catalogos de filtros (HU-01) ────────────────────────────────────────
@@ -230,7 +246,7 @@ def funciones_disponibles(db: Session) -> list[str]:
         ),
         {"sec_ejec": settings.SEC_EJEC},
     ).all()
-    return [r.funcion for r in rows]
+    return [_reparar_texto(r.funcion) or "" for r in rows if r.funcion]
 
 
 def tipologias_disponibles(db: Session) -> list[str]:
@@ -245,4 +261,4 @@ def tipologias_disponibles(db: Session) -> list[str]:
         ),
         {"sec_ejec": settings.SEC_EJEC},
     ).all()
-    return [r.des_tipologia for r in rows]
+    return [_reparar_texto(r.des_tipologia) or "" for r in rows if r.des_tipologia]
