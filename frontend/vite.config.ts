@@ -53,7 +53,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       // Habilita la PWA también en `vite dev` para poder probar la instalación.
-      devOptions: { enabled: true },
+      devOptions: {
+        enabled: true,
+        suppressWarnings: true,
+      },
       includeAssets: ['favicon.png', 'favicon-32.png', 'apple-touch-icon.png'],
       manifest: {
         name: 'Municipalidad de San Jerónimo — Transparencia',
