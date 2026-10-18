@@ -116,7 +116,12 @@ def obtener_obra(
         .mappings()
         .first()
     )
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    d["tipologia"] = d.get("des_tipologia")
+    d["modalidad"] = d.get("des_modalidad")
+    return d
 
 
 def montos_de_obra(

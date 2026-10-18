@@ -36,6 +36,16 @@ const MARKER_STYLES = `
     filter: drop-shadow(0 8px 12px rgba(15, 23, 42, 0.35));
     z-index: 1000 !important;
   }
+  .mapa-marker-obra.is-cartera {
+    opacity: 0.74;
+    filter: drop-shadow(0 2px 4px rgba(15, 23, 42, 0.16));
+  }
+  .mapa-marker-obra.is-cartera:hover {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.15);
+    filter: drop-shadow(0 6px 12px rgba(15, 23, 42, 0.28));
+    z-index: 999 !important;
+  }
   .mapa-marker-obra.is-selected {
     transform: translateY(-3px) scale(1.12);
     filter:
@@ -350,36 +360,45 @@ function iconoSectorSvg(funcion: string | null | undefined): string {
  * de proyecto y el número conserva el avance físico.
  */
 function crearIconoPin(obra: ObraMapaItem, seleccionado = false, separado = false): L.DivIcon {
+  const esActiva =
+    (obra.avance_fisico != null && Number(obra.avance_fisico) > 0) ||
+    (obra.pim_anio_actual != null && Number(obra.pim_anio_actual) > 0);
+
   const avance =
     obra.avance_fisico != null ? Math.min(100, Math.max(0, Number(obra.avance_fisico))) : null;
-  const color = categoriaPinPorObra(obra).color;
+  const color = esActiva ? categoriaPinPorObra(obra).color : '#94a3b8';
   const iconoSector = iconoSectorSvg(`${obra.funcion ?? ''} ${obra.nombre_inversion ?? ''}`);
 
   // Trazamos el pin con su color de categoría y dejamos el avance como aro blanco.
-  // Path del contorno del pin (mismo path, viewBox 44x54).
-  // Longitud aproximada del path para stroke-dasharray dinámico.
   const pathPin =
     'M22 2 C10 2 3 10.5 3 20.5 C3 33 22 51 22 51 C22 51 41 33 41 20.5 C41 10.5 34 2 22 2 Z';
   const perimetro = 138; // longitud aproximada del path
   const dashLen = avance != null ? (perimetro * avance) / 100 : 0;
   const dashGap = perimetro - dashLen;
-  const badgePct = avance != null ? `<span class="marker-pct">${avance.toFixed(0)}%</span>` : '';
+  const badgePct =
+    esActiva && avance != null && avance > 0
+      ? `<span class="marker-pct">${avance.toFixed(0)}%</span>`
+      : '';
+
+  const dimensiones: [number, number] = esActiva ? [44, 54] : [34, 42];
+  const ancla: [number, number] = esActiva ? [22, 52] : [17, 40];
+  const popupAncla: [number, number] = esActiva ? [0, -46] : [0, -36];
 
   return L.divIcon({
     html: `
-      <div class="mapa-marker-obra${seleccionado ? ' is-selected' : ''}${separado ? ' is-spread' : ''}" role="button" tabindex="-1">
-        <svg viewBox="0 0 44 54" width="44" height="54" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <div class="mapa-marker-obra${!esActiva ? ' is-cartera' : ''}${seleccionado ? ' is-selected' : ''}${separado ? ' is-spread' : ''}" role="button" tabindex="-1">
+        <svg viewBox="0 0 44 54" width="${dimensiones[0]}" height="${dimensiones[1]}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
           <defs>
             <linearGradient id="glow-${obra.codigo_unico}" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stop-color="${color}" stop-opacity="1"/>
-              <stop offset="100%" stop-color="${color}" stop-opacity="0.85"/>
+              <stop offset="0%" stop-color="${color}" stop-opacity="${esActiva ? '1' : '0.85'}"/>
+              <stop offset="100%" stop-color="${color}" stop-opacity="${esActiva ? '0.85' : '0.65'}"/>
             </linearGradient>
           </defs>
           <!-- Sombra base clara del pin -->
           <path d="${pathPin}" fill="url(#glow-${obra.codigo_unico})" stroke="white" stroke-width="2"/>
           <!-- Aro de progreso: recorre el contorno del pin -->
           ${
-            avance != null
+            esActiva && avance != null && avance > 0
               ? `<path d="${pathPin}" fill="none" stroke="white" stroke-width="2.5"
                    stroke-dasharray="${dashLen} ${dashGap}"
                    stroke-dashoffset="0"
@@ -387,8 +406,8 @@ function crearIconoPin(obra: ObraMapaItem, seleccionado = false, separado = fals
               : ''
           }
         </svg>
-        <div class="marker-inner-icon">
-          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <div class="marker-inner-icon"${!esActiva ? ' style="padding-top: 5px;"' : ''}>
+          <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"${!esActiva ? ' style="width: 14px; height: 14px;"' : ''}>
             ${iconoSector}
           </svg>
         </div>
@@ -397,9 +416,9 @@ function crearIconoPin(obra: ObraMapaItem, seleccionado = false, separado = fals
       </div>
     `,
     className: 'custom-leaflet-icon',
-    iconSize: [44, 54],
-    iconAnchor: [22, 52],
-    popupAnchor: [0, -46],
+    iconSize: dimensiones,
+    iconAnchor: ancla,
+    popupAnchor: popupAncla,
   });
 }
 
@@ -545,6 +564,10 @@ function calcularVistasMarcadores(
     if (cluster.indices.length === 1) {
       const item = puntos[cluster.indices[0]!]!;
       const seleccionado = item.obra.codigo_unico === codigoSeleccionado;
+      const esActiva =
+        (item.obra.avance_fisico != null && Number(item.obra.avance_fisico) > 0) ||
+        (item.obra.pim_anio_actual != null && Number(item.obra.pim_anio_actual) > 0);
+
       vistas.push({
         tipo: 'obra',
         obra: item.obra,
@@ -552,7 +575,7 @@ function calcularVistasMarcadores(
         position: item.latLng,
         posicionReal: item.latLng,
         separado: false,
-        zIndexOffset: seleccionado ? 1200 : 0,
+        zIndexOffset: seleccionado ? 1200 : esActiva ? 250 : 20,
       });
       return;
     }
@@ -577,6 +600,9 @@ function calcularVistasMarcadores(
       const puntoSeparado = cluster.centro.add(L.point(offset[0], offset[1]));
       const position = map.layerPointToLatLng(puntoSeparado);
       const seleccionado = item.obra.codigo_unico === codigoSeleccionado;
+      const esActiva =
+        (item.obra.avance_fisico != null && Number(item.obra.avance_fisico) > 0) ||
+        (item.obra.pim_anio_actual != null && Number(item.obra.pim_anio_actual) > 0);
 
       vistas.push({
         tipo: 'obra',
@@ -585,7 +611,7 @@ function calcularVistasMarcadores(
         position,
         posicionReal: item.latLng,
         separado: true,
-        zIndexOffset: seleccionado ? 1200 : 800 + indexEnGrupo,
+        zIndexOffset: seleccionado ? 1200 : esActiva ? 800 + indexEnGrupo : 400 + indexEnGrupo,
       });
     });
   });
@@ -712,8 +738,18 @@ export default function MapaObras({
             </span>
           ))}
         </div>
-        <p className="mt-2 text-[10px] leading-tight text-muted-foreground">
-          El número muestra el avance físico. Los grupos reúnen obras cercanas.
+        <div className="mt-2.5 flex items-center justify-between border-t border-border/80 pt-2 text-[10.5px]">
+          <span className="flex items-center gap-1.5 font-medium text-foreground">
+            <span className="h-2.5 w-2.5 rounded-full bg-primary" aria-hidden="true" />
+            Obras activas
+          </span>
+          <span className="flex items-center gap-1.5 text-muted-foreground">
+            <span className="h-2.5 w-2.5 rounded-full bg-slate-400" aria-hidden="true" />
+            Cartera técnica
+          </span>
+        </div>
+        <p className="mt-1.5 text-[10px] leading-tight text-muted-foreground">
+          El número en los pines de color muestra el avance físico actual.
         </p>
       </div>
     </div>
@@ -867,9 +903,13 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
   const totalFotos = fotosDisponibles.length;
   const tieneFotos = totalFotos > 0;
 
+  const esActiva =
+    (obra.avance_fisico != null && Number(obra.avance_fisico) > 0) ||
+    (obra.pim_anio_actual != null && Number(obra.pim_anio_actual) > 0);
+
   const etapa = etiquetaEtapaAvance(obra.avance_fisico);
   const monto = obra.pim_anio_actual != null ? Number(obra.pim_anio_actual) : null;
-  const tieneAvance = obra.avance_fisico != null;
+  const tieneAvance = obra.avance_fisico != null && Number(obra.avance_fisico) > 0;
 
   const urlNavegacion =
     obra.latitud != null && obra.longitud != null
@@ -946,30 +986,52 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
           <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{obra.funcion}</p>
         ) : null}
 
-        {tieneAvance ? (
-          <div className="mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                {etapa.titulo}
-              </span>
-              <span className="text-[11px] font-bold tabular-nums text-foreground">
-                {Number(obra.avance_fisico).toFixed(0)}%
-              </span>
-            </div>
-            <div
-              className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted"
-              aria-hidden="true"
-            >
+        {esActiva ? (
+          tieneAvance ? (
+            <div className="mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {etapa.titulo}
+                </span>
+                <span className="text-[11px] font-bold tabular-nums text-foreground">
+                  {Number(obra.avance_fisico).toFixed(0)}%
+                </span>
+              </div>
               <div
-                className="h-full rounded-full bg-primary transition-all"
-                style={{ width: `${Math.min(100, Math.max(0, Number(obra.avance_fisico)))}%` }}
-              />
+                className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted"
+                aria-hidden="true"
+              >
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${Math.min(100, Math.max(0, Number(obra.avance_fisico)))}%` }}
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="mt-2 rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5">
+              <div className="flex items-center gap-1.5 text-primary">
+                <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+                <span className="text-[10.5px] font-semibold uppercase tracking-wide">
+                  En Ejecución Presupuestal 2026
+                </span>
+              </div>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Presupuesto asignado para este ejercicio.
+              </p>
+            </div>
+          )
         ) : (
-          <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
-            Avance físico aún no reportado
-          </p>
+          <div className="mt-2 rounded-md border border-border bg-muted/30 px-2.5 py-2">
+            <div className="flex items-center gap-1.5 text-muted-foreground">
+              <span className="text-xs">📋</span>
+              <span className="text-[10.5px] font-semibold uppercase tracking-wide text-foreground">
+                Proyecto en Cartera Técnica
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+              Proyecto viable y aprobado en Invierte.pe. En fase previa para asignación presupuestal.
+            </p>
+          </div>
         )}
 
         <div className="mt-2 grid grid-cols-2 gap-1.5">
@@ -981,7 +1043,11 @@ function PopupContenido({ obra }: { obra: ObraMapaItem }) {
               </span>
             </div>
             <p className="mt-0.5 text-[12px] font-bold tabular-nums text-foreground">
-              {monto != null ? formatearMoneda(monto, true) : 'Sin dato'}
+              {monto != null && monto > 0
+                ? formatearMoneda(monto, true)
+                : esActiva
+                  ? 'Por devengar'
+                  : 'En gestión'}
             </p>
           </div>
 

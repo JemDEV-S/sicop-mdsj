@@ -53,8 +53,10 @@ class ObraDetalleResponse(BaseModel):
     situacion: str | None
     funcion: str | None
     programa: str | None
-    tipologia: str | None = Field(alias="des_tipologia", default=None)
-    modalidad: str | None = Field(alias="des_modalidad", default=None)
+    tipologia: str | None = None
+    modalidad: str | None = None
+    des_tipologia: str | None = None
+    des_modalidad: str | None = None
     etapa_f8: str | None
     tiene_f8: str | None
     tiene_f9: str | None
