@@ -175,13 +175,13 @@ def _leer_todo_archivo_mef(sec_ejec: str) -> dict[str, dict[str, Any]]:
     y extrae todos los proyectos de la entidad solicitada."""
     url = "https://fs.datosabiertos.mef.gob.pe/datastorefiles/DETALLE_INVERSIONES.csv"
     logger.info("Leyendo registros Invierte.pe en streaming desde %s...", url)
-    token1 = f",{sec_ejec},".encode("latin-1")
-    token2 = f',"{sec_ejec}",'.encode("latin-1")
+    token1 = f",{sec_ejec},".encode("utf-8")
+    token2 = f',"{sec_ejec}",'.encode("utf-8")
     consolidado: dict[str, dict[str, Any]] = {}
 
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=120) as resp:
-        first_line = resp.readline().decode("latin-1", errors="replace")
+        first_line = resp.readline().decode("utf-8-sig", errors="replace")
         headers = next(csv.reader([first_line]))
         col_map = {h.strip().upper(): i for i, h in enumerate(headers)}
         sec_idx = col_map.get("SEC_EJEC")
@@ -190,7 +190,7 @@ def _leer_todo_archivo_mef(sec_ejec: str) -> dict[str, dict[str, Any]]:
 
         for raw_line in resp:
             if token1 in raw_line or token2 in raw_line:
-                line_str = raw_line.decode("latin-1", errors="replace")
+                line_str = raw_line.decode("utf-8-sig", errors="replace")
                 row = next(csv.reader([line_str]))
                 if len(row) <= sec_idx or row[sec_idx].strip() != sec_ejec:
                     continue

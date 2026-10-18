@@ -12,7 +12,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { DataTable } from '@/components/tabla/DataTable';
-import { useObras, useFunciones, useTipologias } from '@/features/obras/hooks';
+import { useObras, useFunciones, useTipologias, useObrasMapa } from '@/features/obras/hooks';
 import type { ObraCardResponse } from '@/features/obras/types';
 import { mapSemaforoApiToEstado } from '@/features/obras/api';
 import { ObraCard } from '@/features/obras/ObraCard';
@@ -58,8 +58,8 @@ export default function ObrasListado() {
 
   const { data: funciones } = useFunciones();
   const { data: tipologias } = useTipologias();
+  const { data: mapaData } = useObrasMapa({ ano: ANIO_VIGENTE });
 
-  // KPIs derivados sobre la página actual (limitación: no tenemos endpoint de resumen global de obras)
   const items = useMemo(() => data?.items ?? [], [data?.items]);
   const totalItems = data?.total ?? 0;
   const kpisPagina = useMemo(() => {
@@ -69,6 +69,9 @@ export default function ObrasListado() {
     const funcionesDistintas = new Set(items.map((o) => o.funcion).filter(Boolean)).size;
     return { conCoords, funcionesDistintas };
   }, [items]);
+
+  const totalConCoords = mapaData?.total_con_coords ?? kpisPagina.conCoords;
+  const totalFunciones = funciones?.length ?? kpisPagina.funcionesDistintas;
 
   const chipsActivos = [q, funcion, tipologia].filter(Boolean).length;
 
@@ -156,9 +159,9 @@ export default function ObrasListado() {
 
             <MiniStatsObras
               total={totalItems}
-              conCoords={kpisPagina.conCoords}
+              conCoords={totalConCoords}
               pageSize={pagination.pageSize}
-              funcionesDistintas={kpisPagina.funcionesDistintas}
+              funcionesDistintas={totalFunciones}
               cargando={isLoading}
             />
           </div>
