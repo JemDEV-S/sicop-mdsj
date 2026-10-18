@@ -37,7 +37,7 @@ export function useEjecucionResumen(params?: EjecucionParams) {
   return useQuery({
     queryKey: EJECUCION_QUERY_KEYS.resumen(params),
     queryFn: () => fetchEjecucionResumen(params),
-    staleTime: 5 * 60 * 1000, // 5 minutos, la data se actualiza por un job de sync
+    staleTime: 30 * 1000, // 30 segundos para actualización rápida de datos oficiales
   });
 }
 

@@ -58,6 +58,7 @@ services:
       redis:
         condition: service_healthy
     volumes:
+      - ./backend:/app
       - uploads:/var/data/uploads
       - logs:/var/log/sicop
     networks:
