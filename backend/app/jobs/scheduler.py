@@ -233,6 +233,22 @@ def trigger_sync_invierte() -> str:
     return _wrap_run("sync_invierte", sync_invierte)
 
 
+def trigger_sync_todo(ano: int | None = None) -> str:
+    def _run() -> Any:
+        r_siaf = sync_siaf(ano=ano)
+        r_inv = sync_invierte()
+        try:
+            revisar_resoluciones_obsoletas(ano=ano)
+        except Exception:
+            pass
+        return {
+            "siaf_registros": r_siaf.registros,
+            "invierte_proyectos": r_inv.inversiones,
+        }
+
+    return _wrap_run("sync_todo", _run)
+
+
 def trigger_revisar_resoluciones(ano: int | None = None) -> str:
     return _wrap_run(
         "revisar_resoluciones",

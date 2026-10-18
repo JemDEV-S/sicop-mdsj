@@ -51,7 +51,7 @@ export interface EstadoSincronizacion {
 }
 
 /** Nombre del disparador manual disponible en el endpoint admin. */
-export type TriggerManual = 'sincronizar-siaf' | 'sincronizar-invierte';
+export type TriggerManual = 'sincronizar-siaf' | 'sincronizar-invierte' | 'sincronizar-todo';
 
 /**
  * Resultado de subir un Excel del Formato A. Espejo de `CargaFormatoAResponse`

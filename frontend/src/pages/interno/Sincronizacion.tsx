@@ -138,6 +138,15 @@ export default function Sincronizacion() {
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
+                onClick={() => trigger.mutate('sincronizar-todo')}
+                disabled={trigger.isPending}
+              >
+                <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', trigger.isPending && 'animate-spin')} />
+                Sincronizar Todo (SIAF + Invierte)
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 onClick={() => trigger.mutate('sincronizar-siaf')}
                 disabled={trigger.isPending}
               >

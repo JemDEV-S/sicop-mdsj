@@ -164,6 +164,29 @@ def trigger_sync_invierte(
 
 
 @router.post(
+    "/sincronizar-todo",
+    response_model=TriggerResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def trigger_sync_todo(
+    request: Request,
+    ano: int | None = None,
+    user: CurrentUser = Depends(require_role(CodigoRol.admin)),
+    db: Session = Depends(get_db),
+) -> TriggerResponse:
+    job_id = sched.trigger_sync_todo(ano=ano)
+    auditoria_service.registrar_desde_request(
+        db,
+        request,
+        accion="trigger_sync_todo",
+        usuario_id=user.id,
+        detalle={"job_id": job_id, "ano": ano},
+    )
+    db.commit()
+    return TriggerResponse(job_id=job_id, nombre="sync_todo", estado="en_curso")
+
+
+@router.post(
     "/revisar-resoluciones-ccmn",
     response_model=TriggerResponse,
     status_code=status.HTTP_202_ACCEPTED,
