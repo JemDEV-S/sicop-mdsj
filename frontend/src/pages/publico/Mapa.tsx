@@ -89,9 +89,6 @@ export default function Mapa() {
     });
   }, [itemsBase, busqueda]);
 
-  const totalConCoords = itemsValidos.length;
-  const totalSinCoords = data?.total_sin_coords ?? 0;
-
   function desplazarABloqueMapa() {
     const bloque = bloqueMapaRef.current;
     if (!bloque) return;
